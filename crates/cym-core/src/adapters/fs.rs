@@ -31,7 +31,12 @@ impl FileSystem for StdFileSystem {
                 let child = child
                     .to_str()
                     .ok_or_else(|| format!("Skipped non-UTF-8 path in {path}"))?;
-                self.inspect(child, true)
+                // A child of an already-normalized folder needs no further normalization;
+                // the entry's own metadata is an lstat that never follows a link.
+                let metadata = item
+                    .metadata()
+                    .map_err(|e| format!("Cannot inspect {child}: {e}"))?;
+                Ok(Entry::from_metadata(child.to_owned(), &metadata))
             })
             .collect())
     }
@@ -163,22 +168,20 @@ impl Walk<'_> {
                 break;
             }
             let relative = e.path().strip_prefix(self.root).unwrap_or(e.path());
-            let metadata = format!(
-                "{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
-                relative,
+            // Hash the entry's raw fields without formatting a string per entry.
+            let mut hasher = blake3::Hasher::new();
+            hasher.update(relative.as_bytes());
+            hasher.update(&[0, u8::from(e.directory), u8::from(e.symlink)]);
+            for field in [
                 e.identity.device,
                 e.identity.inode,
-                e.identity.modified_seconds,
-                e.identity.modified_nanos,
+                e.identity.modified_seconds as u64,
+                e.identity.modified_nanos as u64,
                 e.bytes,
-                e.directory,
-                e.symlink
-            );
-            for (a, b) in tally
-                .digest
-                .iter_mut()
-                .zip(Sha256::digest(metadata.as_bytes()))
-            {
+            ] {
+                hasher.update(&field.to_le_bytes());
+            }
+            for (a, b) in tally.digest.iter_mut().zip(hasher.finalize().as_bytes()) {
                 *a ^= b;
             }
             if e.regular || e.symlink {
