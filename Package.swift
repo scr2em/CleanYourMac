@@ -22,6 +22,7 @@ let package = Package(
                 .linkedLibrary("cym_core"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("Foundation"),
+                .linkedFramework("CoreServices"),
             ]
         ),
         .target(name: "CleanYourMacDesignSystem"),
