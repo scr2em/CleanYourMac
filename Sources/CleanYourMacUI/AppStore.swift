@@ -41,7 +41,9 @@ public final class AppStore {
     public var selectedIDs = Set<String>()
     public var inspectedID: String?
     public var search = ""
-    public var sort: SortOrder = .size
+    /// Size and CPU start largest first and Name starts A–Z; the direction can then be flipped.
+    public var sort: SortOrder = .size { didSet { if sort != oldValue { sortAscending = sort == .name } } }
+    public var sortAscending = false
     public var sizeFilter: SizeFilter = .all
     public var ageFilter: AgeFilter = .all
     public var isScanning = false
@@ -59,6 +61,12 @@ public final class AppStore {
     public var forceEligible = Set<String>()
     /// Core-computed totals for the current findings; refreshed after scans and actions.
     public var analytics = Analytics.empty
+    /// Core-computed totals for the rows currently matching the search and filters.
+    public var summary = Analytics.empty
+    /// Changes whenever the visible rows can change; drives summary refreshes.
+    public var summaryKey: String {
+        "\(selectedModuleID ?? "")|\(search)|\(sizeFilter.rawValue)|\(ageFilter.rawValue)|\(findings.count)|\(storageNavigation.count)"
+    }
     public var restoredIDs = Set<UUID>()
     public var storageNavigation: [String] = []
     private var scanStatuses: [String: String] = [:]
@@ -98,13 +106,17 @@ public final class AppStore {
             && (ageFilter.days == nil || finding.modifiedAt.map { $0 < Date().addingTimeInterval(-ageFilter.days! * 86_400) } == true)
         }
         if isScanning { return rows }
-        return rows.sorted {
+        let sort = self.sort
+        func less(_ a: Finding, _ b: Finding) -> Bool {
             switch sort {
-            case .size: return ($0.bytes ?? $0.memoryBytes ?? 0, $0.id) > ($1.bytes ?? $1.memoryBytes ?? 0, $1.id)
-            case .name: return $0.title.localizedStandardCompare($1.title) == .orderedAscending
-            case .cpu: return ($0.cpuPercent ?? 0, $0.id) > ($1.cpuPercent ?? 0, $1.id)
+            case .size: return (a.bytes ?? a.memoryBytes ?? 0, a.id) < (b.bytes ?? b.memoryBytes ?? 0, b.id)
+            case .cpu: return (a.cpuPercent ?? 0, a.id) < (b.cpuPercent ?? 0, b.id)
+            case .name:
+                let order = a.title.localizedStandardCompare(b.title)
+                return order == .orderedSame ? a.id < b.id : order == .orderedAscending
             }
         }
+        return sortAscending ? rows.sorted(by: less) : rows.sorted { less($1, $0) }
     }
     public var selectedFindings: [Finding] { findings.filter { selectedIDs.contains($0.id) } }
     public var inspected: Finding? { findings.first { $0.id == inspectedID } }
@@ -180,6 +192,11 @@ public final class AppStore {
         warnings = moduleWarnings[selectedModuleID ?? "overview"] ?? []
         scanningModules = []
         refreshAnalytics()
+    }
+    public func refreshSummary() async {
+        let rows = visibleFindings
+        let totals = await core.analytics(rows)
+        if visibleFindings.count == rows.count { summary = totals }
     }
     public func refreshAnalytics() {
         let rows = findings

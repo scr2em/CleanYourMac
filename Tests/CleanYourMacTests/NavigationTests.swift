@@ -25,3 +25,22 @@ import Testing
     #expect(store.progress == "Scan complete")
     #expect(store.visibleFindings.count == 1)
 }
+
+@MainActor @Test func sortDirectionAndSearchSummaryFollowTheVisibleRows() async throws {
+    let defaults = try #require(UserDefaults(suiteName: "org.cleanyourmac.test." + UUID().uuidString))
+    let store = AppStore(demo: true, defaults: defaults)
+    #expect(store.selectedModuleID == "node")
+    #expect(store.visibleFindings.map(\.id) == ["demo-node", "demo-node-2"])
+    store.sortAscending = true
+    #expect(store.visibleFindings.map(\.id) == ["demo-node-2", "demo-node"])
+    store.sort = .name
+    #expect(store.sortAscending)
+    #expect(store.visibleFindings.map(\.title) == ["dashboard", "landing-page"])
+    store.sortAscending = false
+    #expect(store.visibleFindings.map(\.title) == ["landing-page", "dashboard"])
+    store.search = "landing"
+    await store.refreshSummary()
+    #expect(store.summary.findings == 1)
+    #expect(store.summary.diskBytes == 864_000_000)
+    #expect(store.summary.reclaimableBytes == 864_000_000)
+}

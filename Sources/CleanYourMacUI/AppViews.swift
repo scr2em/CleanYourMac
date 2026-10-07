@@ -155,9 +155,16 @@ private struct FinderView: View {
                 HStack(spacing: Space.md) {
                     TextField("Search results", text: $store.search).textFieldStyle(.roundedBorder)
                     Picker("Sort", selection: $store.sort) { ForEach(SortOrder.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.fixedSize()
+                    Button { store.sortAscending.toggle() } label: {
+                        Image(systemName: store.sortAscending ? "arrow.up" : "arrow.down").foregroundStyle(Palette.accentSymbol)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(sortDirectionLabel)
+                    .accessibilityLabel(sortDirectionLabel)
                     if store.isScanning { ActionButton("Cancel") { store.cancelScan() } }
                     else { ActionButton("Scan", kind: .primary, disabled: store.isApplying || store.demo) { store.scan() } }
                 }
+                SearchSummary(store: store)
                 if ["large", "downloads", "duplicates", "applications", "artifacts", "node"].contains(store.selectedModuleID ?? "") {
                     HStack(spacing: Space.md) {
                         Picker("Size", selection: $store.sizeFilter) { ForEach(SizeFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
@@ -168,7 +175,6 @@ private struct FinderView: View {
                     if store.isScanning { ProgressView().controlSize(.small) }
                     Text(store.progress).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1)
                     Spacer()
-                    Text(Display.items(store.visibleFindings.count)).font(TypeStyle.caption).monospacedDigit()
                 }
                 WarningView(store: store)
                 if store.selectedModuleID == "storage", !store.visibleFindings.isEmpty {
@@ -210,7 +216,54 @@ private struct FinderView: View {
             SelectionFooter(store: store)
         }
     }
+    private var sortDirectionLabel: String {
+        switch store.sort {
+        case .name: store.sortAscending ? "Sorted A to Z; switch to Z to A" : "Sorted Z to A; switch to A to Z"
+        case .size, .cpu: store.sortAscending ? "Smallest first; switch to largest first" : "Largest first; switch to smallest first"
+        }
+    }
     private func copy(_ value: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string) }
+}
+
+/// Aggregate figures for the rows matching the current search and filters.
+private struct SearchSummary: View {
+    @Bindable var store: AppStore
+    var body: some View {
+        let rows = store.visibleFindings
+        let summary = store.summary
+        VStack(alignment: .leading, spacing: Space.xs) {
+            if !store.search.isEmpty {
+                Text("Matching “\(store.search)”").font(TypeStyle.caption).foregroundStyle(Palette.muted)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Space.sm) {
+                    StatChip(rows.count == 1 ? "Item" : "Items", value: rows.count.formatted())
+                    if summary.processCount > 0 {
+                        StatChip("Memory", value: Display.bytes(summary.processMemoryBytes))
+                        if let busiest = rows.compactMap(\.cpuPercent).max() {
+                            StatChip("Highest CPU", value: String(format: "%.1f%%", busiest))
+                        }
+                    } else {
+                        StatChip("Total size", value: Display.bytes(summary.diskBytes))
+                        StatChip("Ready to review", value: Display.bytes(summary.reclaimableBytes), emphasized: summary.reclaimableBytes > 0)
+                        if let largest = rows.max(by: { ($0.bytes ?? 0) < ($1.bytes ?? 0) }), let bytes = largest.bytes, bytes > 0 {
+                            StatChip("Largest · " + largest.title, value: Display.bytes(bytes))
+                        }
+                    }
+                    if summary.blocked > 0 { StatChip("Needs inspection", value: summary.blocked.formatted()) }
+                    if store.selectedIDs.count > 0 { StatChip("Selected", value: store.selectedIDs.count.formatted()) }
+                }
+            }
+        }
+        .task(id: store.summaryKey) {
+            // Debounce typing and streaming results before asking the core for totals.
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            await store.refreshSummary()
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Search summary")
+    }
 }
 
 private struct WarningView: View {

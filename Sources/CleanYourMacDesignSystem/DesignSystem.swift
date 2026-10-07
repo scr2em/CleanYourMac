@@ -199,6 +199,22 @@ public struct Panel<Content: View>: View {
     }
 }
 
+/// A compact figure for summaries under search fields and toolbars.
+public struct StatChip: View {
+    private let label: String, value: String, emphasized: Bool
+    public init(_ label: String, value: String, emphasized: Bool = false) { self.label = label; self.value = value; self.emphasized = emphasized }
+    public var body: some View {
+        VStack(alignment: .leading, spacing: Space.xxs) {
+            Text(value).font(TypeStyle.sectionTitle).monospacedDigit().foregroundStyle(emphasized ? Palette.accentText : Palette.ink).lineLimit(1)
+            Text(label).font(TypeStyle.caption).foregroundStyle(Palette.muted).lineLimit(1)
+        }
+        .padding(.horizontal, Space.md).padding(.vertical, Space.sm)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Layout.controlRadius))
+        .overlay(RoundedRectangle(cornerRadius: Layout.controlRadius).strokeBorder(Palette.border))
+        .accessibilityElement(children: .combine)
+    }
+}
+
 public struct MetricTile: View {
     private let title: String, value: String, detail: String
     public init(_ title: String, value: String, detail: String) { self.title = title; self.value = value; self.detail = detail }
@@ -320,6 +336,7 @@ public struct ComponentGallery: View {
                 Panel {
                     HStack { ActionButton("Scan", kind: .primary) {}; ActionButton("Cancel") {}; ActionButton("Terminate", kind: .destructive) {}; ActionButton("Unavailable", disabled: true) {} }
                 }
+                HStack(spacing: Space.sm) { StatChip("Items", value: "128"); StatChip("Total size", value: "12.4 GB"); StatChip("Ready to review", value: "9.1 GB", emphasized: true); StatChip("Needs inspection", value: "3") }
                 Panel { HStack { StatusBadge("Complete"); StatusBadge("Partial", warning: true); StatusBadge("Permanent", warning: true) } }
                 Panel { StorageBar("Developer data", value: "12.4 GB", fraction: 0.6) }
                 Panel {
