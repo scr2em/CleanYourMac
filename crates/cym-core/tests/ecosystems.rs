@@ -346,8 +346,8 @@ fn caches_report_known_locations_with_an_ecosystem() {
     assert_eq!(
         rows,
         [
+            ("Command-line tool caches (~/.cache)", "Command-line tools"),
             ("Gradle caches", "Gradle"),
-            ("Hugging Face models", "Machine learning"),
             ("Playwright browsers", "JavaScript"),
             ("Pub hosted packages", "Flutter / Dart"),
         ],
@@ -358,16 +358,16 @@ fn caches_report_known_locations_with_an_ecosystem() {
         .findings
         .iter()
         .all(|f| f.actions == [ActionKind::Trash]));
-    let models = report
+    // ~/.cache is one reviewable item that names what is inside and the login it holds.
+    let tool_cache = report
         .findings
         .iter()
-        .find(|f| f.title == "Hugging Face models")
+        .find(|f| f.title.starts_with("Command-line tool caches"))
         .unwrap();
-    assert_eq!(models.risk, Risk::Review);
-    assert_eq!(
-        models.value("Official command"),
-        Some("huggingface-cli delete-cache")
-    );
+    assert_eq!(tool_cache.risk, Risk::Review);
+    assert_eq!(tool_cache.value("Contains"), Some("huggingface"));
+    assert_eq!(tool_cache.value("Sign-in"), Some("Hugging Face token"));
+    assert!(tool_cache.reason.contains("sign in again"));
 }
 
 #[test]
@@ -693,4 +693,92 @@ fn toolchain_actions_refuse_running_and_default_versions() {
         results[0].message
     );
     assert!(fs::metadata(stale.resource.path().unwrap()).is_err());
+}
+
+#[test]
+fn caches_include_mac_leftovers_without_repeating_developer_caches() {
+    let f = Fixture::new();
+    let home = f.dir("home");
+    f.write("home/Library/Caches/com.example.Editor/blob", "x");
+    f.write("home/Library/Caches/com.apple.Safari/blob", "x");
+    // Reported as a developer cache already, so not again as an app cache.
+    f.write("home/Library/Caches/pnpm/metadata/x", "x");
+    f.write("home/Library/Caches/pypoetry/cache/x", "x");
+    f.write(
+        "home/Library/Containers/com.example.Notes/Data/Library/Caches/x",
+        "x",
+    );
+    f.write(
+        "home/Library/Containers/com.example.Notes/Data/Documents/keep.txt",
+        "x",
+    );
+    f.write(
+        "home/Library/Saved Application State/com.example.Editor.savedState/windows.plist",
+        "x",
+    );
+    f.write(
+        "home/Library/Containers/com.apple.mail/Data/Library/Mail Downloads/a.pdf",
+        "x",
+    );
+    f.write(
+        "home/Library/iTunes/iPhone Software Updates/iPhone.ipsw",
+        "x",
+    );
+    f.write(
+        "home/Library/Application Support/MobileSync/Backup/00008030-ABC/Manifest.db",
+        "x",
+    );
+    let module = Arc::new(CachesModule {
+        home: Some(home.clone()),
+        ..Default::default()
+    });
+    let s = services(&f);
+    let report = Engine::new(s.clone(), modules::builtin().register(module.clone())).scan_report(
+        &["caches".into()],
+        &f.context(),
+        &ScanControl::default(),
+    );
+    let mut rows: Vec<_> = report
+        .findings
+        .iter()
+        .map(|f| (f.title.as_str(), f.risk))
+        .collect();
+    rows.sort_by_key(|(title, _)| title.to_string());
+    assert_eq!(
+        rows,
+        [
+            ("App cache · Editor", Risk::Rebuild),
+            ("App cache · Safari", Risk::Review),
+            ("Device backup · 00008030-ABC", Risk::Review),
+            ("Mail downloads", Risk::Rebuild),
+            ("Poetry cache", Risk::Rebuild),
+            ("Sandboxed app cache · Notes", Risk::Rebuild),
+            ("Saved window state · Editor", Risk::Rebuild),
+            ("iPhone software updates", Risk::Rebuild),
+            ("pnpm cache", Risk::Rebuild),
+        ],
+        "{:?}",
+        report.warnings
+    );
+    let editor = report
+        .findings
+        .iter()
+        .find(|f| f.title == "App cache · Editor")
+        .unwrap();
+    assert_eq!(editor.value("App"), Some("com.example.Editor"));
+    assert_eq!(editor.value("Ecosystem"), Some("macOS"));
+    let k = ScanControl::default();
+    assert!(module.preflight(&s, editor, ActionKind::Trash, &k).is_ok());
+    let running = Services {
+        apps: Arc::new(FakeApps(vec![RunningApp {
+            pid: 9,
+            bundle_id: "com.example.Editor".into(),
+            path: "/Applications/Editor.app".into(),
+        }])),
+        ..s
+    };
+    let error = module
+        .preflight(&running, editor, ActionKind::Trash, &k)
+        .unwrap_err();
+    assert!(error.contains("Quit Editor"), "{error}");
 }

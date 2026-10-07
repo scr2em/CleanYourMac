@@ -1001,6 +1001,11 @@ pub struct CachesModule {
     /// The home folder the locations are relative to; `None` uses the current user's.
     pub home: Option<String>,
     pub locations: Vec<CacheLocation>,
+    /// The shared command-line cache folder (`~/.cache`), listed as one item.
+    pub tool_cache: Option<&'static str>,
+    /// macOS leftovers: app caches, saved window state, Mail downloads, device updates and
+    /// backups.
+    pub mac: super::junk::MacJunk,
 }
 impl Default for CachesModule {
     fn default() -> Self {
@@ -1008,6 +1013,8 @@ impl Default for CachesModule {
             "Environments hard-link these packages, so less space may be freed than shown.";
         Self {
             home: None,
+            tool_cache: Some(".cache"),
+            mac: Default::default(),
             locations: vec![
                 // JavaScript and TypeScript
                 cache("JavaScript", "npm cache", ".npm/_cacache")
@@ -1031,14 +1038,10 @@ impl Default for CachesModule {
                 ),
                 cache("JavaScript", "Playwright browsers", "Library/Caches/ms-playwright")
                     .note("Browsers are downloaded again by playwright install."),
-                cache("JavaScript", "Puppeteer browsers", ".cache/puppeteer"),
                 cache("JavaScript", "Cypress binaries", "Library/Caches/Cypress")
                     .command("cypress cache clear"),
                 // Python and machine learning
                 cache("Python", "pip cache", "Library/Caches/pip").command("pip cache purge"),
-                cache("Python", "uv cache", ".cache/uv")
-                    .note("Environments created with uv's symlink link mode point into this cache and break.")
-                    .command("uv cache prune"),
                 cache("Python", "Poetry cache", "Library/Caches/pypoetry/cache"),
                 cache("Python", "Poetry artifacts", "Library/Caches/pypoetry/artifacts"),
                 cache("Python", "Miniconda packages", "miniconda3/pkgs")
@@ -1050,19 +1053,6 @@ impl Default for CachesModule {
                 cache("Python", "Miniforge packages", "miniforge3/pkgs")
                     .note(HARD_LINKS)
                     .command("conda clean --all"),
-                cache("Machine learning", "Hugging Face models", ".cache/huggingface/hub")
-                    .note("Models you downloaded can be many gigabytes to fetch again.")
-                    .command("huggingface-cli delete-cache")
-                    .risk(Risk::Review),
-                cache(
-                    "Machine learning",
-                    "Hugging Face datasets",
-                    ".cache/huggingface/datasets",
-                )
-                .note("Processed datasets can be many gigabytes to fetch and prepare again.")
-                .risk(Risk::Review),
-                cache("Machine learning", "PyTorch hub", ".cache/torch")
-                    .note("Downloaded model weights can be large to fetch again."),
                 // Apple platforms
                 cache("Xcode", "Xcode cache", "Library/Caches/com.apple.dt.Xcode")
                     .apps(owners::XCODE),
@@ -1171,8 +1161,58 @@ impl CachesModule {
     fn home(&self) -> String {
         self.home.clone().unwrap_or_else(policy::home)
     }
+    /// `~/.cache` as one reviewable item. Command-line tools (uv, Puppeteer, Hugging Face,
+    /// PyTorch, pre-commit and more) share it; some keep large downloads or a login there.
+    fn tool_cache_candidate(&self, s: &Services, c: &ScanContext) -> Option<Candidate> {
+        let path = format!("{}/{}", self.home(), self.tool_cache?);
+        let entry = s.entry(&path).ok().filter(|e| e.directory)?;
+        if !c.allows(&path) {
+            return None;
+        }
+        let mut names: Vec<String> = s
+            .children(&path, &mut vec![])
+            .into_iter()
+            .map(|e| e.name().to_owned())
+            .collect();
+        names.sort_by_key(|n| n.to_lowercase());
+        let shown = names
+            .iter()
+            .take(12)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let contents = match names.len().saturating_sub(12) {
+            0 => shown,
+            more => format!("{shown} and {more} more"),
+        };
+        let mut reason = "Caches of command-line tools, which download or rebuild what they need. Some keep large downloads here, such as machine-learning models.".to_owned();
+        let mut details = vec![
+            detail("Ecosystem", "Command-line tools"),
+            detail("Contains", contents),
+        ];
+        if s.is_file(&format!("{path}/huggingface/token")) {
+            reason +=
+                " It also holds your Hugging Face login token; you will need to sign in again.";
+            details.push(detail("Sign-in", "Hugging Face token"));
+        }
+        Some(
+            Candidate::new(entry, &reason, vec![ActionKind::Trash], Risk::Review)
+                .title("Command-line tool caches (~/.cache)".to_owned())
+                .details(details),
+        )
+    }
     fn logs(&self) -> String {
         self.home() + "/Library/Logs"
+    }
+    /// Every folder this module reports on, so other modules can leave them to it.
+    pub fn covered(&self) -> Vec<String> {
+        let home = self.home();
+        self.locations
+            .iter()
+            .map(|l| format!("{home}/{}", l.root()))
+            .chain([self.logs()])
+            .chain(self.tool_cache.map(|c| format!("{home}/{c}")))
+            .collect()
     }
     /// The location an existing path belongs to.
     fn location(&self, path: &str) -> Option<&CacheLocation> {
@@ -1221,7 +1261,7 @@ impl ScanModule for CachesModule {
             "Caches & Logs",
             "Developer",
             "archivebox",
-            "Known package caches and logs, with rebuild costs made clear.",
+            "Developer and app caches, logs and other Mac leftovers, with rebuild costs made clear.",
             false,
         )
     }
@@ -1231,6 +1271,8 @@ impl ScanModule for CachesModule {
             .iter()
             .map(|l| format!("{home}/{}", l.root()))
             .chain([format!("{home}/Library/Caches"), self.logs()])
+            .chain(self.tool_cache.map(|c| format!("{home}/{c}")))
+            .chain(self.mac.action_roots(&home))
             .collect()
     }
     fn scan(
@@ -1265,6 +1307,14 @@ impl ScanModule for CachesModule {
                 }
             }
         }
+        if let Some(candidate) = self.tool_cache_candidate(s, c) {
+            candidates.push(candidate);
+        }
+        // macOS leftovers, except folders the tool caches above already cover.
+        candidates.extend(
+            self.mac
+                .candidates(s, c, k, &self.home(), &self.covered())?,
+        );
         let logs = self.logs();
         if s.is_dir(&logs) && !c.excludes(&logs) {
             let mut warnings = vec![];
@@ -1288,6 +1338,10 @@ impl ScanModule for CachesModule {
     }
     fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
         let path = f.resource.path().ok_or("Missing path")?;
+        // A macOS leftover only needs its app closed; developer tools are irrelevant to it.
+        if let Some(result) = self.mac.preflight(s, &self.home(), path) {
+            return result;
+        }
         if let Some(location) = self.location(path) {
             if let Some(reason) = location.blocked {
                 return Err(reason.into());

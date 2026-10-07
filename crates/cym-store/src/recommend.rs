@@ -60,7 +60,7 @@ pub const RULES: &[Rule] = &[
         id: "rebuildable-caches",
         module: "caches",
         title: "Caches that rebuild themselves",
-        detail: "Tool and package caches that are downloaded or regenerated when needed.",
+        detail: "Developer tool, package and app caches, saved window state and other leftovers that are downloaded or regenerated when needed.",
         action: ActionKind::Trash,
         risks: &[Risk::Rebuild],
         idle_days: None,

@@ -1,0 +1,217 @@
+//! macOS leftovers in the user's Library: app caches, saved window state, Mail downloads,
+//! device software updates and old device backups. Caches & Logs lists them alongside the
+//! developer caches.
+use super::{glob, owners_closed, Candidate};
+use crate::{model::*, policy, ports::*, services::Services};
+
+/// A known kind of macOS leftover.
+pub struct JunkLocation {
+    pub name: &'static str,
+    /// Relative to the home folder. A `*` matches one path component; the first one names
+    /// the owning app's bundle identifier when `per_app` is set.
+    pub path: &'static str,
+    pub reason: &'static str,
+    pub risk: Risk,
+    /// The owning app must not be running when the item is removed.
+    pub per_app: bool,
+}
+
+/// The table of macOS leftover locations, relative to a home folder.
+pub struct MacJunk {
+    pub locations: Vec<JunkLocation>,
+}
+impl Default for MacJunk {
+    fn default() -> Self {
+        Self {
+            locations: vec![
+                JunkLocation {
+                    name: "App cache",
+                    path: "Library/Caches/*",
+                    reason: "Apps recreate their caches as needed; the app may start a little slower once.",
+                    risk: Risk::Rebuild,
+                    per_app: true,
+                },
+                JunkLocation {
+                    name: "Sandboxed app cache",
+                    path: "Library/Containers/*/Data/Library/Caches",
+                    reason: "Apps recreate their caches as needed; the app may start a little slower once.",
+                    risk: Risk::Rebuild,
+                    per_app: true,
+                },
+                JunkLocation {
+                    name: "Saved window state",
+                    path: "Library/Saved Application State/*",
+                    reason: "Lets an app reopen its windows where you left them; it opens fresh windows instead.",
+                    risk: Risk::Rebuild,
+                    per_app: true,
+                },
+                JunkLocation {
+                    name: "Mail downloads",
+                    path: "Library/Containers/com.apple.mail/Data/Library/Mail Downloads",
+                    reason: "Copies of attachments you opened in Mail; the originals stay in your mail.",
+                    risk: Risk::Rebuild,
+                    per_app: false,
+                },
+                JunkLocation {
+                    name: "iPhone software updates",
+                    path: "Library/iTunes/iPhone Software Updates",
+                    reason: "Device update files, downloaded again when a device needs them.",
+                    risk: Risk::Rebuild,
+                    per_app: false,
+                },
+                JunkLocation {
+                    name: "iPad software updates",
+                    path: "Library/iTunes/iPad Software Updates",
+                    reason: "Device update files, downloaded again when a device needs them.",
+                    risk: Risk::Rebuild,
+                    per_app: false,
+                },
+                JunkLocation {
+                    name: "Device backup",
+                    path: "Library/Application Support/MobileSync/Backup/*",
+                    reason: "A local backup of an iPhone or iPad. Remove it only if you have a newer backup, here or in iCloud.",
+                    risk: Risk::Review,
+                    per_app: false,
+                },
+            ],
+        }
+    }
+}
+impl MacJunk {
+    /// Existing folders matching a location, with the first `*` match.
+    fn expand(
+        &self,
+        s: &Services,
+        home: &str,
+        location: &JunkLocation,
+    ) -> Vec<(Entry, Option<String>)> {
+        let mut current: Vec<(String, Option<String>)> = vec![(home.to_owned(), None)];
+        for part in location.path.split('/') {
+            let mut next = vec![];
+            for (folder, capture) in current {
+                if part.contains('*') {
+                    for e in s.children(&folder, &mut vec![]) {
+                        if e.directory && !e.symlink && glob(part, e.name()).is_some() {
+                            let capture = capture.clone().or_else(|| Some(e.name().to_owned()));
+                            next.push((e.identity.path, capture));
+                        }
+                    }
+                } else {
+                    next.push((format!("{folder}/{part}"), capture));
+                }
+            }
+            current = next;
+        }
+        current
+            .into_iter()
+            .filter_map(|(path, capture)| {
+                let e = s.entry(&path).ok().filter(|e| e.directory)?;
+                Some((e, capture))
+            })
+            .collect()
+    }
+    /// The location and first `*` match of an existing path.
+    fn locate(&self, home: &str, path: &str) -> Option<(&JunkLocation, Option<String>)> {
+        let relative: Vec<&str> = path
+            .strip_prefix(home)?
+            .strip_prefix('/')?
+            .split('/')
+            .collect();
+        self.locations.iter().find_map(|l| {
+            let parts: Vec<&str> = l.path.split('/').collect();
+            if parts.len() != relative.len() {
+                return None;
+            }
+            let mut capture = None;
+            for (pattern, name) in parts.iter().zip(&relative) {
+                glob(pattern, name)?;
+                if pattern.contains('*') && capture.is_none() {
+                    capture = Some((*name).to_owned());
+                }
+            }
+            Some((l, capture))
+        })
+    }
+    /// The folders actions may touch: each location up to its first `*`.
+    pub fn action_roots(&self, home: &str) -> Vec<String> {
+        self.locations
+            .iter()
+            .map(|l| {
+                let fixed: Vec<&str> = l.path.split('/').take_while(|p| !p.contains('*')).collect();
+                format!("{home}/{}", fixed.join("/"))
+            })
+            .collect()
+    }
+    /// Leftovers in `home`, leaving out folders in or around `covered` (reported elsewhere).
+    pub(crate) fn candidates(
+        &self,
+        s: &Services,
+        c: &ScanContext,
+        k: &ScanControl,
+        home: &str,
+        covered: &[String],
+    ) -> Result<Vec<Candidate>> {
+        let overlaps = |path: &str| {
+            covered
+                .iter()
+                .any(|c| policy::contains(path, c) || policy::contains(c, path))
+        };
+        let mut candidates = vec![];
+        for location in &self.locations {
+            k.check()?;
+            for (e, capture) in self.expand(s, home, location) {
+                if !c.allows(e.path()) || overlaps(e.path()) {
+                    continue;
+                }
+                let owner = capture.as_deref().filter(|_| location.per_app).map(bundle);
+                // Apple's own caches are left to review rather than offered as a quick fix.
+                let apple = owner.is_some_and(|b| b.starts_with("com.apple."));
+                let title = match (owner, &capture) {
+                    (Some(b), _) => format!("{} · {}", location.name, app_name(b)),
+                    (None, Some(name)) => format!("{} · {name}", location.name),
+                    _ => location.name.to_owned(),
+                };
+                let mut details = vec![detail("Ecosystem", "macOS"), detail("Kind", location.name)];
+                if let Some(b) = owner {
+                    details.push(detail("App", b));
+                }
+                let reason = if location.per_app {
+                    format!("{} Quit the app first.", location.reason)
+                } else {
+                    location.reason.to_owned()
+                };
+                let risk = if apple && location.risk == Risk::Rebuild {
+                    Risk::Review
+                } else {
+                    location.risk
+                };
+                candidates.push(
+                    Candidate::new(e, &reason, vec![ActionKind::Trash], risk)
+                        .title(title)
+                        .details(details),
+                );
+            }
+        }
+        Ok(candidates)
+    }
+    /// Checks before removing a leftover: `None` when the path is not one.
+    pub fn preflight(&self, s: &Services, home: &str, path: &str) -> Option<Result<()>> {
+        let (location, capture) = self.locate(home, path)?;
+        Some(match capture.as_deref() {
+            Some(capture) if location.per_app => owners_closed(s, &[bundle(capture)]),
+            _ => Ok(()),
+        })
+    }
+}
+/// A bundle identifier from a folder name such as `com.apple.Safari.savedState`.
+fn bundle(capture: &str) -> &str {
+    capture.strip_suffix(".savedState").unwrap_or(capture)
+}
+/// A readable app name from a bundle identifier: its last component.
+fn app_name(bundle: &str) -> &str {
+    bundle
+        .rsplit('.')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(bundle)
+}

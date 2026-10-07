@@ -6,6 +6,7 @@ use std::{collections::HashSet, sync::Arc};
 
 pub mod applications;
 pub mod developer;
+pub mod junk;
 pub mod processes;
 pub mod simulators;
 pub mod storage;
@@ -244,46 +245,51 @@ pub(crate) fn add_files(
     if candidates.is_empty() {
         return Ok(());
     }
+    let total = candidates.len();
     sink.progress(format!(
-        "Sizing {} item{}",
-        candidates.len(),
-        if candidates.len() == 1 { "" } else { "s" }
+        "Sizing {total} item{}",
+        if total == 1 { "" } else { "s" }
     ));
-    let rows: Vec<_> = services.io.install(|| {
-        candidates
-            .into_par_iter()
-            .map(|c| {
-                let row = services.file_finding(
-                    &c.entry,
-                    module,
-                    c.title.as_deref(),
-                    &c.reason,
-                    c.actions,
-                    c.risk,
-                    control,
-                );
-                let used = c.last_used.resolve(services, c.entry.path());
-                (c.entry.identity.path, c.details, c.blocked, used, row)
+    // Size on the I/O pool and report each item the moment its size is known, so results
+    // appear while the rest are still being measured. The sink stays on this thread.
+    let (send, receive) = std::sync::mpsc::channel();
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            services.io.install(|| {
+                candidates.into_par_iter().for_each_with(send, |send, c| {
+                    let row = services.file_finding(
+                        &c.entry,
+                        module,
+                        c.title.as_deref(),
+                        &c.reason,
+                        c.actions,
+                        c.risk,
+                        control,
+                    );
+                    let used = c.last_used.resolve(services, c.entry.path());
+                    let _ = send.send((c.entry.identity.path, c.details, c.blocked, used, row));
+                });
             })
-            .collect()
+        });
+        for (done, (path, details, blocked, used, row)) in receive.iter().enumerate() {
+            match row {
+                Ok(mut f) => {
+                    f.details.extend(details);
+                    if let Some((at, source)) = used {
+                        f.last_used_at = Some(at);
+                        f.details.push(detail("Last used from", source));
+                    }
+                    if blocked.is_some() {
+                        f.blocked_reason = blocked;
+                    }
+                    sink.finding(f);
+                }
+                Err(e) => sink.warning(format!("Cannot size {path}: {e}")),
+            }
+            sink.progress(format!("Sized {} of {total}", done + 1));
+        }
     });
     control.check()?;
-    for (path, details, blocked, used, row) in rows {
-        match row {
-            Ok(mut f) => {
-                f.details.extend(details);
-                if let Some((at, source)) = used {
-                    f.last_used_at = Some(at);
-                    f.details.push(detail("Last used from", source));
-                }
-                if blocked.is_some() {
-                    f.blocked_reason = blocked;
-                }
-                sink.finding(f);
-            }
-            Err(e) => sink.warning(format!("Cannot size {path}: {e}")),
-        }
-    }
     Ok(())
 }
 /// Matches a name against a pattern with at most one `*` and returns the part `*` matched,
