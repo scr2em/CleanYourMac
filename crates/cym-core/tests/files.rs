@@ -412,7 +412,7 @@ fn fast_path_rules_match_the_reference_rules() {
     }
     let roots: Vec<String> = paths.iter().step_by(15).cloned().collect();
     // Real subfolders only: excluding `/` or the working folder would exclude everything.
-    let context = ScanContext {
+    let mut context = ScanContext {
         exclusions: paths[5..]
             .iter()
             .filter(|p| p.len() > home.len() + 4)
@@ -421,6 +421,15 @@ fn fast_path_rules_match_the_reference_rules() {
             .collect(),
         ..Default::default()
     };
+    // Ensure exclusion coverage independently of the machine's home-path length.
+    let excluded_root = format!("{home}/Projects/policy-fixture-excluded");
+    context.exclusions.push(excluded_root.clone());
+    for index in 0..32 {
+        paths.push(format!("{excluded_root}/file-{index}.txt"));
+        paths.push(format!(
+            "{home}/Projects/policy-fixture-visible/file-{index}.txt"
+        ));
+    }
     let scope = policy::Scope::new(&context);
     // Every rule must give both answers somewhere, or the comparison proves nothing.
     let mut outcomes = [[0usize; 2]; 4];

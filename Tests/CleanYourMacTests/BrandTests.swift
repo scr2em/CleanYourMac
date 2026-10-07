@@ -19,7 +19,7 @@ import Testing
     #expect(BrandCatalog.slugs.count >= 50)
     #expect(BrandCatalog.name("flutter") == "Flutter")
     #expect(BrandCatalog.contains("nextdotjs"))
-    let svg = #"<svg fill="#61DAFB" role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>React</title><path d="M0 0h24v24H0z"/></svg>"#
+    let svg = ##"<svg fill="#61DAFB" role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>React</title><path d="M0 0h24v24H0z"/></svg>"##
     let icon = try #require(SVGIcon(svg: svg))
     #expect(icon.fill == 0x61DAFB)
     #expect(icon.title == "React")

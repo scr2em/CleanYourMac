@@ -7,7 +7,7 @@ import SwiftUI
     @State private var store: AppStore
     init() {
         NSApplication.shared.setActivationPolicy(.regular)
-        let fixture = CommandLine.arguments.contains("--demo")
+        let fixture = CommandLine.arguments.contains("--demo") || Bundle.main.bundleIdentifier == "org.cleanyourmac.preview"
         // `--demo --demo-rows 1000000` previews a million synthetic rows.
         let rows = CommandLine.arguments.firstIndex(of: "--demo-rows").flatMap { CommandLine.arguments.indices.contains($0 + 1) ? Int(CommandLine.arguments[$0 + 1]) : nil } ?? 0
         let initial = AppStore(demo: fixture, demoRows: rows)

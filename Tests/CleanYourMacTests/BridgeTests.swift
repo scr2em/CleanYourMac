@@ -16,9 +16,10 @@ private func collect(_ stream: AsyncThrowingStream<ScanEvent, Error>) async thro
 
 @Test func coreDescribesRegisteredModules() {
     let modules = CoreEngine.shared.modules()
-    #expect(modules.count == 14)
+    #expect(modules.count == 15)
     #expect(modules.first?.id == "storage")
     #expect(modules.first { $0.id == "orphans" }?.category == .tools)
+    #expect(modules.first { $0.id == "toolchains" }?.category == .developer)
     #expect(Set(modules.map(\.id)).count == modules.count)
 }
 

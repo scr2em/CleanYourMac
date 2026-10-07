@@ -131,3 +131,13 @@ import Testing
     store.toggleSelectAll()
     #expect(store.selectedIDs.isEmpty)
 }
+
+@MainActor @Test func demoStartsWithLoadedInspectorDetails() async throws {
+    let defaults = try #require(UserDefaults(suiteName: "org.cleanyourmac.test." + UUID().uuidString))
+    let store = AppStore(demo: true, defaults: defaults, core: CoreEngine())
+    await store.requery()
+    for _ in 0..<200 where store.inspected == nil { try await Task.sleep(for: .milliseconds(10)) }
+    let finding = try #require(store.inspected)
+    #expect(finding.id == "demo-node")
+    #expect(finding.value("Package manager") == "pnpm")
+}

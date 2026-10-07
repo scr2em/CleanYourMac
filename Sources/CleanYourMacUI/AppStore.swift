@@ -80,12 +80,12 @@ public final class AppStore {
     public private(set) var eligibleTotal = 0
     /// Core-computed totals for the rows matching the search and filters.
     public private(set) var summary = Analytics.empty
-    public private(set) var largest: [ResultRow] = []
+    public private(set) var largest: [CleanYourMacCore.ResultRow] = []
     public private(set) var maxCPU: Double?
     /// Totals across every module, for the overview, sidebar counts and menu bar.
     public private(set) var overview = Analytics.empty
     public private(set) var selection = SelectionSummary.empty
-    private var pages: [Int: [ResultRow]] = [:]
+    private var pages: [Int: [CleanYourMacCore.ResultRow]] = [:]
     private var loadingPages = Set<Int>()
     /// Bumped whenever stored results change, so the visible query refreshes.
     public private(set) var storeVersion = 0
@@ -153,7 +153,7 @@ public final class AppStore {
         if let info = try? await core.query(ResultQuery(module: nil)) { overview = info.summary }
     }
     /// The row at `index` if its page is cached. Call `prefetch` to load it.
-    public func row(at index: Int) -> ResultRow? {
+    public func row(at index: Int) -> CleanYourMacCore.ResultRow? {
         let page = pages[index / Self.pageSize]
         let offset = index % Self.pageSize
         return page.flatMap { offset < $0.count ? $0[offset] : nil }
@@ -183,12 +183,13 @@ public final class AppStore {
         }
     }
     /// Rows in `range`, loading them directly; for tests and previews.
-    public func rows(_ range: Range<Int>) async -> [ResultRow] {
+    public func rows(_ range: Range<Int>) async -> [CleanYourMacCore.ResultRow] {
         (try? await core.rows(queryID: queryID, offset: range.lowerBound, limit: range.count)) ?? []
     }
     private func loadInspected() {
         guard let id = inspectedID else { inspected = nil; return }
         Task { [weak self] in
+            if let demoLoad = self?.demoLoad { await demoLoad.value }
             let finding = await self?.core.finding(id)
             if self?.inspectedID == id { self?.inspected = finding }
         }
@@ -459,8 +460,8 @@ public final class AppStore {
             Finding(id: "demo-node-2", moduleID: "node", title: "landing-page", subtitle: base + "/landing-page/node_modules", resource: file(base + "/landing-page/node_modules"), bytes: 864_000_000, actions: [.trash], risk: .rebuild, reason: "Manifests and lockfiles are preserved."),
             Finding(id: "demo-storage", moduleID: "storage", title: "Projects", subtitle: base, resource: file(base), bytes: 14_280_000_000, reason: "Storage inventory. Inspect this folder to see its contents."),
             Finding(id: "demo-storage-2", moduleID: "storage", title: "Downloads", subtitle: "/Users/demo/Downloads", resource: file("/Users/demo/Downloads"), bytes: 3_510_000_000, reason: "Storage inventory."),
-            Finding(id: "demo-simulator", moduleID: "simulators", title: "iPhone 16", subtitle: "iOS 18.5", resource: .simulator(id: "35D71E75-E2F0-4EF5-A131-06B14FDB044E", state: "Shutdown"), bytes: 4_320_000_000, details: [Detail("State", "Shutdown"), Detail("Identifier", "35D71E75-E2F0-4EF5-A131-06B14FDB044E")], actions: [.resetSimulator, .deleteSimulator], risk: .permanent, reason: "Device app data and settings are erased by reset or delete."),
-            Finding(id: "demo-worktree", moduleID: "worktrees", title: "feature-navigation", subtitle: "feature/navigation · " + base + "/dashboard-worktrees/feature-navigation", resource: file(base + "/dashboard-worktrees/feature-navigation"), bytes: 2_540_000_000, details: [Detail("Branch", "feature/navigation"), Detail("State", "Local changes")], reason: "Local work needs inspection.", blockedReason: "Contains untracked or ignored files.", badge: "Linked"),
+            Finding(id: "demo-simulator", moduleID: "simulators", title: "iPhone 16", subtitle: "iOS 18.5", resource: .simulator(id: "35D71E75-E2F0-4EF5-A131-06B14FDB044E", state: "Shutdown"), bytes: 4_320_000_000, details: [Detail("State", "Shutdown"), Detail("Identifier", "35D71E75-E2F0-4EF5-A131-06B14FDB044E"), Detail("Data path", "/Users/demo/Library/Developer/CoreSimulator/Devices/35D71E75-E2F0-4EF5-A131-06B14FDB044E/data")], actions: [.resetSimulator, .deleteSimulator], risk: .permanent, reason: "Device app data and settings are erased by reset or delete."),
+            Finding(id: "demo-worktree", moduleID: "worktrees", title: "feature-navigation", subtitle: "feature/navigation · " + base + "/dashboard-worktrees/feature-navigation", resource: file(base + "/dashboard-worktrees/feature-navigation"), bytes: 2_540_000_000, details: [Detail("Branch", "feature/navigation"), Detail("State", "Local changes")], reason: "Local work needs inspection.", blockedReason: "Contains untracked files.", badge: "Linked"),
             Finding(id: "demo-process", moduleID: "orphans", title: "node", subtitle: base + "/dashboard", resource: .process(ProcessIdentity(pid: 4201, uid: 501, startedSeconds: 1_791_399_000, startedMicroseconds: 1, executable: "/opt/homebrew/bin/node")), cpuPercent: 53.2, memoryBytes: 240_000_000, details: [Detail("PID", "4201"), Detail("Working folder", base + "/dashboard"), Detail("Command", "node dev-server.js")], actions: [.terminate, .forceQuit], risk: .permanent, reason: "No known managed job or running app owns this process. Review before terminating."),
         ]
         demoLoad = Task { [core] in
@@ -494,7 +495,7 @@ public enum Display {
     public static func lastUsed(_ date: Date?) -> String? {
         date.map { "used " + $0.formatted(.relative(presentation: .named)) }
     }
-    public static func value(_ row: ResultRow) -> String {
+    public static func value(_ row: CleanYourMacCore.ResultRow) -> String {
         if row.isProcess {
             let cpu = row.cpuPercent.map { String(format: "%.1f%% CPU", $0) } ?? "Sampling CPU"
             return cpu + " · " + bytes(row.memoryBytes)
