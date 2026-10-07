@@ -13,6 +13,7 @@ typedef struct {
     char path[4096], cwd[1024], command[16384];
 } CYMProcess;
 
+size_t cym_process_struct_size(void) { return sizeof(CYMProcess); }
 int cym_processes(int32_t *buffer, int capacity) { return proc_listallpids(buffer, capacity * sizeof(int32_t)); }
 int cym_inspect_process(int32_t pid, CYMProcess *out) {
     memset(out, 0, sizeof(*out));

@@ -154,3 +154,18 @@ pub fn normalized_selection(rows: &[Finding]) -> Vec<Finding> {
         .cloned()
         .collect()
 }
+/// macOS packages are listed as single items; traversal does not enter them.
+pub const PACKAGE_EXTENSIONS: &[&str] = &[
+    "app",
+    "bundle",
+    "framework",
+    "xcarchive",
+    "photoslibrary",
+    "playground",
+];
+pub fn package(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|e| PACKAGE_EXTENSIONS.contains(&e))
+}

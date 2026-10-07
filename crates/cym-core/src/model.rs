@@ -223,3 +223,53 @@ pub fn now() -> f64 {
         .unwrap_or_default()
         .as_secs_f64()
 }
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModuleTotal {
+    pub module_id: String,
+    pub count: usize,
+    pub bytes: u64,
+    pub reclaimable_bytes: u64,
+}
+/// Aggregate figures for a set of findings. Disk totals count each path once even when
+/// findings overlap; process memory is reported separately and never added to disk usage.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Analytics {
+    pub findings: usize,
+    pub disk_bytes: u64,
+    pub allocated_bytes: u64,
+    pub reclaimable_bytes: u64,
+    pub blocked: usize,
+    pub process_count: usize,
+    pub process_memory_bytes: u64,
+    pub modules: Vec<ModuleTotal>,
+}
+/// Scan output delivered while modules run.
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[allow(clippy::large_enum_variant)]
+pub enum ScanEvent {
+    #[serde(rename_all = "camelCase")]
+    Finding {
+        module_id: String,
+        finding: Finding,
+    },
+    #[serde(rename_all = "camelCase")]
+    Warning {
+        module_id: String,
+        message: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    Progress {
+        module_id: String,
+        message: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    ModuleFinished {
+        module_id: String,
+    },
+    Finished {
+        cancelled: bool,
+    },
+}
