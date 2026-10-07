@@ -4,7 +4,7 @@ CleanYourMac is a Rust core with a thin SwiftUI interface. The core owns discove
 
 ~~~
 SwiftUI views ── AppStore ── CoreEngine (Swift) ──C ABI (JSON)── Engine (Rust)
-                                                                 ├─ Registry ── ScanModule × 14
+                                                                 ├─ Registry ── ScanModule × 15
                                                                  ├─ actions · analytics · policy
                                                                  └─ Services ── ports (traits) ── adapters
 ~~~

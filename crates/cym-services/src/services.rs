@@ -95,6 +95,13 @@ impl Services {
     pub fn is_dir(&self, path: &str) -> bool {
         self.entry(path).is_ok_and(|e| e.directory)
     }
+    /// A small text file such as a tool's settings, or `None` when it is missing or unreadable.
+    pub fn read_text(&self, path: &str) -> Option<String> {
+        self.fs
+            .read(path, 256 * 1024)
+            .ok()
+            .map(|data| String::from_utf8_lossy(&data).into_owned())
+    }
 
     /// Canonical, physically distinct roots with nested roots folded into their ancestors.
     pub fn roots(&self, paths: &[String]) -> Vec<String> {

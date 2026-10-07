@@ -45,11 +45,13 @@ fn artifacts_require_project_evidence() {
     let f = Fixture::new();
     let s = services(&f);
     let module = ArtifactsModule::default();
-    assert_eq!(module.rule(&s, "build", &f.path()), None);
-    assert_eq!(module.rule(&s, "target", &f.path()), None);
+    assert_eq!(module.matches(&s, &f.dir("build")), None);
+    assert_eq!(module.matches(&s, &f.dir("target")), None);
     f.write("Cargo.toml", "[package]");
-    assert!(module.rule(&s, "target", &f.path()).is_some());
-    assert_eq!(module.rule(&s, "dist", &f.path()), None);
+    let cargo = module.matches(&s, &f.at("target")).unwrap();
+    assert_eq!(cargo.rule.ecosystem, "Rust (Cargo)");
+    assert_eq!(cargo.project, f.path());
+    assert_eq!(module.matches(&s, &f.dir("dist")), None);
 }
 
 #[test]

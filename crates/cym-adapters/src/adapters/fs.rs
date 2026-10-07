@@ -45,6 +45,22 @@ impl FileSystem for StdFileSystem {
             .ok()
             .and_then(|p| p.to_str().map(str::to_owned))
     }
+    fn read(&self, path: &str, limit: u64) -> Result<Vec<u8>> {
+        use std::os::unix::fs::OpenOptionsExt;
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)
+            .map_err(|e| format!("Cannot read {path}: {e}"))?;
+        if !file.metadata().is_ok_and(|m| m.is_file()) {
+            return Err(format!("Not a regular file: {path}"));
+        }
+        let mut data = vec![];
+        file.take(limit)
+            .read_to_end(&mut data)
+            .map_err(|e| format!("Cannot read {path}: {e}"))?;
+        Ok(data)
+    }
     fn remove(&self, path: &str) -> Result<()> {
         let m = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
         if m.is_dir() {

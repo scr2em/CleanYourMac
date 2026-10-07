@@ -142,6 +142,7 @@ private struct ScopeView: View {
         case "applications", "leftovers": "Installed applications and precisely named related files"
         case "downloads": "Your Downloads folder"
         case "trash": "Your local Trash"
+        case "toolchains": "Version managers, SDK components and virtual devices in your home folder"
         default: "Known user caches and logs"
         }
     }

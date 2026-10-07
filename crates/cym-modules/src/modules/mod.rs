@@ -9,6 +9,7 @@ pub mod developer;
 pub mod processes;
 pub mod simulators;
 pub mod storage;
+pub mod toolchains;
 pub mod worktrees;
 
 pub trait ScanModule: Send + Sync {
@@ -282,6 +283,46 @@ pub(crate) fn add_files(
     }
     Ok(())
 }
+/// Matches a name against a pattern with at most one `*` and returns the part `*` matched,
+/// or the whole name for a literal pattern.
+pub fn glob<'a>(pattern: &str, name: &'a str) -> Option<&'a str> {
+    match pattern.split_once('*') {
+        None => (pattern == name).then_some(name),
+        Some((prefix, suffix)) => (name.len() >= prefix.len() + suffix.len()
+            && name.starts_with(prefix)
+            && name.ends_with(suffix))
+        .then(|| &name[prefix.len()..name.len() - suffix.len()]),
+    }
+}
+/// Fails while an app whose bundle identifier starts with one of `prefixes` is running.
+pub(crate) fn owners_closed(services: &Services, prefixes: &[&str]) -> Result<()> {
+    if prefixes.is_empty() {
+        return Ok(());
+    }
+    let running = services.apps.running()?;
+    match running
+        .iter()
+        .find(|a| prefixes.iter().any(|p| a.bundle_id.starts_with(p)))
+    {
+        Some(app) => Err(format!(
+            "Quit {} before removing its data.",
+            std::path::Path::new(&app.path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&app.bundle_id)
+        )),
+        None => Ok(()),
+    }
+}
+/// Bundle-identifier prefixes of apps that own developer data.
+pub mod owners {
+    pub const XCODE: &[&str] = &["com.apple.dt.Xcode", "com.apple.iphonesimulator"];
+    pub const ANDROID: &[&str] = &["com.google.android.studio", "com.jetbrains."];
+    pub const JETBRAINS: &[&str] = &["com.jetbrains."];
+    pub const VSCODE: &[&str] = &["com.microsoft.VSCode"];
+    pub const UNITY: &[&str] = &["com.unity3d.UnityEditor", "com.unity3d.unityhub"];
+    pub const UNREAL: &[&str] = &["com.epicgames.UnrealEditor"];
+}
 pub(crate) fn descriptor(
     id: &str,
     name: &str,
@@ -305,6 +346,7 @@ pub fn builtin() -> Registry {
         Arc::new(simulators::SimulatorModule),
         Arc::new(developer::XcodeModule),
         Arc::new(developer::CachesModule::default()),
+        Arc::new(toolchains::ToolchainsModule::default()),
         Arc::new(applications::ApplicationsModule),
         Arc::new(applications::LeftoversModule),
         Arc::new(storage::FolderModule::downloads()),
