@@ -297,3 +297,167 @@ fn bulk_listing_matches_lstat_for_every_kind_of_entry() {
     }
     assert!(BulkFileSystem.children(&f.at("absent")).is_err());
 }
+
+/// The path rules as they were before the allocation-free rewrite, kept as the reference.
+mod reference {
+    use cym_core::policy::{canonical, home, DUPLICATE_IGNORES, DUPLICATE_IGNORE_SUFFIXES};
+    use std::path::Path;
+    pub fn contains(path: &str, root: &str) -> bool {
+        Path::new(&canonical(path)).starts_with(canonical(root))
+    }
+    pub fn system_excluded(path: &str) -> bool {
+        [
+            "/System", "/Library", "/bin", "/sbin", "/usr", "/dev", "/Network", "/private", "/var",
+            "/etc", "/tmp",
+        ]
+        .iter()
+        .any(|r| contains(path, r))
+            || sensitive(path)
+    }
+    fn sensitive(path: &str) -> bool {
+        let h = home();
+        [
+            "/.ssh",
+            "/.aws",
+            "/.gnupg",
+            "/Library/Keychains",
+            "/Library/Mobile Documents",
+            "/Library/CloudStorage",
+        ]
+        .iter()
+        .any(|r| contains(path, &(h.clone() + r)))
+            || Path::new(path).components().any(|c| {
+                let s = c.as_os_str().to_string_lossy();
+                s == ".git" || s == ".env" || s.starts_with(".env.")
+            })
+    }
+    pub fn duplicate_excluded(path: &str) -> bool {
+        system_excluded(path)
+            || Path::new(path).components().any(|c| {
+                let name = c.as_os_str().to_string_lossy().to_lowercase();
+                DUPLICATE_IGNORES.contains(&name.as_str())
+                    || DUPLICATE_IGNORE_SUFFIXES
+                        .iter()
+                        .any(|suffix| name.ends_with(&suffix.to_lowercase()))
+            })
+    }
+}
+
+#[test]
+fn fast_path_rules_match_the_reference_rules() {
+    let home = policy::home();
+    let segments = [
+        "Users",
+        "dev",
+        "usr",
+        "usrx",
+        "Library",
+        "Keychains",
+        "Mobile Documents",
+        ".git",
+        ".gitignore",
+        ".env",
+        ".env.local",
+        ".envrc",
+        "node_modules",
+        "Node_Modules",
+        "x.egg-info",
+        "App.dSYM",
+        "b.XCARCHIVE",
+        "projects",
+        ".",
+        "..",
+        "é",
+        "名前",
+        "target",
+        "Target",
+        "CloudStorage",
+        ".ssh",
+        ".sshx",
+        "tmp",
+        "private",
+        "a b",
+    ];
+    let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+    let mut next = move |n: usize| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed % n as u64) as usize
+    };
+    let mut paths = vec![
+        "/".to_owned(),
+        home.clone(),
+        "~".into(),
+        "~/".into(),
+        "".into(),
+    ];
+    for _ in 0..1_500 {
+        let mut path = match next(6) {
+            0 => String::new(),
+            1 => "~".into(),
+            2 => home.clone(),
+            _ => "/".into(),
+        };
+        for i in 0..1 + next(5) {
+            if i > 0 || !(path.is_empty() || path.ends_with('/')) {
+                path.push_str(if next(8) == 0 { "//" } else { "/" });
+            }
+            path.push_str(segments[next(segments.len())]);
+        }
+        if next(6) == 0 {
+            path.push('/');
+        }
+        paths.push(path);
+    }
+    let roots: Vec<String> = paths.iter().step_by(15).cloned().collect();
+    // Real subfolders only: excluding `/` or the working folder would exclude everything.
+    let context = ScanContext {
+        exclusions: paths[5..]
+            .iter()
+            .filter(|p| p.len() > home.len() + 4)
+            .step_by(60)
+            .cloned()
+            .collect(),
+        ..Default::default()
+    };
+    let scope = policy::Scope::new(&context);
+    // Every rule must give both answers somewhere, or the comparison proves nothing.
+    let mut outcomes = [[0usize; 2]; 4];
+    for path in &paths {
+        outcomes[0][usize::from(
+            roots[1..]
+                .iter()
+                .filter(|r| r.len() > 2)
+                .any(|r| policy::contains(path, r) && path != r),
+        )] += 1;
+        outcomes[1][usize::from(policy::system_excluded(path))] += 1;
+        outcomes[2][usize::from(scope.excludes(path))] += 1;
+        outcomes[3][usize::from(policy::duplicate_excluded(path))] += 1;
+        for root in &roots {
+            assert_eq!(
+                policy::contains(path, root),
+                reference::contains(path, root),
+                "contains({path:?}, {root:?})"
+            );
+        }
+        let system = reference::system_excluded(path);
+        assert_eq!(policy::system_excluded(path), system, "system {path:?}");
+        assert_eq!(scope.system_excluded(path), system, "scope system {path:?}");
+        let excluded = context
+            .exclusions
+            .iter()
+            .any(|r| reference::contains(path, r));
+        assert_eq!(context.excludes(path), excluded, "excludes {path:?}");
+        assert_eq!(scope.excludes(path), excluded, "scope excludes {path:?}");
+        assert_eq!(
+            policy::duplicate_excluded(path),
+            reference::duplicate_excluded(path),
+            "duplicate {path:?}"
+        );
+    }
+    assert!(
+        outcomes.iter().all(|o| o[0] > 20 && o[1] > 20),
+        "{outcomes:?}"
+    );
+}

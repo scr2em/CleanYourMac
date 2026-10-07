@@ -186,7 +186,9 @@ impl ScanModule for DuplicatesModule {
         context.roots.retain(|r| !policy::duplicate_excluded(r));
         let walked = s.walk(&context, k, &mut warnings, &mut |e| {
             if e.directory {
-                return Ok(!policy::duplicate_excluded(e.path()));
+                // Roots were checked in full above, and an ignored folder is never entered,
+                // so only the new folder's own name needs checking.
+                return Ok(!policy::duplicate_ignored_name(e.name()));
             }
             if e.regular && e.bytes >= self.minimum_bytes {
                 sizes.push((e.bytes, e.clone()));

@@ -161,6 +161,8 @@ impl Services {
         visit: &mut dyn FnMut(&Entry) -> Result<bool>,
     ) -> Result<()> {
         let mut count = 0usize;
+        // Prepared once: every visited entry is checked against these.
+        let scope = policy::Scope::new(context);
         for root in self.roots(&context.roots) {
             control.check()?;
             if context.excludes(&root) || policy::system_excluded(&root) {
@@ -183,8 +185,8 @@ impl Services {
                     }
                     if e.symlink
                         || e.dataless
-                        || context.excludes(e.path())
-                        || policy::system_excluded(e.path())
+                        || scope.excludes(e.path())
+                        || scope.system_excluded(e.path())
                     {
                         return Ok(Visit::Skip);
                     }
