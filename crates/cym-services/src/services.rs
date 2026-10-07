@@ -7,15 +7,22 @@
 use crate::{
     adapters::{command, fs, journal, native},
     model::*,
-    orphans::ProcessState,
     policy,
     ports::*,
 };
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::Path,
     sync::{Arc, Mutex},
+    time::Instant,
 };
+
+/// CPU samples and graceful-termination requests for orphan processes, kept between scans.
+#[derive(Default)]
+pub struct ProcessState {
+    pub samples: HashMap<ProcessIdentity, (u64, Instant)>,
+    pub requests: HashMap<ProcessIdentity, Instant>,
+}
 
 #[derive(Clone)]
 pub struct Services {

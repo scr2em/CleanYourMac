@@ -1,17 +1,16 @@
 //! Orphan-process classification adapted from the owner's MIT OrphanBar project; see
 //! THIRD_PARTY_NOTICES.md. Inspection and signals go through `ProcessInspector`.
-use crate::{model::*, policy, ports::*, services::Services};
+use crate::{
+    model::*,
+    policy,
+    ports::*,
+    services::{ProcessState, Services},
+};
 use std::{
     collections::{HashMap, HashSet},
     thread,
     time::{Duration, Instant},
 };
-
-#[derive(Default)]
-pub struct ProcessState {
-    samples: HashMap<ProcessIdentity, (u64, Instant)>,
-    requests: HashMap<ProcessIdentity, Instant>,
-}
 
 pub const SYSTEM_PREFIXES: &[&str] = &[
     "/System/",

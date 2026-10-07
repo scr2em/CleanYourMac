@@ -1,0 +1,10 @@
+[package]
+name = "cym-ports"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cym-model = { path = "../cym-model" }
+serde = { version = "1", features = ["derive"] }

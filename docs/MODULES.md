@@ -6,12 +6,12 @@ CleanYourMac uses compiled, trusted Rust modules. It does not load arbitrary bin
 
 | Path | Owns |
 | --- | --- |
-| `crates/cym-core/src/ports.rs` | Replaceable boundaries: filesystem, walker, sizer, hasher, commands, processes, apps, Trash, journal, sink |
-| `src/adapters/` | Default implementations of the ports |
-| `src/services.rs` | The adapter bundle plus scope, traversal and identity rules |
-| `src/modules/` | `ScanModule`, `Registry`, built-in modules |
-| `src/actions.rs`, `src/analytics.rs`, `src/policy.rs` | Shared executor, totals and path policy |
-| `src/ffi.rs`, `include/cym_core.h` | Versioned C ABI |
+| `crates/cym-ports/src/ports.rs` | Replaceable boundaries: filesystem, walker, sizer, hasher, commands, processes, apps, usage, Trash, journal, sink |
+| `crates/cym-adapters` | Default implementations of the ports |
+| `crates/cym-services` | The adapter bundle plus scope, traversal and identity rules |
+| `crates/cym-modules/src/modules/` | `ScanModule`, `Registry`, built-in modules |
+| `crates/cym-engine`, `crates/cym-store`, `crates/cym-model` | Executor, result store and totals, models and path policy |
+| `crates/cym-core/src/ffi.rs`, `crates/cym-core/include/cym_core.h` | Versioned C ABI |
 | `Sources/CleanYourMacCore` | Swift wire models and `CoreEngine` bridge |
 | `Sources/CleanYourMacDesignSystem`, `Sources/CleanYourMacUI` | Tokens, components and presentation only |
 

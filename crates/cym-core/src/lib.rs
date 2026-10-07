@@ -1,20 +1,9 @@
 //! CleanYourMac core: discovery modules, scope and identity policy, reviewed actions and
-//! analytics. Platform work goes through the replaceable traits in [`ports`]; default
-//! implementations live in [`adapters`] and are bundled by [`services::Services`].
-pub mod actions;
-pub mod adapters;
-pub mod analytics;
-pub mod engine;
-pub mod ffi;
-pub mod git;
-pub mod model;
-pub mod modules;
-pub mod orphans;
-pub mod policy;
-pub mod ports;
-pub mod results;
-pub mod services;
-pub mod simulator;
-
-pub use engine::Engine;
+//! analytics, split into layered crates so a change rebuilds only what depends on it. This
+//! crate re-exports them under one path and adds the C ABI and the `cym` CLI.
+pub use cym_engine::{
+    actions, adapters, analytics, engine, git, model, modules, orphans, policy, ports, results,
+    services, simulator, Engine,
+};
 pub use services::Services;
+pub mod ffi;

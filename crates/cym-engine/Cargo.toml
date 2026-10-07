@@ -1,17 +1,9 @@
 [package]
-name = "cym-core"
+name = "cym-engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-
-[lib]
-name = "cym_core"
-crate-type = ["rlib", "staticlib"]
-
-[[bin]]
-name = "cym"
-path = "src/bin/cym.rs"
 
 [dependencies]
 cym-model = { path = "../cym-model" }
@@ -20,10 +12,4 @@ cym-adapters = { path = "../cym-adapters" }
 cym-services = { path = "../cym-services" }
 cym-modules = { path = "../cym-modules" }
 cym-store = { path = "../cym-store" }
-cym-engine = { path = "../cym-engine" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
-[dev-dependencies]
 uuid = { version = "1", features = ["v4"] }
-libc = "0.2"

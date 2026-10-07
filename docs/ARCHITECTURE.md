@@ -9,9 +9,26 @@ SwiftUI views ── AppStore ── CoreEngine (Swift) ──C ABI (JSON)──
                                                                  └─ Services ── ports (traits) ── adapters
 ~~~
 
+## Crates
+
+The core is a Cargo workspace of layered crates, so a change rebuilds only its crate and the ones above it:
+
+| Crate | Owns | Depends on |
+| --- | --- | --- |
+| `cym-model` | Wire models, path and protection policy | — |
+| `cym-ports` | The replaceable traits | model |
+| `cym-adapters` | Standard-library, macOS (`macos.m`) and journal implementations | model, ports |
+| `cym-services` | The `Services` bundle, scope, traversal and identity rules | adapters |
+| `cym-modules` | `ScanModule`, the registry, built-in modules, Git, simctl and process logic | services |
+| `cym-store` | The result store, snapshots and totals | model |
+| `cym-engine` | Scan coordination and reviewed actions | modules, store |
+| `cym-core` | Re-exports everything as `cym_core::…`, the C ABI, the static library and the `cym` CLI | engine |
+
+Editing a module recompiles `cym-modules`, `cym-engine` and `cym-core`; models, ports and adapters stay cached.
+
 ## Ports and adapters
 
-Every platform dependency is a trait in `crates/cym-core/src/ports.rs`, and scanners, safety checks and actions use only those traits. Default implementations live in `src/adapters/` and are bundled by `Services` (`src/services.rs`). Replacing one is a one-line change and needs no edits to modules or policy:
+Every platform dependency is a trait in `crates/cym-ports/src/ports.rs`, and scanners, safety checks and actions use only those traits. Default implementations live in `crates/cym-adapters` and are bundled by `Services` (`crates/cym-services`). Replacing one is a one-line change and needs no edits to modules or policy:
 
 ~~~rust
 let services = Services { walker: Arc::new(JwalkWalker::default()), ..Services::native() };

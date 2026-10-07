@@ -86,7 +86,7 @@ impl Registry {
         Ok(report)
     }
 }
-pub(crate) fn run(
+pub fn run(
     module: &dyn ScanModule,
     services: &Services,
     context: &ScanContext,
@@ -101,14 +101,14 @@ pub(crate) fn run(
 }
 
 /// Removes duplicate finding IDs and bounds the result count for one module.
-pub(crate) struct Guard<'a> {
+pub struct Guard<'a> {
     inner: &'a mut dyn Sink,
     seen: HashSet<String>,
     limited: bool,
     limit: usize,
 }
 impl<'a> Guard<'a> {
-    pub(crate) fn new(inner: &'a mut dyn Sink, limit: usize) -> Self {
+    pub fn new(inner: &'a mut dyn Sink, limit: usize) -> Self {
         Self {
             inner,
             seen: HashSet::new(),
