@@ -208,3 +208,50 @@ fn cancelled_walk_stops() {
         .walk(&f.context(), &k, &mut vec![], &mut |_| Ok(true))
         .is_err());
 }
+
+#[test]
+fn prefetching_walker_visits_in_stack_order_and_honors_skip_and_stop() {
+    use cym_core::adapters::fs::{PrefetchWalker, StackWalker, StdFileSystem};
+    let f = Fixture::new();
+    for a in 0..6 {
+        for b in 0..5 {
+            f.write(&format!("d{a}/e{b}/file.txt"), "x");
+            f.write(&format!("d{a}/skip/e{b}/file.txt"), "x");
+        }
+    }
+    let files: Arc<dyn FileSystem> = Arc::new(StdFileSystem);
+    let pool = Arc::new(
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap(),
+    );
+    let walk = |walker: &dyn Walker, stop_after: usize| {
+        let mut seen = vec![];
+        walker
+            .walk(
+                &f.path(),
+                &ScanControl::default(),
+                &mut |e| panic!("{e}"),
+                &mut |e| {
+                    seen.push(e.path().to_owned());
+                    Ok(if seen.len() == stop_after {
+                        Visit::Stop
+                    } else if e.name() == "skip" {
+                        Visit::Skip
+                    } else {
+                        Visit::Descend
+                    })
+                },
+            )
+            .unwrap();
+        seen
+    };
+    let mut prefetch = PrefetchWalker::new(files.clone(), Some(pool));
+    prefetch.window = 3;
+    let expected = walk(&StackWalker(files.clone()), usize::MAX);
+    let seen = walk(&prefetch, usize::MAX);
+    assert_eq!(seen, expected);
+    assert!(!seen.iter().any(|p| p.contains("/skip/")));
+    assert_eq!(walk(&prefetch, 7), expected[..7]);
+}

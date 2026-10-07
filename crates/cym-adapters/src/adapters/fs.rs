@@ -7,8 +7,8 @@ use std::{
     fs,
     io::Read,
     sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc, Arc,
     },
 };
 
@@ -95,6 +95,130 @@ impl Walker for StackWalker {
                         stack.push(entry.identity.path)
                     }
                     _ => {}
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+type Listing = Result<Vec<Result<Entry>>>;
+
+/// A folder waiting to be listed, possibly already being read on the pool.
+enum Pending {
+    Queued(String),
+    Started {
+        path: String,
+        claimed: Arc<AtomicBool>,
+        listing: mpsc::Receiver<Listing>,
+    },
+}
+
+/// Depth-first traversal in exactly `StackWalker`'s order, with the folders nearest the top
+/// of the stack listed ahead of time on a thread pool. The visitor still runs on the calling
+/// thread, one entry at a time. Whoever claims a listing first reads it, so the walk never
+/// waits on a job that has not started, even when it runs on the same pool.
+pub struct PrefetchWalker {
+    pub fs: Arc<dyn FileSystem>,
+    pub pool: Option<Arc<rayon::ThreadPool>>,
+    /// How many folders at the top of the stack are read ahead.
+    pub window: usize,
+}
+impl PrefetchWalker {
+    pub fn new(fs: Arc<dyn FileSystem>, pool: Option<Arc<rayon::ThreadPool>>) -> Self {
+        Self {
+            fs,
+            pool,
+            window: 32,
+        }
+    }
+    fn start(&self, path: String) -> Pending {
+        let claimed = Arc::new(AtomicBool::new(false));
+        let (send, listing) = mpsc::sync_channel(1);
+        let (fs, job_path, job_claimed) = (self.fs.clone(), path.clone(), claimed.clone());
+        let job = move || {
+            if !job_claimed.swap(true, Ordering::AcqRel) {
+                let _ = send.send(fs.children(&job_path));
+            }
+        };
+        match &self.pool {
+            Some(pool) => pool.spawn(job),
+            None => rayon::spawn(job),
+        }
+        Pending::Started {
+            path,
+            claimed,
+            listing,
+        }
+    }
+    fn list(&self, pending: Pending) -> Listing {
+        match pending {
+            Pending::Queued(path) => self.fs.children(&path),
+            Pending::Started {
+                path,
+                claimed,
+                listing,
+            } => {
+                if claimed.swap(true, Ordering::AcqRel) {
+                    listing.recv().unwrap_or_else(|_| self.fs.children(&path))
+                } else {
+                    self.fs.children(&path)
+                }
+            }
+        }
+    }
+}
+/// Abandons queued reads when a walk ends early.
+struct Abandon(Vec<Pending>);
+impl Drop for Abandon {
+    fn drop(&mut self) {
+        for pending in &self.0 {
+            if let Pending::Started { claimed, .. } = pending {
+                claimed.store(true, Ordering::Release);
+            }
+        }
+    }
+}
+impl Walker for PrefetchWalker {
+    fn walk(
+        &self,
+        root: &str,
+        control: &ScanControl,
+        problem: &mut dyn FnMut(String),
+        visit: &mut dyn FnMut(&Entry) -> Result<Visit>,
+    ) -> Result<()> {
+        let mut stack = Abandon(vec![Pending::Queued(root.to_owned())]);
+        while let Some(pending) = stack.0.pop() {
+            control.check()?;
+            let children = match self.list(pending) {
+                Ok(children) => children,
+                Err(e) => {
+                    problem(e);
+                    continue;
+                }
+            };
+            for child in children {
+                control.check()?;
+                let entry = match child {
+                    Ok(entry) => entry,
+                    Err(e) => {
+                        problem(e);
+                        continue;
+                    }
+                };
+                match visit(&entry)? {
+                    Visit::Stop => return Ok(()),
+                    Visit::Descend if entry.directory && !entry.symlink => {
+                        stack.0.push(Pending::Queued(entry.identity.path))
+                    }
+                    _ => {}
+                }
+            }
+            // The next folders popped are the newest pushes; start reading them now.
+            let floor = stack.0.len().saturating_sub(self.window);
+            for slot in &mut stack.0[floor..] {
+                if let Pending::Queued(path) = slot {
+                    *slot = self.start(std::mem::take(path));
                 }
             }
         }

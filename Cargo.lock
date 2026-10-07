@@ -144,6 +144,7 @@ dependencies = [
  "cym-services",
  "cym-store",
  "libc",
+ "rayon",
  "serde",
  "serde_json",
  "uuid",

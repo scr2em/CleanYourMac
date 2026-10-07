@@ -38,7 +38,7 @@ let engine = Engine::new(services, modules::builtin());
 | Port | Default adapter | Notes |
 | --- | --- | --- |
 | `FileSystem` | `StdFileSystem` | `lstat` metadata, children, resolve, remove, rename |
-| `Walker` | `StackWalker` | Pure traversal; scope, exclusions, packages and limits are enforced by `Services::walk` |
+| `Walker` | `PrefetchWalker` | Depth-first, with the next folders listed ahead of time on the I/O pool; `StackWalker` is the sequential equivalent. Scope, exclusions, packages and limits are enforced by `Services::walk` |
 | `Sizer` | `MetadataSizer` | Parallel (rayon), hard links counted once, order-independent folder fingerprint |
 | `Hasher` | `Blake3Hasher` | `Sha256Hasher` is also provided; prefix hashing for staged duplicate detection |
 | `CommandRunner` | `SystemRunner` | Allow-listed tools, argument arrays, clean environment, own process group, deadline, bounded output |
