@@ -17,7 +17,7 @@ fn scan(f: &Fixture, id: &str) -> ScanReport {
 }
 
 #[test]
-fn node_finder_groups_nested_dependencies_and_requires_an_owner() {
+fn node_finder_lists_projects_and_skips_package_manager_folders() {
     let f = Fixture::new();
     f.write("app/package.json", "{}");
     f.write("app/pnpm-lock.yaml", "lockfileVersion: 9");
@@ -25,32 +25,40 @@ fn node_finder_groups_nested_dependencies_and_requires_an_owner() {
         "app/node_modules/dependency/node_modules/nested/index.js",
         "x",
     );
+    // No owning package.json: left out rather than listed blocked.
     f.write("unknown/node_modules/index.js", "x");
-    // pnpm's global virtual store: one node_modules per package, owned by pnpm.
-    f.write("pnpm/global/5/package.json", "{}");
-    f.write("pnpm/global/5/node_modules/tool/index.js", "x");
+    // Package managers' own folders, even where they look like projects.
+    f.write("Library/pnpm/global/5/package.json", "{}");
+    f.write("Library/pnpm/global/5/node_modules/tool/index.js", "x");
     f.write(
-        "pnpm/global/5/.pnpm/refractor@5.0.0/node_modules/refractor/index.js",
+        "Library/pnpm/global/5/.pnpm/marked@13.0.3/node_modules/marked/index.js",
         "x",
     );
+    f.write(".npm/_npx/272617f699a83097/package.json", "{}");
+    f.write(".npm/_npx/272617f699a83097/node_modules/x/index.js", "x");
+    f.write(".bun/install/global/package.json", "{}");
+    f.write(".bun/install/global/node_modules/x/index.js", "x");
     f.write(
-        "pnpm/global/5/.pnpm/marked@13.0.3/node_modules/marked/index.js",
+        ".nvm/versions/node/v22.0.0/lib/node_modules/npm/package.json",
+        "{}",
+    );
+    // A pnpm virtual store inside any project is pnpm's too.
+    f.write(
+        "store/.pnpm/refractor@5.0.0/node_modules/refractor/index.js",
         "x",
     );
-    let report = scan(&f, "node");
-    let mut titles: Vec<_> = report.findings.iter().map(|f| f.title.as_str()).collect();
-    titles.sort();
-    assert_eq!(titles, ["5", "app", "unknown"], "{:?}", report.warnings);
-    let app = report.findings.iter().find(|f| f.title == "app").unwrap();
+    let node = modules::developer::NodeModule {
+        home: Some(f.path()),
+        ..Default::default()
+    };
+    let engine = Engine::new(services(&f), modules::builtin().register(Arc::new(node)));
+    let report = engine.scan_report(&["node".into()], &f.context(), &ScanControl::default());
+    let titles: Vec<_> = report.findings.iter().map(|f| f.title.as_str()).collect();
+    assert_eq!(titles, ["app"], "{:?}", report.warnings);
+    let app = &report.findings[0];
     assert_eq!(app.actions, vec![ActionKind::Trash]);
     assert_eq!(app.value("Package manager"), Some("pnpm"));
-    let unknown = report
-        .findings
-        .iter()
-        .find(|f| f.title == "unknown")
-        .unwrap();
-    assert!(unknown.actions.is_empty());
-    assert!(unknown.blocked_reason.is_some());
+    assert!(app.blocked_reason.is_none());
 }
 
 #[test]

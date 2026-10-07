@@ -48,10 +48,41 @@ fn untracked(s: &Services, path: &str, k: &ScanControl) -> Result<()> {
 pub struct NodeModule {
     /// Package manager name and the lockfile that identifies it, in priority order.
     pub lockfiles: Vec<(&'static str, &'static str)>,
+    /// Package managers' own stores, caches and global installs, relative to the home
+    /// folder. Their `node_modules` belong to the tool, not a project, so they are not
+    /// searched; Caches & Logs and Toolchains & SDKs cover them.
+    pub tool_folders: Vec<&'static str>,
+    /// Folder names that are always a package manager's store, wherever they appear.
+    pub tool_folder_names: Vec<&'static str>,
+    /// The home folder `tool_folders` are relative to; the user's when `None`.
+    pub home: Option<String>,
 }
 impl Default for NodeModule {
     fn default() -> Self {
         Self {
+            tool_folders: vec![
+                ".npm",
+                ".pnpm-store",
+                ".bun",
+                ".yarn",
+                ".nvm",
+                ".fnm",
+                ".volta",
+                ".asdf",
+                ".cache/pnpm",
+                ".cache/yarn",
+                ".cache/node",
+                ".local/share/pnpm",
+                ".local/share/fnm",
+                ".local/share/mise",
+                "Library/pnpm",
+                "Library/Caches/pnpm",
+                "Library/Caches/Yarn",
+                "Library/Caches/node-gyp",
+                "Library/Application Support/fnm",
+            ],
+            tool_folder_names: vec![".pnpm", ".pnpm-store", "_cacache", "_npx"],
+            home: None,
             lockfiles: vec![
                 ("pnpm", "pnpm-lock.yaml"),
                 ("Yarn", "yarn.lock"),
@@ -94,23 +125,36 @@ impl ScanModule for NodeModule {
             }
             false
         });
+        let home = self.home.clone().unwrap_or_else(policy::home);
+        let tool_folders: Vec<String> = self
+            .tool_folders
+            .iter()
+            .map(|f| format!("{home}/{f}"))
+            .collect();
         let mut warnings = vec![];
         let walked = s.walk(&context, k, &mut warnings, &mut |e| {
-            if e.directory && e.name() == "node_modules" {
+            if !e.directory {
+                return Ok(true);
+            }
+            if e.name() == "node_modules" {
                 candidates.push(e.clone());
                 return Ok(false);
             }
-            // pnpm's virtual store holds one node_modules per package version with no owning
-            // project; they belong to pnpm (Caches & Logs offers `pnpm store prune`).
-            Ok(!(e.directory && e.name() == ".pnpm"))
+            // Package managers' stores and caches (pnpm's virtual store, npm's cache and npx
+            // folders, Bun's and Yarn's caches, version managers' global installs) hold
+            // node_modules that no project owns.
+            Ok(!self.tool_folder_names.contains(&e.name())
+                && !tool_folders.iter().any(|f| f == e.path()))
         });
         flush(sink, &mut warnings);
         walked?;
+        // A node_modules with no package.json beside it has no project to rebuild it from;
+        // it is left out rather than listed as an item nobody can act on.
         let candidates = candidates
             .into_iter()
+            .filter(|e| s.is_file(&format!("{}/package.json", parent(e.path()))))
             .map(|e| {
                 let project = parent(e.path());
-                let manifest = s.is_file(&format!("{project}/package.json"));
                 let manager = self
                     .lockfiles
                     .iter()
@@ -132,9 +176,6 @@ impl ScanModule for NodeModule {
                     detail("Package manager", manager),
                     detail("Artifact", "node_modules"),
                 ])
-                .blocked((!manifest).then_some(
-                    "No owning package.json. This directory needs manual inspection.",
-                ))
             })
             .collect();
         add_files(s, sink, "node", candidates, k)
