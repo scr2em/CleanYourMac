@@ -1,4 +1,4 @@
-use super::{add_files, descriptor, flush, Candidate, ScanModule};
+use super::{add_files, descriptor, flush, Candidate, LastUsed, ScanModule};
 use crate::{model::*, policy, ports::*, services::Services};
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -39,6 +39,7 @@ impl ScanModule for StorageModule {
                             vec![],
                             Risk::Review,
                         )
+                        .last_used(LastUsed::Spotlight)
                     }),
             );
         }
@@ -90,6 +91,7 @@ impl ScanModule for LargeFilesModule {
                 f.bytes = Some(e.bytes);
                 f.allocated_bytes = Some(e.allocated);
                 f.modified_at = Some(e.modified());
+                f.last_used_at = s.usage.last_used(e.path());
                 if !policy::protected(e.path()) {
                     f.actions.push(ActionKind::Trash);
                 }
@@ -243,6 +245,7 @@ impl ScanModule for DuplicatesModule {
                 f.bytes = Some(e.bytes);
                 f.allocated_bytes = Some(e.allocated);
                 f.modified_at = Some(e.modified());
+                f.last_used_at = s.usage.last_used(e.path());
                 f.details = vec![
                     detail("Preserved original", original.clone()),
                     detail("Group files", count.to_string()),
@@ -344,7 +347,10 @@ impl ScanModule for FolderModule {
             .children(&folder, &mut warnings)
             .into_iter()
             .filter(|e| c.allows(e.path()))
-            .map(|e| Candidate::new(e, self.reason, vec![self.action], self.risk))
+            .map(|e| {
+                Candidate::new(e, self.reason, vec![self.action], self.risk)
+                    .last_used(LastUsed::Spotlight)
+            })
             .collect();
         flush(sink, &mut warnings);
         add_files(s, sink, &self.descriptor.id, candidates, k)

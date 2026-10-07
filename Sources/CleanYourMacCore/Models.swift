@@ -135,6 +135,8 @@ public struct Finding: Identifiable, Codable, Hashable, Sendable {
     public var cpuPercent: Double?
     public var memoryBytes: UInt64?
     public var modifiedAt: Date?
+    /// When the item (or, for generated folders, its project) was last used.
+    public var lastUsedAt: Date?
     public var details: [Detail]
     public var actions: [ActionKind]
     public var risk: Risk
@@ -142,12 +144,12 @@ public struct Finding: Identifiable, Codable, Hashable, Sendable {
     public var blockedReason: String?
     public var badge: String?
     private enum CodingKeys: String, CodingKey {
-        case id, moduleID = "moduleId", title, subtitle, resource, bytes, allocatedBytes, cpuPercent, memoryBytes, modifiedAt, details, actions, risk, reason, blockedReason, badge
+        case id, moduleID = "moduleId", title, subtitle, resource, bytes, allocatedBytes, cpuPercent, memoryBytes, modifiedAt, lastUsedAt, details, actions, risk, reason, blockedReason, badge
     }
-    public init(id: String, moduleID: String, title: String, subtitle: String, resource: Resource, bytes: UInt64? = nil, allocatedBytes: UInt64? = nil, cpuPercent: Double? = nil, memoryBytes: UInt64? = nil, modifiedAt: Date? = nil, details: [Detail] = [], actions: [ActionKind] = [], risk: Risk = .review, reason: String, blockedReason: String? = nil, badge: String? = nil) {
+    public init(id: String, moduleID: String, title: String, subtitle: String, resource: Resource, bytes: UInt64? = nil, allocatedBytes: UInt64? = nil, cpuPercent: Double? = nil, memoryBytes: UInt64? = nil, modifiedAt: Date? = nil, lastUsedAt: Date? = nil, details: [Detail] = [], actions: [ActionKind] = [], risk: Risk = .review, reason: String, blockedReason: String? = nil, badge: String? = nil) {
         self.id = id; self.moduleID = moduleID; self.title = title; self.subtitle = subtitle; self.resource = resource
         self.bytes = bytes; self.allocatedBytes = allocatedBytes; self.cpuPercent = cpuPercent; self.memoryBytes = memoryBytes
-        self.modifiedAt = modifiedAt
+        self.modifiedAt = modifiedAt; self.lastUsedAt = lastUsedAt
         self.details = details; self.actions = actions; self.risk = risk; self.reason = reason; self.blockedReason = blockedReason; self.badge = badge
     }
     public func value(_ label: String) -> String? { details.first { $0.label == label }?.value }
@@ -234,17 +236,18 @@ public struct ResultRow: Identifiable, Codable, Hashable, Sendable {
     public let cpuPercent: Double?
     public let memoryBytes: UInt64?
     public let modifiedAt: Date?
+    public let lastUsedAt: Date?
     public let risk: Risk
     public let badge: String?
     public let blocked: Bool
     public let eligible: Bool
     public var isProcess: Bool { pid != nil }
     private enum CodingKeys: String, CodingKey {
-        case id, moduleID = "moduleId", title, subtitle, path, pid, bytes, allocatedBytes, cpuPercent, memoryBytes, modifiedAt, risk, badge, blocked, eligible
+        case id, moduleID = "moduleId", title, subtitle, path, pid, bytes, allocatedBytes, cpuPercent, memoryBytes, modifiedAt, lastUsedAt, risk, badge, blocked, eligible
     }
 }
 
-public enum ResultSort: String, Codable, Sendable { case size, name, cpu }
+public enum ResultSort: String, Codable, Sendable { case size, name, cpu, lastUsed }
 
 /// What a finder is looking at. The core filters and sorts; the app pages through the result.
 public struct ResultQuery: Codable, Hashable, Sendable {

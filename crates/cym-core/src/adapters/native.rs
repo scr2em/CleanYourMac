@@ -26,6 +26,7 @@ unsafe extern "C" {
     fn cym_inspect_process(pid: i32, out: *mut RawProcess) -> i32;
     fn cym_process_struct_size() -> usize;
     fn cym_native_apps() -> *mut libc::c_char;
+    fn cym_last_used(path: *const libc::c_char) -> f64;
     fn cym_native_trash(
         path: *const libc::c_char,
         failure: *mut *mut libc::c_char,
@@ -141,6 +142,21 @@ impl Applications for NativeApplications {
             identifier: value("CFBundleIdentifier"),
             version: value("CFBundleShortVersionString"),
         }
+    }
+}
+
+/// Spotlight's `kMDItemLastUsedDate`, the date Finder shows as "Last opened".
+pub struct SpotlightUsage;
+impl Usage for SpotlightUsage {
+    #[cfg(target_os = "macos")]
+    fn last_used(&self, path: &str) -> Option<f64> {
+        let path = std::ffi::CString::new(path).ok()?;
+        let seconds = unsafe { cym_last_used(path.as_ptr()) };
+        (seconds > 0.).then_some(seconds)
+    }
+    #[cfg(not(target_os = "macos"))]
+    fn last_used(&self, _: &str) -> Option<f64> {
+        None
     }
 }
 

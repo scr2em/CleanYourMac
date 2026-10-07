@@ -205,6 +205,11 @@ pub trait Applications: Send + Sync {
     fn bundle_info(&self, app_path: &str) -> BundleInfo;
 }
 
+/// When the user last opened an item, as Unix seconds, if the platform records it.
+pub trait Usage: Send + Sync {
+    fn last_used(&self, path: &str) -> Option<f64>;
+}
+
 /// Moves one item to the user's Trash and returns its new location.
 pub trait Trash: Send + Sync {
     fn move_to_trash(&self, path: &str) -> Result<String>;

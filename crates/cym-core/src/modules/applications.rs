@@ -1,4 +1,4 @@
-use super::{add_files, descriptor, flush, Candidate, ScanModule};
+use super::{add_files, descriptor, flush, Candidate, LastUsed, ScanModule};
 use crate::{model::*, policy, ports::*, services::Services};
 use rayon::prelude::*;
 
@@ -150,7 +150,8 @@ impl ScanModule for ApplicationsModule {
                         detail("State", if running { "Running" } else { "Not running" }),
                         detail("Application path", app_path),
                     ])
-                    .blocked(blocked),
+                    .blocked(blocked)
+                    .last_used(LastUsed::Spotlight),
                 );
             }
         }
@@ -232,7 +233,8 @@ impl ScanModule for LeftoversModule {
                         detail("Location type", directory),
                         detail("Classification", "Possible leftover; ownership is uncertain"),
                     ])
-                    .blocked(running.then_some("The owning application is running.")),
+                    .blocked(running.then_some("The owning application is running."))
+                    .last_used(LastUsed::Spotlight),
                 );
             }
         }

@@ -94,7 +94,7 @@ private struct ResultCell: View {
                 title: row.title,
                 subtitle: (row.subtitle as NSString).abbreviatingWithTildeInPath,
                 value: Display.value(row),
-                badge: row.badge ?? (row.blocked ? "Inspect" : row.risk.rawValue),
+                badge: [row.badge ?? (row.blocked ? "Inspect" : row.risk.rawValue), Display.lastUsed(row.lastUsedAt)].compactMap { $0 }.joined(separator: " · "),
                 symbol: symbol,
                 active: store.inspectedID == row.id,
                 eligible: row.eligible && !store.isApplying,

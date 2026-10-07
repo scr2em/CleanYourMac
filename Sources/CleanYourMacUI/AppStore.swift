@@ -11,8 +11,8 @@ public struct ReviewDraft: Identifiable {
     public let selection: SelectionSummary
 }
 public enum SortOrder: String, CaseIterable {
-    case size = "Size", name = "Name", cpu = "CPU"
-    var core: ResultSort { switch self { case .size: .size; case .name: .name; case .cpu: .cpu } }
+    case size = "Size", name = "Name", lastUsed = "Last used", cpu = "CPU"
+    var core: ResultSort { switch self { case .size: .size; case .name: .name; case .lastUsed: .lastUsed; case .cpu: .cpu } }
 }
 public enum SizeFilter: String, CaseIterable {
     case all = "Any size", large = "100 MB+", huge = "1 GB+"
@@ -52,8 +52,9 @@ public final class AppStore {
     /// The full finding behind `inspectedID`, fetched from the core on demand.
     public private(set) var inspected: Finding?
     public var search = ""
-    /// Size and CPU start largest first and Name starts A–Z; the direction can then be flipped.
-    public var sort: SortOrder = .size { didSet { if sort != oldValue { sortAscending = sort == .name } } }
+    /// Size and CPU start largest first, Name starts A–Z and Last used starts with the least
+    /// recently used; the direction can then be flipped.
+    public var sort: SortOrder = .size { didSet { if sort != oldValue { sortAscending = sort == .name || sort == .lastUsed } } }
     public var sortAscending = false
     public var sizeFilter: SizeFilter = .all
     public var ageFilter: AgeFilter = .all
@@ -405,6 +406,10 @@ public enum Display {
     public static func bytes(_ bytes: UInt64?) -> String {
         guard let bytes else { return "Unavailable" }
         return ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
+    }
+    /// "used 3 months ago", for row badges.
+    public static func lastUsed(_ date: Date?) -> String? {
+        date.map { "used " + $0.formatted(.relative(presentation: .named)) }
     }
     public static func value(_ row: ResultRow) -> String {
         if row.isProcess {

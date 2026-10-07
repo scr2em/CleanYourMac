@@ -106,6 +106,9 @@ pub struct Finding {
     pub cpu_percent: Option<f64>,
     pub memory_bytes: Option<u64>,
     pub modified_at: Option<f64>,
+    /// When the item (or, for generated folders, its project) was last used, in Unix seconds.
+    #[serde(default)]
+    pub last_used_at: Option<f64>,
     pub details: Vec<Detail>,
     pub actions: Vec<ActionKind>,
     pub risk: Risk,
@@ -126,6 +129,7 @@ impl Finding {
             cpu_percent: None,
             memory_bytes: None,
             modified_at: None,
+            last_used_at: None,
             details: vec![],
             actions: vec![],
             risk: Risk::Review,

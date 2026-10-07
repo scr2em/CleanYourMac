@@ -143,6 +143,46 @@ pub(crate) fn flush(sink: &mut dyn Sink, warnings: &mut Vec<String>) {
         sink.warning(warning);
     }
 }
+/// Where a candidate's "last used" date comes from.
+#[derive(Clone, Default)]
+pub(crate) enum LastUsed {
+    #[default]
+    Unknown,
+    /// Finder's "Last opened" date from Spotlight.
+    Spotlight,
+    /// The newest change among a project's own files, ignoring generated folders.
+    Project {
+        folder: String,
+    },
+    At(f64),
+}
+impl LastUsed {
+    fn resolve(&self, s: &Services, path: &str) -> Option<(f64, &'static str)> {
+        match self {
+            Self::Unknown => None,
+            Self::Spotlight => s.usage.last_used(path).map(|t| (t, "Finder “Last opened”")),
+            Self::Project { folder } => {
+                project_activity(s, folder).map(|t| (t, "Newest change to project files"))
+            }
+            Self::At(t) => Some((*t, "Recorded by the owning tool")),
+        }
+    }
+}
+/// The newest modification among a project's immediate entries, skipping generated and
+/// dependency folders whose timestamps change on every build.
+pub(crate) fn project_activity(s: &Services, folder: &str) -> Option<f64> {
+    s.fs.children(folder)
+        .ok()?
+        .into_iter()
+        .flatten()
+        .filter(|e| {
+            let name = e.name().to_lowercase();
+            !crate::policy::DUPLICATE_IGNORES.contains(&name.as_str()) || name == ".git"
+        })
+        .map(|e| e.modified())
+        .reduce(f64::max)
+}
+
 /// One item to size and report.
 pub(crate) struct Candidate {
     pub entry: Entry,
@@ -153,6 +193,7 @@ pub(crate) struct Candidate {
     pub details: Vec<Detail>,
     /// Overrides the generic blocked reason; callers pass no actions when set.
     pub blocked: Option<String>,
+    pub last_used: LastUsed,
 }
 impl Candidate {
     pub fn new(entry: Entry, reason: &str, actions: Vec<ActionKind>, risk: Risk) -> Self {
@@ -164,7 +205,12 @@ impl Candidate {
             risk,
             details: vec![],
             blocked: None,
+            last_used: LastUsed::Unknown,
         }
+    }
+    pub fn last_used(mut self, source: LastUsed) -> Self {
+        self.last_used = source;
+        self
     }
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
@@ -211,14 +257,19 @@ pub(crate) fn add_files(
                 c.risk,
                 control,
             );
-            (c.entry.identity.path, c.details, c.blocked, row)
+            let used = c.last_used.resolve(services, c.entry.path());
+            (c.entry.identity.path, c.details, c.blocked, used, row)
         })
         .collect();
     control.check()?;
-    for (path, details, blocked, row) in rows {
+    for (path, details, blocked, used, row) in rows {
         match row {
             Ok(mut f) => {
                 f.details.extend(details);
+                if let Some((at, source)) = used {
+                    f.last_used_at = Some(at);
+                    f.details.push(detail("Last used from", source));
+                }
                 if blocked.is_some() {
                     f.blocked_reason = blocked;
                 }

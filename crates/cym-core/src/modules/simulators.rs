@@ -47,6 +47,10 @@ impl ScanModule for SimulatorModule {
                     "Device data includes installed apps, settings and test documents. Reset or delete cannot be undone.",
                 );
                 f.subtitle = runtime.clone();
+                f.last_used_at = device
+                    .last_booted_at
+                    .as_deref()
+                    .and_then(crate::simulator::parse_timestamp);
                 f.bytes = size.as_ref().map(|s| s.logical);
                 f.allocated_bytes = size.map(|s| s.allocated);
                 f.risk = Risk::Permanent;

@@ -102,6 +102,7 @@ impl WorktreeModule {
             f.bytes = in_scope.then_some(size.logical);
             f.allocated_bytes = in_scope.then_some(size.allocated);
             f.modified_at = Some(e.modified());
+            f.last_used_at = git.last_commit(&record.path, k);
             f.risk = Risk::Permanent;
             f.subtitle = format!("{} · {}", head_label(&record), record.path);
             f.badge = Some(state_badge(&record).into());

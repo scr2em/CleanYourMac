@@ -207,6 +207,7 @@ private struct FinderView: View {
         switch store.sort {
         case .name: store.sortAscending ? "Sorted A to Z; switch to Z to A" : "Sorted Z to A; switch to A to Z"
         case .size, .cpu: store.sortAscending ? "Smallest first; switch to largest first" : "Largest first; switch to smallest first"
+        case .lastUsed: store.sortAscending ? "Least recently used first; switch to most recent first" : "Most recently used first; switch to least recent first"
         }
     }
 }
@@ -306,6 +307,7 @@ private struct InspectorView: View {
                     if let bytes = finding.bytes { KeyValueRow("Logical size", Display.bytes(bytes)) }
                     if let allocated = finding.allocatedBytes { KeyValueRow("Allocated size estimate", Display.bytes(allocated)) }
                     if let modified = finding.modifiedAt { KeyValueRow("Last modified", modified.formatted()) }
+                    if let used = finding.lastUsedAt { KeyValueRow("Last used", used.formatted() + " · " + used.formatted(.relative(presentation: .named))) }
                     if let memory = finding.memoryBytes { KeyValueRow("Memory footprint", Display.bytes(memory)) }
                     if let path = finding.resource.path { KeyValueRow("Path", path) }
                     ForEach(Array(finding.details.enumerated()), id: \.offset) { _, detail in KeyValueRow(detail.label, detail.value) }

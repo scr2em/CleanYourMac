@@ -48,6 +48,8 @@ pub enum SortKey {
     Size,
     Name,
     Cpu,
+    /// Least recently used first when ascending; items without a date always sort last.
+    LastUsed,
 }
 /// What the UI is looking at: a module (or all modules), a search, filters and an order.
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -77,6 +79,7 @@ pub struct Row {
     pub cpu_percent: Option<f64>,
     pub memory_bytes: Option<u64>,
     pub modified_at: Option<f64>,
+    pub last_used_at: Option<f64>,
     pub risk: Risk,
     pub badge: Option<String>,
     pub blocked: bool,
@@ -99,6 +102,7 @@ impl From<&Finding> for Row {
             cpu_percent: f.cpu_percent,
             memory_bytes: f.memory_bytes,
             modified_at: f.modified_at,
+            last_used_at: f.last_used_at,
             risk: f.risk,
             badge: f.badge.clone(),
             blocked: f.blocked_reason.is_some(),
@@ -377,7 +381,24 @@ impl ResultStore {
             Err(_) => vec![],
         };
         let compare = |a: &Arc<Finding>, b: &Arc<Finding>| {
+            if q.sort == SortKey::LastUsed {
+                let order = match (a.last_used_at, b.last_used_at) {
+                    (Some(x), Some(y)) => {
+                        let order = x.total_cmp(&y);
+                        if q.ascending {
+                            order
+                        } else {
+                            order.reverse()
+                        }
+                    }
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => Ordering::Equal,
+                };
+                return order.then_with(|| a.id.cmp(&b.id));
+            }
             let order = match q.sort {
+                SortKey::LastUsed => Ordering::Equal,
                 SortKey::Size => a
                     .bytes
                     .or(a.memory_bytes)

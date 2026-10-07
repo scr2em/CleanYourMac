@@ -11,6 +11,7 @@ pub struct Device {
     pub state: String,
     pub is_available: Option<bool>,
     pub data_path: Option<String>,
+    pub last_booted_at: Option<String>,
 }
 impl Device {
     pub fn data_path(&self) -> String {
@@ -36,6 +37,27 @@ pub struct Runtime {
 pub struct Inventory {
     pub devices: BTreeMap<String, Vec<Device>>,
     pub runtimes: Vec<Runtime>,
+}
+
+/// Parses simctl's UTC timestamps (`2025-01-15T09:41:12Z`, optionally with fractions).
+pub fn parse_timestamp(text: &str) -> Option<f64> {
+    let (date, time) = text.trim_end_matches('Z').split_once('T')?;
+    let mut d = date.splitn(3, '-').map(|p| p.parse::<i64>().ok());
+    let (year, month, day) = (d.next()??, d.next()??, d.next()??);
+    let mut t = time.splitn(3, ':');
+    let (hour, minute) = (
+        t.next()?.parse::<i64>().ok()?,
+        t.next()?.parse::<i64>().ok()?,
+    );
+    let second = t.next()?.parse::<f64>().ok()?;
+    // Days from civil (Howard Hinnant's algorithm).
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some((days * 86_400 + hour * 3_600 + minute * 60) as f64 + second)
 }
 
 pub struct Simctl<'a>(pub &'a dyn CommandRunner);

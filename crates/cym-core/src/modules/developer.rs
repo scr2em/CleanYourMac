@@ -1,4 +1,4 @@
-use super::{add_files, descriptor, flush, Candidate, ScanModule};
+use super::{add_files, descriptor, flush, Candidate, LastUsed, ScanModule};
 use crate::{git::Git, model::*, orphans, policy, ports::*, services::Services};
 use std::path::Path;
 
@@ -120,6 +120,9 @@ impl ScanModule for NodeModule {
                     Risk::Rebuild,
                 )
                 .title(name(&project))
+                .last_used(LastUsed::Project {
+                    folder: project.clone(),
+                })
                 .details(vec![
                     detail("Project", project.clone()),
                     detail("Package manager", manager),
@@ -235,12 +238,14 @@ impl ScanModule for ArtifactsModule {
         let candidates = candidates
             .into_iter()
             .map(|(e, rule)| {
+                let project = parent(e.path());
                 Candidate::new(
                     e,
                     &format!("{rule}. Rebuilding requires the project's tools and dependencies."),
                     vec![ActionKind::Trash],
                     Risk::Rebuild,
                 )
+                .last_used(LastUsed::Project { folder: project })
             })
             .collect();
         add_files(s, sink, "artifacts", candidates, k)
@@ -250,6 +255,16 @@ impl ScanModule for ArtifactsModule {
         active_project_tools(s, &parent(path))?;
         untracked(s, path, k)
     }
+}
+
+/// Xcode records when it last opened each DerivedData folder in its `info.plist`.
+fn derived_data_accessed(folder: &str) -> Option<f64> {
+    let info = plist::Value::from_file(Path::new(folder).join("info.plist")).ok()?;
+    let date = info.as_dictionary()?.get("LastAccessedDate")?.as_date()?;
+    std::time::SystemTime::from(date)
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs_f64())
 }
 
 pub struct XcodeModule;
@@ -301,12 +316,14 @@ impl ScanModule for XcodeModule {
                         Risk::Review,
                     )
                 } else {
+                    let accessed = derived_data_accessed(e.path());
                     Candidate::new(
                         e,
                         "Xcode regenerates this build or device-support data when needed.",
                         vec![ActionKind::Trash],
                         Risk::Rebuild,
                     )
+                    .last_used(accessed.map_or(LastUsed::Unknown, LastUsed::At))
                 });
             }
         }

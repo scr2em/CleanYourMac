@@ -175,3 +175,70 @@ fn one_million_rows_stay_interactive() {
     assert!(search.as_secs_f64() < 3.0);
     assert!(paging.as_millis() < 50);
 }
+
+#[test]
+fn last_used_sorts_dated_rows_first_in_either_direction() {
+    let store = ResultStore::default();
+    let mut rows = synthetic(4);
+    rows[0].last_used_at = Some(300.0);
+    rows[1].last_used_at = None;
+    rows[2].last_used_at = Some(100.0);
+    rows[3].last_used_at = Some(200.0);
+    let ids: Vec<String> = rows.iter().map(|f| f.id.clone()).collect();
+    store.insert(rows);
+    let order = |ascending| {
+        store
+            .query(&Query {
+                sort: SortKey::LastUsed,
+                ascending,
+                ..Default::default()
+            })
+            .page(0, 4)
+            .into_iter()
+            .map(|r| r.id)
+            .collect::<Vec<_>>()
+    };
+    let pick = |i: [usize; 4]| i.map(|i| ids[i].clone()).to_vec();
+    assert_eq!(order(true), pick([2, 3, 0, 1]));
+    assert_eq!(order(false), pick([0, 3, 2, 1]));
+}
+
+#[test]
+fn simulator_timestamps_parse_as_utc() {
+    use cym_core::simulator::parse_timestamp;
+    assert_eq!(parse_timestamp("1970-01-01T00:00:00Z"), Some(0.0));
+    assert_eq!(
+        parse_timestamp("2025-01-15T09:41:12Z"),
+        Some(1_736_934_072.0)
+    );
+    assert_eq!(
+        parse_timestamp("2024-02-29T12:00:00.5Z"),
+        Some(1_709_208_000.5)
+    );
+    assert_eq!(parse_timestamp("not a date"), None);
+}
+
+#[test]
+fn node_findings_report_project_activity_as_last_used() {
+    let f = Fixture::new();
+    f.write("app/package.json", "{}");
+    f.write("app/node_modules/x/index.js", "x");
+    let report = Engine::new(services(&f), modules::builtin()).scan_report(
+        &["node".into()],
+        &f.context(),
+        &ScanControl::default(),
+    );
+    let row = &report.findings[0];
+    let manifest = fs::metadata(f.at("app/package.json")).unwrap();
+    let expected = manifest
+        .modified()
+        .unwrap()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64();
+    assert!((row.last_used_at.unwrap() - expected).abs() < 1.0);
+    assert_eq!(
+        row.value("Last used from"),
+        Some("Newest change to project files")
+    );
+}

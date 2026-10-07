@@ -70,3 +70,20 @@ char *cym_native_trash(const char *path, char **failure) {
         return strdup(result.path.UTF8String);
     }
 }
+#import <CoreServices/CoreServices.h>
+// Finder's "Last opened" (kMDItemLastUsedDate) as Unix seconds, or -1 when Spotlight has none.
+double cym_last_used(const char *path) {
+    @autoreleasepool {
+        NSString *string = [[NSString alloc] initWithUTF8String:path];
+        if (!string) return -1;
+        MDItemRef item = MDItemCreate(kCFAllocatorDefault, (__bridge CFStringRef)string);
+        if (!item) return -1;
+        CFTypeRef value = MDItemCopyAttribute(item, kMDItemLastUsedDate);
+        CFRelease(item);
+        if (!value) return -1;
+        double seconds = -1;
+        if (CFGetTypeID(value) == CFDateGetTypeID()) seconds = CFDateGetAbsoluteTime((CFDateRef)value) + kCFAbsoluteTimeIntervalSince1970;
+        CFRelease(value);
+        return seconds;
+    }
+}

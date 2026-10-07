@@ -164,6 +164,15 @@ impl Git<'_> {
             upstream,
         })
     }
+    /// Unix time of the checked-out commit, the worktree's last activity Git can vouch for.
+    pub fn last_commit(&self, worktree: &str, control: &ScanControl) -> Option<f64> {
+        let out = self
+            .run(worktree, &["log", "-1", "--format=%ct"], control)
+            .ok()?;
+        (out.status == 0)
+            .then(|| out.text().trim().parse().ok())
+            .flatten()
+    }
     /// Whether Git tracks anything at or below `path`.
     pub fn tracks(&self, directory: &str, path: &str, control: &ScanControl) -> Result<bool> {
         let out = self.run(directory, &["ls-files", "-z", "--", path], control)?;

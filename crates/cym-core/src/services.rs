@@ -27,6 +27,7 @@ pub struct Services {
     pub processes: Arc<dyn ProcessInspector>,
     pub apps: Arc<dyn Applications>,
     pub trash: Arc<dyn Trash>,
+    pub usage: Arc<dyn Usage>,
     pub journal: Arc<dyn Journal>,
     /// CPU samples and graceful-termination requests shared across orphan refreshes.
     pub process_state: Arc<Mutex<ProcessState>>,
@@ -52,6 +53,7 @@ impl Services {
             processes: Arc::new(native::LibprocInspector),
             apps: Arc::new(native::NativeApplications),
             trash: Arc::new(native::NativeTrash),
+            usage: Arc::new(native::SpotlightUsage),
             journal,
             process_state: Default::default(),
             walk_limit: 20_000_000,
