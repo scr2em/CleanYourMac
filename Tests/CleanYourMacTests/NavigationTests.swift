@@ -3,6 +3,10 @@ import CleanYourMacUI
 import Foundation
 import Testing
 
+@MainActor private func waitForScan(_ store: AppStore) async throws {
+    for _ in 0..<500 where store.isScanning { try await Task.sleep(for: .milliseconds(10)) }
+}
+
 @MainActor @Test func unscannedToolNeverInheritsAnotherToolsCompletion() async throws {
     let fixture = try Fixture(); defer { fixture.clean() }
     try fixture.write("app/package.json", "{}")
@@ -12,35 +16,62 @@ import Testing
     store.roots = [fixture.path]
     store.selectedModuleID = "node"
     store.scan()
-    for _ in 0..<200 where store.isScanning { try await Task.sleep(for: .milliseconds(10)) }
+    try await waitForScan(store)
     #expect(!store.isScanning)
     #expect(store.progress == "Scan complete")
-    #expect(store.visibleFindings.count == 1)
-    store.selectedIDs = Set(store.visibleFindings.map(\.id))
+    await store.requery()
+    #expect(store.resultTotal == 1)
+    let row = try #require(await store.rows(0..<1).first)
+    #expect(row.moduleID == "node")
+    store.selectedIDs = [row.id]
     store.selectedModuleID = "simulators"
     #expect(store.progress == "Ready · scan this tool")
     #expect(store.selectedIDs.isEmpty)
-    #expect(store.visibleFindings.isEmpty)
+    await store.requery()
+    #expect(store.resultTotal == 0)
     store.selectedModuleID = "node"
     #expect(store.progress == "Scan complete")
-    #expect(store.visibleFindings.count == 1)
+    await store.requery()
+    #expect(store.resultTotal == 1)
 }
 
-@MainActor @Test func sortDirectionAndSearchSummaryFollowTheVisibleRows() async throws {
+@MainActor @Test func sortDirectionAndSearchSummaryFollowTheQuery() async throws {
     let defaults = try #require(UserDefaults(suiteName: "org.cleanyourmac.test." + UUID().uuidString))
-    let store = AppStore(demo: true, defaults: defaults)
+    let store = AppStore(demo: true, defaults: defaults, core: CoreEngine())
     #expect(store.selectedModuleID == "node")
-    #expect(store.visibleFindings.map(\.id) == ["demo-node", "demo-node-2"])
+    await store.requery()
+    #expect(await store.rows(0..<2).map(\.id) == ["demo-node", "demo-node-2"])
     store.sortAscending = true
-    #expect(store.visibleFindings.map(\.id) == ["demo-node-2", "demo-node"])
+    await store.requery()
+    #expect(await store.rows(0..<2).map(\.id) == ["demo-node-2", "demo-node"])
     store.sort = .name
     #expect(store.sortAscending)
-    #expect(store.visibleFindings.map(\.title) == ["dashboard", "landing-page"])
-    store.sortAscending = false
-    #expect(store.visibleFindings.map(\.title) == ["landing-page", "dashboard"])
+    await store.requery()
+    #expect(await store.rows(0..<2).map(\.title) == ["dashboard", "landing-page"])
     store.search = "landing"
-    await store.refreshSummary()
-    #expect(store.summary.findings == 1)
+    await store.requery()
+    #expect(store.resultTotal == 1)
     #expect(store.summary.diskBytes == 864_000_000)
     #expect(store.summary.reclaimableBytes == 864_000_000)
+    store.selectedIDs = ["demo-node", "demo-node-2"]
+    await store.refreshSelection()
+    #expect(store.selection.count == 2)
+    #expect(store.availableActions == [.trash])
+}
+
+@MainActor @Test func pagesLoadOnDemandForLargeResultSets() async throws {
+    let defaults = try #require(UserDefaults(suiteName: "org.cleanyourmac.test." + UUID().uuidString))
+    let store = AppStore(demo: true, demoRows: 50_000, defaults: defaults, core: CoreEngine())
+    #expect(store.selectedModuleID == "large")
+    await store.requery()
+    #expect(store.resultTotal == 10_000)
+    #expect(store.row(at: 9_999) == nil)
+    store.prefetch(9_999)
+    for _ in 0..<200 where store.row(at: 9_999) == nil { try await Task.sleep(for: .milliseconds(10)) }
+    #expect(store.row(at: 9_999) != nil)
+    #expect(store.row(at: 0) == nil)
+    store.selectedModuleID = "overview"
+    await store.requery()
+    #expect(store.resultTotal == 50_000)
+    #expect(store.overview.findings == 50_000)
 }

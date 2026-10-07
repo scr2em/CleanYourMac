@@ -33,7 +33,7 @@ public struct WorkspaceView: View {
         .alert("Attention needed", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             Button("OK") { store.error = nil }
         } message: { Text(store.error ?? "") }
-        .task { if !store.demo { await store.loadHistory() } }
+        .task { if !store.demo { await store.loadHistory() }; await store.refreshOverview() }
         .task(id: store.selectedModuleID) {
             if store.selectedModuleID == "orphans" {
                 while !Task.isCancelled {
@@ -80,9 +80,9 @@ private struct OverviewView: View {
             VStack(alignment: .leading, spacing: Space.xl) {
                 PageHeader("Your Mac, with room to work", subtitle: "Inspect storage and developer clutter. Every removal starts with your selection.")
                 HStack {
-                    MetricTile("Scan results", value: String(store.findings.count), detail: "Across enabled modules")
-                    MetricTile("Ready to review", value: Display.bytes(store.analytics.reclaimableBytes), detail: "Eligible items, overlaps counted once")
-                    MetricTile("Found on disk", value: Display.bytes(store.analytics.diskBytes), detail: "Logical size of scanned items")
+                    MetricTile("Scan results", value: store.overview.findings.formatted(), detail: "Across enabled modules")
+                    MetricTile("Ready to review", value: Display.bytes(store.overview.reclaimableBytes), detail: "Eligible items, overlaps counted once")
+                    MetricTile("Found on disk", value: Display.bytes(store.overview.diskBytes), detail: "Logical size of scanned items")
                     MetricTile("Root folders", value: String(store.roots.count), detail: "Chosen by you")
                 }
                 ScopeView(store: store, usesRoots: true)
@@ -104,7 +104,7 @@ private struct OverviewView: View {
                                             Text(module.summary).font(TypeStyle.secondary).foregroundStyle(.secondary)
                                         }
                                         Spacer()
-                                        Text(String(store.findings.filter { $0.moduleID == module.id }.count)).font(TypeStyle.body).monospacedDigit()
+                                        Text(store.count(for: module.id).formatted()).font(TypeStyle.numeric)
                                         Image(systemName: "chevron.right").foregroundStyle(.secondary)
                                     }
                                 }
@@ -113,6 +113,11 @@ private struct OverviewView: View {
                     }
                 }
             }.padding(Space.xl)
+        }
+        .task(id: store.storeVersion) {
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            await store.refreshOverview()
         }
     }
 }
@@ -177,40 +182,22 @@ private struct FinderView: View {
                     Spacer()
                 }
                 WarningView(store: store)
-                if store.selectedModuleID == "storage", !store.visibleFindings.isEmpty {
+                if store.selectedModuleID == "storage", !store.largest.isEmpty {
                     Panel {
                         VStack(alignment: .leading, spacing: Space.md) {
                             Text("Largest items · logical size in this folder").font(TypeStyle.caption).foregroundStyle(.secondary)
-                            ForEach(store.visibleFindings.sorted { ($0.bytes ?? 0) > ($1.bytes ?? 0) }.prefix(5)) { finding in
-                                StorageBar(finding.title, value: Display.bytes(finding.bytes), fraction: store.diskBytes > 0 ? Double(finding.bytes ?? 0) / Double(store.diskBytes) : 0)
+                            ForEach(store.largest) { row in
+                                StorageBar(row.title, value: Display.bytes(row.bytes), fraction: store.summary.diskBytes > 0 ? Double(row.bytes ?? 0) / Double(store.summary.diskBytes) : 0)
                             }
                         }
                     }
                 }
             }.padding(Space.xl)
             Divider()
-            if store.visibleFindings.isEmpty {
+            if store.resultTotal == 0 {
                 EmptyState(store.isScanning ? "Looking for items…" : "No results to show", message: store.isScanning ? "Results appear as the scan progresses." : "Scan this tool or adjust your roots and search. Review warnings for incomplete coverage.", symbol: store.currentModule?.symbol ?? "tray")
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(store.visibleFindings) { finding in
-                            ResultRow(title: finding.title, subtitle: (finding.subtitle as NSString).abbreviatingWithTildeInPath, value: Display.value(finding), badge: finding.badge ?? (finding.blockedReason == nil ? finding.risk.rawValue : "Inspect"), symbol: store.currentModule?.symbol ?? "doc", active: store.inspectedID == finding.id, eligible: !finding.actions.isEmpty && finding.blockedReason == nil && !store.isApplying, checked: Binding(get: { store.selectedIDs.contains(finding.id) }, set: { store.select(finding.id, checked: $0) })) {
-                                store.inspectedID = finding.id
-                            }
-                            .contextMenu {
-                                Button("Reveal in Finder") { store.reveal(finding) }
-                                Button("Copy Path") { copy(finding.resource.path ?? finding.subtitle) }
-                                if case .process(let identity) = finding.resource {
-                                    Button("Copy PID") { copy(String(identity.pid)) }
-                                    Button("Copy Command") { copy(finding.details.first { $0.label == "Command" }?.value ?? "") }
-                                    Button("Ignore Process Name") { store.ignore(finding) }
-                                } else { Button("Protect Path") { store.protect(finding) } }
-                            }
-                            Divider().padding(.leading, Space.lg)
-                        }
-                    }
-                }
+                ResultsTable(store: store, symbol: store.currentModule?.symbol ?? "doc")
             }
             Divider()
             SelectionFooter(store: store)
@@ -222,14 +209,12 @@ private struct FinderView: View {
         case .size, .cpu: store.sortAscending ? "Smallest first; switch to largest first" : "Largest first; switch to smallest first"
         }
     }
-    private func copy(_ value: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string) }
 }
 
 /// Aggregate figures for the rows matching the current search and filters.
 private struct SearchSummary: View {
     @Bindable var store: AppStore
     var body: some View {
-        let rows = store.visibleFindings
         let summary = store.summary
         VStack(alignment: .leading, spacing: Space.xs) {
             if !store.search.isEmpty {
@@ -237,29 +222,27 @@ private struct SearchSummary: View {
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Space.sm) {
-                    StatChip(rows.count == 1 ? "Item" : "Items", value: rows.count.formatted())
+                    StatChip(store.resultTotal == 1 ? "Item" : "Items", value: store.resultTotal.formatted())
                     if summary.processCount > 0 {
                         StatChip("Memory", value: Display.bytes(summary.processMemoryBytes))
-                        if let busiest = rows.compactMap(\.cpuPercent).max() {
-                            StatChip("Highest CPU", value: String(format: "%.1f%%", busiest))
-                        }
+                        if let busiest = store.maxCPU { StatChip("Highest CPU", value: String(format: "%.1f%%", busiest)) }
                     } else {
                         StatChip("Total size", value: Display.bytes(summary.diskBytes))
                         StatChip("Ready to review", value: Display.bytes(summary.reclaimableBytes), emphasized: summary.reclaimableBytes > 0)
-                        if let largest = rows.max(by: { ($0.bytes ?? 0) < ($1.bytes ?? 0) }), let bytes = largest.bytes, bytes > 0 {
+                        if let largest = store.largest.first, let bytes = largest.bytes, bytes > 0 {
                             StatChip("Largest · " + largest.title, value: Display.bytes(bytes))
                         }
                     }
                     if summary.blocked > 0 { StatChip("Needs inspection", value: summary.blocked.formatted()) }
-                    if store.selectedIDs.count > 0 { StatChip("Selected", value: store.selectedIDs.count.formatted()) }
+                    if !store.selectedIDs.isEmpty { StatChip("Selected", value: store.selectedIDs.count.formatted()) }
                 }
             }
         }
-        .task(id: store.summaryKey) {
-            // Debounce typing and streaming results before asking the core for totals.
+        .task(id: store.queryKey) {
+            // Debounce typing and streamed results before asking the core for a new snapshot.
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }
-            await store.refreshSummary()
+            await store.requery()
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Search summary")
@@ -287,7 +270,7 @@ private struct SelectionFooter: View {
     var body: some View {
         HStack(spacing: Space.md) {
             VStack(alignment: .leading, spacing: Space.xs) {
-                Text("\(store.selectedIDs.count) selected").font(TypeStyle.sectionTitle)
+                Text("\(store.selectedIDs.count.formatted()) selected").font(TypeStyle.sectionTitle)
                 Text(summary).font(TypeStyle.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -295,13 +278,18 @@ private struct SelectionFooter: View {
             ForEach(store.availableActions, id: \.self) { action in
                 ActionButton("Review " + action.label, kind: action == .trash ? .primary : .destructive, disabled: store.isApplying || store.isScanning) { store.reviewSelection(action) }
             }
-        }.padding(Space.lg)
+        }
+        .padding(Space.lg)
+        .task(id: store.selectedIDs) {
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            await store.refreshSelection()
+        }
     }
     private var summary: String {
-        if store.selectedFindings.contains(where: { if case .process = $0.resource { true } else { false } }) { return "Process actions do not delete files or reclaim disk space." }
+        if store.selection.includesProcesses { return "Process actions do not delete files or reclaim disk space." }
         if store.selectedIDs.isEmpty { return "Select items to review an action." }
-        let bytes = store.core.normalizedSelection(store.selectedFindings).reduce(UInt64(0)) { $0 + ($1.bytes ?? 0) }
-        return Display.bytes(bytes) + " logical size · review consequences before applying"
+        return Display.bytes(store.selection.bytes) + " logical size · review consequences before applying"
     }
 }
 
@@ -321,12 +309,12 @@ private struct InspectorView: View {
                     if let memory = finding.memoryBytes { KeyValueRow("Memory footprint", Display.bytes(memory)) }
                     if let path = finding.resource.path { KeyValueRow("Path", path) }
                     ForEach(Array(finding.details.enumerated()), id: \.offset) { _, detail in KeyValueRow(detail.label, detail.value) }
-                    ActionButton("Reveal in Finder") { store.reveal(finding) }
+                    ActionButton("Reveal in Finder") { store.reveal(id: finding.id, path: finding.resource.path) }
                     if finding.moduleID == "storage", let path = finding.resource.path, store.core.isDirectory(path) {
                         ActionButton("Inspect folder", kind: .primary, disabled: store.isScanning || store.demo) { store.browse(path) }
                     }
-                    if case .process = finding.resource { ActionButton("Ignore process name") { store.ignore(finding) } }
-                    else { ActionButton("Protect this path") { store.protect(finding) } }
+                    if case .process = finding.resource { ActionButton("Ignore process name") { store.ignore(processName: finding.title, id: finding.id) } }
+                    else { ActionButton("Protect this path") { store.protect(path: finding.resource.path, id: finding.id) } }
                 }.padding(Space.xl)
             }
         }.background(Palette.surface)
@@ -338,11 +326,11 @@ private struct ReviewView: View {
     let draft: ReviewDraft
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xl) {
-            PageHeader(draft.request.kind.label, subtitle: Display.items(draft.request.findings.count) + " selected for review")
-            Panel { Label(draft.request.kind.consequence, systemImage: "exclamationmark.circle").font(TypeStyle.secondary).fixedSize(horizontal: false, vertical: true) }
+            PageHeader(draft.kind.label, subtitle: Display.items(draft.selection.count) + " selected for review · " + Display.bytes(draft.selection.bytes))
+            Panel { Label(draft.kind.consequence, systemImage: "exclamationmark.circle").font(TypeStyle.secondary).fixedSize(horizontal: false, vertical: true) }
             ScrollView {
-                VStack(alignment: .leading, spacing: Space.lg) {
-                    ForEach(draft.request.findings) { finding in
+                LazyVStack(alignment: .leading, spacing: Space.lg) {
+                    ForEach(draft.selection.preview) { finding in
                         VStack(alignment: .leading, spacing: Space.xs) {
                             Text(finding.title).font(TypeStyle.sectionTitle)
                             Text(finding.resource.path ?? finding.subtitle).font(TypeStyle.code).textSelection(.enabled)
@@ -350,13 +338,16 @@ private struct ReviewView: View {
                         }
                         Divider()
                     }
+                    if draft.selection.count > draft.selection.preview.count {
+                        Text("and \((draft.selection.count - draft.selection.preview.count).formatted()) more").font(TypeStyle.caption).foregroundStyle(Palette.muted)
+                    }
                 }
             }
             HStack {
                 if store.isApplying { ProgressView().controlSize(.small); Text("Applying reviewed actions…").font(TypeStyle.caption) }
                 Spacer()
                 ActionButton("Cancel", disabled: store.isApplying) { store.review = nil }
-                ActionButton(draft.request.kind.label, kind: .destructive, disabled: store.isApplying || store.demo) { Task { await store.apply(draft) } }
+                ActionButton(draft.kind.label, kind: .destructive, disabled: store.isApplying || store.demo) { Task { await store.apply(draft) } }
             }
         }.padding(Space.xl).frame(width: Layout.reviewWidth, height: Layout.reviewHeight).interactiveDismissDisabled(store.isApplying)
     }

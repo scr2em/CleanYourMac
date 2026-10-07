@@ -217,6 +217,65 @@ public enum ScanEvent: Sendable {
     case progress(String)
     case warning(String)
     case moduleFinished(String)
+    /// Findings were written to the core's result store; `total` counts every stored row.
+    case stored(moduleID: String, total: Int)
+}
+
+/// A lightweight list row projected from a stored finding.
+public struct ResultRow: Identifiable, Codable, Hashable, Sendable {
+    public let id: String
+    public let moduleID: String
+    public let title: String
+    public let subtitle: String
+    public let path: String?
+    public let pid: Int32?
+    public let bytes: UInt64?
+    public let allocatedBytes: UInt64?
+    public let cpuPercent: Double?
+    public let memoryBytes: UInt64?
+    public let modifiedAt: Date?
+    public let risk: Risk
+    public let badge: String?
+    public let blocked: Bool
+    public let eligible: Bool
+    public var isProcess: Bool { pid != nil }
+    private enum CodingKeys: String, CodingKey {
+        case id, moduleID = "moduleId", title, subtitle, path, pid, bytes, allocatedBytes, cpuPercent, memoryBytes, modifiedAt, risk, badge, blocked, eligible
+    }
+}
+
+public enum ResultSort: String, Codable, Sendable { case size, name, cpu }
+
+/// What a finder is looking at. The core filters and sorts; the app pages through the result.
+public struct ResultQuery: Codable, Hashable, Sendable {
+    public var module: String?
+    public var search: String
+    public var minBytes: UInt64
+    public var modifiedBefore: Date?
+    public var sort: ResultSort
+    public var ascending: Bool
+    public init(module: String?, search: String = "", minBytes: UInt64 = 0, modifiedBefore: Date? = nil, sort: ResultSort = .size, ascending: Bool = false) {
+        self.module = module; self.search = search; self.minBytes = minBytes; self.modifiedBefore = modifiedBefore; self.sort = sort; self.ascending = ascending
+    }
+}
+
+public struct QueryInfo: Codable, Sendable {
+    public let queryId: UInt64
+    public let generation: UInt64
+    public let total: Int
+    public let summary: Analytics
+    public let largest: [ResultRow]
+    public let maxCpu: Double?
+}
+
+/// Totals and shared actions for selected IDs, with a bounded preview for review.
+public struct SelectionSummary: Codable, Sendable {
+    public let count: Int
+    public let bytes: UInt64
+    public let actions: [ActionKind]
+    public let includesProcesses: Bool
+    public let preview: [Finding]
+    public static let empty = SelectionSummary(count: 0, bytes: 0, actions: [], includesProcesses: false, preview: [])
 }
 
 public enum CleanError: LocalizedError, Sendable {

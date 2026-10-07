@@ -8,7 +8,9 @@ import SwiftUI
     init() {
         NSApplication.shared.setActivationPolicy(.regular)
         let fixture = CommandLine.arguments.contains("--demo")
-        let initial = AppStore(demo: fixture)
+        // `--demo --demo-rows 1000000` previews a million synthetic rows.
+        let rows = CommandLine.arguments.firstIndex(of: "--demo-rows").flatMap { CommandLine.arguments.indices.contains($0 + 1) ? Int(CommandLine.arguments[$0 + 1]) : nil } ?? 0
+        let initial = AppStore(demo: fixture, demoRows: rows)
         if fixture, let index = CommandLine.arguments.firstIndex(of: "--screen"), CommandLine.arguments.indices.contains(index + 1) {
             initial.selectedModuleID = CommandLine.arguments[index + 1]
             if initial.selectedModuleID == "node" { initial.inspectedID = "demo-node" }
@@ -29,8 +31,8 @@ import SwiftUI
         Settings { PreferencesView(store: store) }
         MenuBarExtra("CleanYourMac", systemImage: "leaf", isInserted: $store.menuBarEnabled) {
             Button("Open CleanYourMac") { NSApplication.shared.activate(ignoringOtherApps: true) }
-            Text("\(store.findings.filter { $0.moduleID == "orphans" }.count) orphan candidates")
-            Text("\(Display.bytes(store.diskBytes)) in this view's storage findings")
+            Text("\(store.count(for: "orphans").formatted()) orphan candidates")
+            Text("\(Display.bytes(store.overview.diskBytes)) found across scanned tools")
             Button("Inspect Orphan Processes") { store.selectedModuleID = "orphans"; NSApplication.shared.activate(ignoringOtherApps: true) }
             Divider()
             Button("Quit") { NSApplication.shared.terminate(nil) }

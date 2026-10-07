@@ -62,12 +62,47 @@ public final class CoreEngine: @unchecked Sendable {
         _ = try await detached { try self.call("restore", ["result": result], as: Empty.self) }
     }
 
+    // Result store: scans write here; the app queries snapshots and reads them a page at a time.
+    public func query(_ query: ResultQuery) async throws -> QueryInfo {
+        try await detached { try self.value("query", ["query": query], as: QueryInfo.self) }
+    }
+    public func rows(queryID: UInt64, offset: Int, limit: Int) async throws -> [ResultRow] {
+        struct Params: Encodable { let queryId: UInt64; let offset: Int; let limit: Int }
+        return try await detached { try self.value("rows", Params(queryId: queryID, offset: offset, limit: limit), as: [ResultRow].self) }
+    }
+    public func position(queryID: UInt64, id: String) async -> Int? {
+        struct Params: Encodable { let queryId: UInt64; let id: String }
+        return (try? await detached { try self.call("position", Params(queryId: queryID, id: id), as: Int.self) }) ?? nil
+    }
+    public func finding(_ id: String) async -> Finding? {
+        (try? await detached { try self.call("finding", ["id": id], as: Finding.self) }) ?? nil
+    }
+    public func selection(_ ids: [String], preview: Int = 200) async -> SelectionSummary {
+        struct Params: Encodable { let ids: [String]; let preview: Int }
+        return (try? await detached { try self.value("selection", Params(ids: ids, preview: preview), as: SelectionSummary.self) }) ?? .empty
+    }
+    public func executeSelection(_ ids: [String], kind: ActionKind, context: ScanContext) async throws -> [ActionResult] {
+        struct Params: Encodable { let ids: [String]; let kind: ActionKind; let context: ScanContext }
+        return try await detached { try self.value("executeSelection", Params(ids: ids, kind: kind, context: context), as: [ActionResult].self) }
+    }
+    public func removeResults(_ ids: [String]) async {
+        _ = try? await detached { try self.call("removeResults", ["ids": ids], as: Int.self) }
+    }
+    public func loadResults(_ findings: [Finding]) async {
+        _ = try? await detached { try self.call("loadResults", ["findings": findings], as: Int.self) }
+    }
+    /// Replaces stored results with synthetic rows, for previews and scale checks.
+    public func synthesize(_ count: Int) async -> Int {
+        (try? await detached { try self.value("synthesize", ["count": count], as: Int.self) }) ?? 0
+    }
+
     /// Streams a scan. Cancelling the consuming task cancels the core scan; a core-side
-    /// cancellation finishes the stream with `CancellationError`.
-    public func scan(moduleIDs: [String], context: ScanContext, concurrency: Int = 3) -> AsyncThrowingStream<ScanEvent, Error> {
-        struct ScanRequest: Encodable { let modules: [String]; let context: ScanContext; let concurrency: Int }
+    /// cancellation finishes the stream with `CancellationError`. With `store`, findings go to
+    /// the core's result store and only `.stored` counts are streamed.
+    public func scan(moduleIDs: [String], context: ScanContext, concurrency: Int = 3, store: Bool = false) -> AsyncThrowingStream<ScanEvent, Error> {
+        struct ScanRequest: Encodable { let modules: [String]; let context: ScanContext; let concurrency: Int; let store: Bool }
         return AsyncThrowingStream { continuation in
-            guard let data = try? Self.encoder.encode(ScanRequest(modules: moduleIDs, context: context, concurrency: concurrency)) else {
+            guard let data = try? Self.encoder.encode(ScanRequest(modules: moduleIDs, context: context, concurrency: concurrency, store: store)) else {
                 continuation.finish(throwing: CleanError.message("The scan request could not be encoded.")); return
             }
             let box = Unmanaged.passRetained(ScanBox(continuation))
@@ -103,6 +138,7 @@ private final class ScanBox: @unchecked Sendable {
         let finding: Finding?
         let message: String?
         let cancelled: Bool?
+        let total: Int?
     }
     private let continuation: AsyncThrowingStream<ScanEvent, Error>.Continuation
     init(_ continuation: AsyncThrowingStream<ScanEvent, Error>.Continuation) { self.continuation = continuation }
@@ -117,6 +153,7 @@ private final class ScanBox: @unchecked Sendable {
         case "progress": continuation.yield(.progress(event.message ?? ""))
         case "warning": continuation.yield(.warning(event.message ?? ""))
         case "moduleFinished": continuation.yield(.moduleFinished(event.moduleId ?? ""))
+        case "stored": continuation.yield(.stored(moduleID: event.moduleId ?? "", total: event.total ?? 0))
         case "finished":
             if event.cancelled == true { continuation.finish(throwing: CancellationError()) } else { continuation.finish() }
             return true

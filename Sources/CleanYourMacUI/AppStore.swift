@@ -6,9 +6,14 @@ import Observation
 
 public struct ReviewDraft: Identifiable {
     public let id = UUID()
-    public let request: ActionRequest
+    public let ids: [String]
+    public let kind: ActionKind
+    public let selection: SelectionSummary
 }
-public enum SortOrder: String, CaseIterable { case size = "Size", name = "Name", cpu = "CPU" }
+public enum SortOrder: String, CaseIterable {
+    case size = "Size", name = "Name", cpu = "CPU"
+    var core: ResultSort { switch self { case .size: .size; case .name: .name; case .cpu: .cpu } }
+}
 public enum SizeFilter: String, CaseIterable {
     case all = "Any size", large = "100 MB+", huge = "1 GB+"
     var minimum: UInt64 { switch self { case .all: 0; case .large: 100_000_000; case .huge: 1_000_000_000 } }
@@ -18,8 +23,13 @@ public enum AgeFilter: String, CaseIterable {
     var days: Double? { switch self { case .all: nil; case .months: 90; case .year: 365 } }
 }
 
+/// App state. Findings live in the core's result store; this store keeps only the current
+/// query's totals and a bounded cache of row pages, so result sets of millions stay smooth.
 @MainActor @Observable
 public final class AppStore {
+    public static let pageSize = 200
+    private static let maxPages = 60
+
     public let core: CoreEngine
     public let modules: [ModuleDescriptor]
     public var selectedModuleID: String? = "overview" {
@@ -37,9 +47,10 @@ public final class AppStore {
     public var exclusions: [String]
     public var ignoredNames: [String]
     public var disabledModules: [String]
-    public var findings: [Finding] = []
     public var selectedIDs = Set<String>()
-    public var inspectedID: String?
+    public var inspectedID: String? { didSet { if inspectedID != oldValue { loadInspected() } } }
+    /// The full finding behind `inspectedID`, fetched from the core on demand.
+    public private(set) var inspected: Finding?
     public var search = ""
     /// Size and CPU start largest first and Name starts A–Z; the direction can then be flipped.
     public var sort: SortOrder = .size { didSet { if sort != oldValue { sortAscending = sort == .name } } }
@@ -59,16 +70,24 @@ public final class AppStore {
     /// The Comfy palette; colors resolve against it at draw time.
     public var theme: ComfyTheme = ComfyTheme.current { didSet { ComfyTheme.current = theme; persist() } }
     public var forceEligible = Set<String>()
-    /// Core-computed totals for the current findings; refreshed after scans and actions.
-    public var analytics = Analytics.empty
-    /// Core-computed totals for the rows currently matching the search and filters.
-    public var summary = Analytics.empty
-    /// Changes whenever the visible rows can change; drives summary refreshes.
-    public var summaryKey: String {
-        "\(selectedModuleID ?? "")|\(search)|\(sizeFilter.rawValue)|\(ageFilter.rawValue)|\(findings.count)|\(storageNavigation.count)"
-    }
     public var restoredIDs = Set<UUID>()
     public var storageNavigation: [String] = []
+
+    // Current query: totals and a page cache. Rows are fetched only for what is on screen.
+    public private(set) var queryID: UInt64 = 0
+    public private(set) var resultTotal = 0
+    /// Core-computed totals for the rows matching the search and filters.
+    public private(set) var summary = Analytics.empty
+    public private(set) var largest: [ResultRow] = []
+    public private(set) var maxCPU: Double?
+    /// Totals across every module, for the overview, sidebar counts and menu bar.
+    public private(set) var overview = Analytics.empty
+    public private(set) var selection = SelectionSummary.empty
+    private var pages: [Int: [ResultRow]] = [:]
+    private var loadingPages = Set<Int>()
+    /// Bumped whenever stored results change, so the visible query refreshes.
+    public private(set) var storeVersion = 0
+
     private var scanStatuses: [String: String] = [:]
     private var moduleWarnings: [String: [String]] = [:]
     private var scanningModules: [String] = []
@@ -78,10 +97,11 @@ public final class AppStore {
     private var scanHadWarnings = false
     private var monitorTask: Task<Void, Never>?
     private var isRefreshingOrphans = false
-    private var resultLimitReached = false
+    private var queryToken = 0
+    private var demoLoad: Task<Void, Never>?
     private let defaults: UserDefaults
 
-    public init(demo: Bool = false, defaults: UserDefaults = .standard, core: CoreEngine = .shared) {
+    public init(demo: Bool = false, demoRows: Int = 0, defaults: UserDefaults = .standard, core: CoreEngine = .shared) {
         self.defaults = defaults; self.demo = demo; self.core = core
         modules = core.modules()
         let initial = core.projectRoots()
@@ -93,40 +113,102 @@ public final class AppStore {
         theme = defaults.string(forKey: "theme").flatMap(ComfyTheme.init(rawValue:)) ?? .walnut
         ComfyTheme.current = theme
         configureMonitor()
-        if demo { roots = ["/Users/demo/Projects"]; exclusions = []; disabledModules = []; loadDemo() }
+        if demo { roots = ["/Users/demo/Projects"]; exclusions = []; disabledModules = []; loadDemo(rows: demoRows) }
     }
     public var context: ScanContext { ScanContext(roots: selectedModuleID == "storage" && !storageNavigation.isEmpty ? [storageNavigation.last!] : roots, exclusions: exclusions, ignoredProcessNames: ignoredNames) }
     public var enabledModules: [ModuleDescriptor] { modules.filter { !disabledModules.contains($0.id) } }
     public var currentModule: ModuleDescriptor? { modules.first { $0.id == selectedModuleID } }
-    public var visibleFindings: [Finding] {
-        let rows = findings.filter { finding in
-            (selectedModuleID == "overview" || finding.moduleID == selectedModuleID)
-            && (search.isEmpty || (finding.title + " " + finding.subtitle).localizedCaseInsensitiveContains(search))
-            && (sizeFilter == .all || (finding.bytes ?? 0) >= sizeFilter.minimum)
-            && (ageFilter.days == nil || finding.modifiedAt.map { $0 < Date().addingTimeInterval(-ageFilter.days! * 86_400) } == true)
-        }
-        if isScanning { return rows }
-        let sort = self.sort
-        func less(_ a: Finding, _ b: Finding) -> Bool {
-            switch sort {
-            case .size: return (a.bytes ?? a.memoryBytes ?? 0, a.id) < (b.bytes ?? b.memoryBytes ?? 0, b.id)
-            case .cpu: return (a.cpuPercent ?? 0, a.id) < (b.cpuPercent ?? 0, b.id)
-            case .name:
-                let order = a.title.localizedStandardCompare(b.title)
-                return order == .orderedSame ? a.id < b.id : order == .orderedAscending
+    public func count(for module: String) -> Int { overview.modules.first { $0.moduleId == module }?.count ?? 0 }
+
+    // MARK: Querying
+
+    public var currentQuery: ResultQuery {
+        ResultQuery(
+            module: selectedModuleID == "overview" ? nil : selectedModuleID,
+            search: search,
+            minBytes: sizeFilter.minimum,
+            modifiedBefore: ageFilter.days.map { Date().addingTimeInterval(-$0 * 86_400) },
+            sort: sort.core,
+            ascending: sortAscending
+        )
+    }
+    /// Changes whenever the visible rows can change; drives debounced re-queries.
+    public var queryKey: String {
+        "\(selectedModuleID ?? "")|\(search)|\(sizeFilter.rawValue)|\(ageFilter.rawValue)|\(sort.rawValue)|\(sortAscending)|\(storeVersion)|\(storageNavigation.count)"
+    }
+    /// Runs the current query in the core and resets the page cache. Stale answers are dropped.
+    public func requery() async {
+        if let demoLoad { await demoLoad.value }
+        queryToken += 1
+        let token = queryToken
+        guard let info = try? await core.query(currentQuery), token == queryToken else { return }
+        queryID = info.queryId; resultTotal = info.total; summary = info.summary
+        largest = info.largest; maxCPU = info.maxCpu
+        pages = [:]; loadingPages = []
+        if currentQuery.module == nil { overview = info.summary }
+    }
+    public func refreshOverview() async {
+        if let info = try? await core.query(ResultQuery(module: nil)) { overview = info.summary }
+    }
+    /// The row at `index` if its page is cached. Call `prefetch` to load it.
+    public func row(at index: Int) -> ResultRow? {
+        let page = pages[index / Self.pageSize]
+        let offset = index % Self.pageSize
+        return page.flatMap { offset < $0.count ? $0[offset] : nil }
+    }
+    /// Loads the page containing `index` (and the next one near a page end).
+    public func prefetch(_ index: Int) {
+        let page = index / Self.pageSize
+        load(page)
+        if index % Self.pageSize > Self.pageSize * 3 / 4 { load(page + 1) }
+    }
+    private func load(_ page: Int) {
+        guard page >= 0, page * Self.pageSize < resultTotal, pages[page] == nil, !loadingPages.contains(page) else { return }
+        loadingPages.insert(page)
+        let query = queryID
+        Task { [weak self] in
+            guard let self else { return }
+            let rows = (try? await self.core.rows(queryID: query, offset: page * Self.pageSize, limit: Self.pageSize)) ?? []
+            guard query == self.queryID else { return }
+            self.loadingPages.remove(page)
+            self.pages[page] = rows
+            if self.pages.count > Self.maxPages {
+                // Keep the pages nearest the one just loaded.
+                for far in self.pages.keys.sorted(by: { abs($0 - page) > abs($1 - page) }).prefix(self.pages.count - Self.maxPages) {
+                    self.pages[far] = nil
+                }
             }
         }
-        return sortAscending ? rows.sorted(by: less) : rows.sorted { less($1, $0) }
     }
-    public var selectedFindings: [Finding] { findings.filter { selectedIDs.contains($0.id) } }
-    public var inspected: Finding? { findings.first { $0.id == inspectedID } }
-    public var availableActions: [ActionKind] {
-        guard let first = selectedFindings.first else { return [] }
-        return first.actions.filter { kind in
-            selectedFindings.allSatisfy { $0.actions.contains(kind) && $0.blockedReason == nil && (kind != .forceQuit || forceEligible.contains($0.id)) }
+    /// Rows in `range`, loading them directly; for tests and previews.
+    public func rows(_ range: Range<Int>) async -> [ResultRow] {
+        (try? await core.rows(queryID: queryID, offset: range.lowerBound, limit: range.count)) ?? []
+    }
+    private func loadInspected() {
+        guard let id = inspectedID else { inspected = nil; return }
+        Task { [weak self] in
+            let finding = await self?.core.finding(id)
+            if self?.inspectedID == id { self?.inspected = finding }
         }
     }
-    public var diskBytes: UInt64 { visibleFindings.filter { if case .process = $0.resource { false } else { true } }.reduce(0) { $0 + ($1.bytes ?? 0) } }
+    private func resultsChanged() { storeVersion += 1 }
+
+    // MARK: Selection
+
+    public var availableActions: [ActionKind] {
+        selection.actions.filter { $0 != .forceQuit || selectedIDs.isSubset(of: forceEligible) }
+    }
+    public func select(_ id: String, checked: Bool) {
+        if checked { selectedIDs.insert(id) } else { selectedIDs.remove(id) }
+    }
+    public func refreshSelection() async {
+        let ids = Array(selectedIDs)
+        let summary = ids.isEmpty ? .empty : await core.selection(ids, preview: 0)
+        if Set(ids) == selectedIDs { selection = summary }
+    }
+
+    // MARK: Settings
+
     public func persist() {
         guard !demo else { return }
         defaults.set(roots, forKey: "scanRoots"); defaults.set(exclusions, forKey: "excludedPaths")
@@ -141,45 +223,35 @@ public final class AppStore {
             roots = core.normalizeRoots(roots + panel.urls.map(\.path)); storageNavigation = []; persist()
         }
     }
-    public func select(_ id: String, checked: Bool) {
-        if checked { selectedIDs.insert(id) } else { selectedIDs.remove(id) }
-    }
+
+    // MARK: Scanning
+
     public func scan() {
         guard !isApplying else { return }
-        if demo { loadDemo(); return }
+        if demo { loadDemo(rows: 0); return }
         if isScanning { cancelScan() }
         scanTask?.cancel()
         let id = UUID(), selected = selectedModuleID ?? "overview", context = self.context
-        scanID = id; isScanning = true; progress = "Starting scan…"; warnings = []; scanHadWarnings = false; resultLimitReached = false; selectedIDs = []; inspectedID = nil
+        scanID = id; isScanning = true; progress = "Starting scan…"; warnings = []; scanHadWarnings = false; selectedIDs = []; inspectedID = nil
         let ids = selected == "overview" ? enabledModules.map(\.id) : [selected]
         scanningModules = Array(Set(ids + [selected]))
-        findings.removeAll { ids.contains($0.moduleID) }
-        let stream = core.scan(moduleIDs: ids, context: context)
+        let stream = core.scan(moduleIDs: ids, context: context, store: true)
         scanTask = Task { [weak self] in
             guard let self else { return }
             do {
-                var seen = Set(self.findings.map(\.id))
                 for try await event in stream {
                     guard self.scanID == id else { return }
                     try Task.checkCancellation()
                     switch event {
-                    case .finding(let finding):
-                        if self.findings.count >= 30_000 {
-                            if !self.resultLimitReached { self.scanHadWarnings = true; self.resultLimitReached = true; self.warnings.append("Result limit reached; scan narrower roots.") }
-                            break
-                        }
-                        if seen.insert(finding.id).inserted { self.findings.append(finding) }
+                    case .stored: self.resultsChanged()
                     case .progress(let message): self.progress = message
                     case .warning(let message):
                         self.scanHadWarnings = true
                         if self.warnings.count < 200 { self.warnings.append(message) }
-                    case .moduleFinished: break
+                    case .finding, .moduleFinished: break
                     }
                 }
-                if self.scanID == id {
-                    let status = self.scanHadWarnings ? "Partial scan · review warnings" : "Scan complete"
-                    self.finishScanStatus(status)
-                }
+                if self.scanID == id { self.finishScanStatus(self.scanHadWarnings ? "Partial scan · review warnings" : "Scan complete") }
             } catch {
                 if self.scanID == id { self.finishScanStatus(error is CancellationError ? "Scan cancelled · partial results" : "Scan failed"); if !(error is CancellationError) { self.error = error.localizedDescription } }
             }
@@ -191,20 +263,8 @@ public final class AppStore {
         progress = scanStatuses[selectedModuleID ?? "overview"] ?? "Ready · scan this tool"
         warnings = moduleWarnings[selectedModuleID ?? "overview"] ?? []
         scanningModules = []
-        refreshAnalytics()
-    }
-    public func refreshSummary() async {
-        let rows = visibleFindings
-        let totals = await core.analytics(rows)
-        if visibleFindings.count == rows.count { summary = totals }
-    }
-    public func refreshAnalytics() {
-        let rows = findings
-        Task { [weak self] in
-            guard let self else { return }
-            let totals = await self.core.analytics(rows)
-            if self.findings.count == rows.count { self.analytics = totals }
-        }
+        resultsChanged()
+        Task { await refreshOverview() }
     }
     public func cancelScan() { scanTask?.cancel(); scanID = nil; finishScanStatus("Scan cancelled · partial results") }
     public func browse(_ path: String) {
@@ -215,25 +275,32 @@ public final class AppStore {
         guard !storageNavigation.isEmpty else { return }
         storageNavigation.removeLast(); scan()
     }
-    public func reviewSelection(_ kind: ActionKind) { review = ReviewDraft(request: ActionRequest(findings: selectedFindings, kind: kind, context: context)) }
+
+    // MARK: Actions
+
+    public func reviewSelection(_ kind: ActionKind) {
+        let ids = Array(selectedIDs)
+        Task { [weak self] in
+            guard let self else { return }
+            let summary = await self.core.selection(ids, preview: 200)
+            self.review = ReviewDraft(ids: ids, kind: kind, selection: summary)
+        }
+    }
     public func apply(_ draft: ReviewDraft) async {
         guard !demo else { error = "Demo mode cannot modify files or processes."; return }
         isApplying = true
-        let freshRequest = ActionRequest(findings: draft.request.findings, kind: draft.request.kind, context: self.context)
         let results: [ActionResult]
-        do { results = try await core.execute(freshRequest) }
+        do { results = try await core.executeSelection(draft.ids, kind: draft.kind, context: context) }
         catch { self.error = error.localizedDescription; isApplying = false; return }
         for result in results {
-            if let id = result.findingID {
-                if result.outcome == .requested && result.action == .terminate { forceEligible.insert(id) }
-                if result.outcome == .applied || result.outcome == .skipped {
-                    findings.removeAll { $0.id == id }; selectedIDs.remove(id); forceEligible.remove(id)
-                }
-            }
+            guard let id = result.findingID else { continue }
+            if result.outcome == .requested && result.action == .terminate { forceEligible.insert(id) }
+            if result.outcome == .applied || result.outcome == .skipped { selectedIDs.remove(id); forceEligible.remove(id) }
         }
         mergeHistory(results + (await core.history()))
         isApplying = false; review = nil
-        refreshAnalytics()
+        resultsChanged()
+        await refreshOverview()
         if let failed = results.first(where: { $0.outcome == .failed }) { error = failed.message }
         else if let warning = results.compactMap(\.journalWarning).first { error = warning }
     }
@@ -261,22 +328,21 @@ public final class AppStore {
         isRefreshingOrphans = true
         defer { isRefreshingOrphans = false }
         do {
-            var refreshed: [Finding] = []
-            for try await event in core.scan(moduleIDs: ["orphans"], context: context) {
-                if case .finding(let finding) = event { refreshed.append(finding) }
+            for try await _ in core.scan(moduleIDs: ["orphans"], context: context, store: true) {}
+            let orphanIDs = selectedIDs.filter { $0.hasPrefix("orphans:") }
+            if !orphanIDs.isEmpty {
+                let present = Set(await core.selection(Array(orphanIDs), preview: orphanIDs.count).preview.map(\.id))
+                selectedIDs.subtract(orphanIDs.subtracting(present))
+                forceEligible = forceEligible.filter { !$0.hasPrefix("orphans:") || present.contains($0) }
             }
-            let freshIDs = Set(refreshed.map(\.id))
-            findings.removeAll { $0.moduleID == "orphans" }; findings.append(contentsOf: refreshed)
-            selectedIDs = selectedIDs.filter { id in !id.hasPrefix("orphans:") || freshIDs.contains(id) }
-            forceEligible = forceEligible.intersection(freshIDs)
             scanStatuses["orphans"] = "Live process inspection"; moduleWarnings["orphans"] = []
             if selectedModuleID == "orphans" { progress = "Live process inspection"; warnings = [] }
         } catch {
-            findings.removeAll { $0.moduleID == "orphans" }
             if !warnings.contains(error.localizedDescription), warnings.count < 200 { warnings.append(error.localizedDescription) }
             scanStatuses["orphans"] = "Process inspection incomplete"; moduleWarnings["orphans"] = [error.localizedDescription]
             if selectedModuleID == "orphans" { progress = "Process inspection incomplete" }
         }
+        resultsChanged()
     }
     public func restore(_ result: ActionResult) async {
         guard !demo, !isApplying else { return }
@@ -285,46 +351,66 @@ public final class AppStore {
         do { try await core.restore(result); restoredIDs.insert(result.id) }
         catch { self.error = error.localizedDescription }
     }
-    public func protect(_ finding: Finding) {
-        if let path = finding.resource.path, !exclusions.contains(path) { exclusions.append(path); persist(); selectedIDs.remove(finding.id) }
+    public func protect(path: String?, id: String) {
+        if let path, !exclusions.contains(path) { exclusions.append(path); persist(); selectedIDs.remove(id) }
     }
-    public func ignore(_ finding: Finding) {
-        guard case .process = finding.resource else { return }
-        if !ignoredNames.contains(finding.title) { ignoredNames.append(finding.title); persist() }
-        findings.removeAll { $0.id == finding.id }; selectedIDs.remove(finding.id)
+    public func ignore(processName: String, id: String) {
+        if !ignoredNames.contains(processName) { ignoredNames.append(processName); persist() }
+        selectedIDs.remove(id)
+        Task { [weak self] in
+            await self?.core.removeResults([id])
+            self?.resultsChanged()
+        }
     }
-    public func reveal(_ finding: Finding) {
-        if let folder = finding.details.first(where: { $0.label == "Working folder" || $0.label == "Data path" })?.value, FileManager.default.fileExists(atPath: folder) {
-            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: folder)
-        } else if let path = finding.resource.path { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
+    public func reveal(id: String, path: String?) {
+        Task { [weak self] in
+            let finding = await self?.core.finding(id)
+            if let folder = finding?.value("Working folder") ?? finding?.value("Data path"), FileManager.default.fileExists(atPath: folder) {
+                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: folder)
+            } else if let path = finding?.resource.path ?? path {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+            }
+        }
     }
-    private func loadDemo() {
+
+    // MARK: Demo
+
+    private func loadDemo(rows: Int) {
         let base = "/Users/demo/Projects"
         func file(_ path: String) -> Resource { .file(FileIdentity(path: path, device: 1, inode: 1, modifiedSeconds: 0, modifiedNanos: 0)) }
-        findings = [
+        let fixtures = [
             Finding(id: "demo-node", moduleID: "node", title: "dashboard", subtitle: base + "/dashboard/node_modules", resource: file(base + "/dashboard/node_modules"), bytes: 1_842_000_000, allocatedBytes: 1_210_000_000, details: [Detail("Project", base + "/dashboard"), Detail("Package manager", "pnpm"), Detail("Files", "34,126")], actions: [.trash], risk: .rebuild, reason: "Dependencies can be reinstalled. Review local patches before cleanup."),
             Finding(id: "demo-node-2", moduleID: "node", title: "landing-page", subtitle: base + "/landing-page/node_modules", resource: file(base + "/landing-page/node_modules"), bytes: 864_000_000, actions: [.trash], risk: .rebuild, reason: "Manifests and lockfiles are preserved."),
             Finding(id: "demo-storage", moduleID: "storage", title: "Projects", subtitle: base, resource: file(base), bytes: 14_280_000_000, reason: "Storage inventory. Inspect this folder to see its contents."),
             Finding(id: "demo-storage-2", moduleID: "storage", title: "Downloads", subtitle: "/Users/demo/Downloads", resource: file("/Users/demo/Downloads"), bytes: 3_510_000_000, reason: "Storage inventory."),
             Finding(id: "demo-simulator", moduleID: "simulators", title: "iPhone 16", subtitle: "iOS 18.5", resource: .simulator(id: "35D71E75-E2F0-4EF5-A131-06B14FDB044E", state: "Shutdown"), bytes: 4_320_000_000, details: [Detail("State", "Shutdown"), Detail("Identifier", "35D71E75-E2F0-4EF5-A131-06B14FDB044E")], actions: [.resetSimulator, .deleteSimulator], risk: .permanent, reason: "Device app data and settings are erased by reset or delete."),
-            Finding(id: "demo-worktree", moduleID: "worktrees", title: "feature-navigation", subtitle: base + "/dashboard-worktrees/feature-navigation", resource: file(base + "/dashboard-worktrees/feature-navigation"), bytes: 2_540_000_000, details: [Detail("Branch", "feature/navigation"), Detail("State", "Local changes")], reason: "Local work needs inspection.", blockedReason: "Contains untracked or ignored files."),
+            Finding(id: "demo-worktree", moduleID: "worktrees", title: "feature-navigation", subtitle: "feature/navigation · " + base + "/dashboard-worktrees/feature-navigation", resource: file(base + "/dashboard-worktrees/feature-navigation"), bytes: 2_540_000_000, details: [Detail("Branch", "feature/navigation"), Detail("State", "Local changes")], reason: "Local work needs inspection.", blockedReason: "Contains untracked or ignored files.", badge: "Linked"),
             Finding(id: "demo-process", moduleID: "orphans", title: "node", subtitle: base + "/dashboard", resource: .process(ProcessIdentity(pid: 4201, uid: 501, startedSeconds: 1_791_399_000, startedMicroseconds: 1, executable: "/opt/homebrew/bin/node")), cpuPercent: 53.2, memoryBytes: 240_000_000, details: [Detail("PID", "4201"), Detail("Working folder", base + "/dashboard"), Detail("Command", "node dev-server.js")], actions: [.terminate, .forceQuit], risk: .permanent, reason: "No known managed job or running app owns this process. Review before terminating."),
         ]
-        selectedModuleID = "node"; inspectedID = "demo-node"; progress = "Scan complete"; isScanning = false
+        demoLoad = Task { [core] in
+            if rows > 0 { _ = await core.synthesize(rows) } else { await core.loadResults(fixtures) }
+        }
+        selectedModuleID = rows > 0 ? "large" : "node"
+        inspectedID = rows > 0 ? nil : "demo-node"
+        progress = "Scan complete"; isScanning = false
+        Task { [weak self] in
+            await self?.requery()
+            await self?.refreshOverview()
+        }
     }
 }
 
 public enum Display {
-    public static func items(_ count: Int) -> String { "\(count) " + (count == 1 ? "item" : "items") }
+    public static func items(_ count: Int) -> String { "\(count.formatted()) " + (count == 1 ? "item" : "items") }
     public static func bytes(_ bytes: UInt64?) -> String {
         guard let bytes else { return "Unavailable" }
         return ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
     }
-    public static func value(_ finding: Finding) -> String {
-        if case .process = finding.resource {
-            let cpu = finding.cpuPercent.map { String(format: "%.1f%% CPU", $0) } ?? "Sampling CPU"
-            return cpu + " · " + bytes(finding.memoryBytes)
+    public static func value(_ row: ResultRow) -> String {
+        if row.isProcess {
+            let cpu = row.cpuPercent.map { String(format: "%.1f%% CPU", $0) } ?? "Sampling CPU"
+            return cpu + " · " + bytes(row.memoryBytes)
         }
-        return bytes(finding.bytes)
+        return bytes(row.bytes)
     }
 }
