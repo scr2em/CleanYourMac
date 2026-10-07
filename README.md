@@ -10,7 +10,7 @@ A comfy, modular, open-source macOS cleaner for people who build things. Find bu
 
 **Development preview:** scanning, safety policy, actions, history and analytics run in a Rust core (`crates/cym-core`) behind replaceable interfaces. A thin SwiftUI app talks to it over a versioned C ABI. A trusted, notarized binary release is not available yet. See [the architecture](docs/ARCHITECTURE.md).
 
-The [Comfy design system](docs/brand/README.md) has original branding and shared light and dark tokens: a warm off-white canvas, linen and sand neutrals, and a dusty-rose accent. The app and the [Figma library](docs/FIGMA.md) both use it.
+The [Comfy design system](docs/brand/README.md) has original branding and shared light and dark tokens: warm cream surfaces, a terracotta accent, navy links and brown ink. Cream & Mauve and Linen & Rose palettes are available in Settings. The app and the [Figma library](docs/FIGMA.md) both use it.
 
 ![Overview design concept with warm cream surfaces and mint analytics](docs/design-concepts/overview.png)
 
