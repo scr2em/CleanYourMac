@@ -33,13 +33,17 @@ impl ScanModule for StorageModule {
                     .into_iter()
                     .filter(|e| c.allows(e.path()) && !policy::system_excluded(e.path()))
                     .map(|e| {
+                        // Anything outside the protected locations can be moved to Trash
+                        // after review; nothing here is a cleanup recommendation.
+                        let protected = policy::protected(e.path());
                         Candidate::new(
                             e,
-                            "Storage inventory, not a cleanup recommendation. Inspect this item in Finder.",
-                            vec![],
+                            "Part of your storage, not a cleanup recommendation. Inspect it before moving it to Trash.",
+                            if protected { vec![] } else { vec![ActionKind::Trash] },
                             Risk::Review,
                         )
                         .last_used(LastUsed::Spotlight)
+                        .blocked(protected.then_some("Protected location; open it to inspect what is inside."))
                     }),
             );
         }

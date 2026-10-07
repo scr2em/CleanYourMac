@@ -145,7 +145,13 @@ private struct ResultCell: View {
                 eligible: row.eligible && !store.isApplying,
                 checked: Binding(get: { store.selectedIDs.contains(row.id) }, set: { store.select(row.id, checked: $0) })
             ) { store.click(row, at: index, Self.click); focus() }
+            // In Storage Explorer a folder opens with a double-click, as in Finder.
+            .simultaneousGesture(TapGesture(count: 2).onEnded { if let folder = openableFolder(row) { store.browse(folder) } })
             .contextMenu {
+                if let folder = openableFolder(row) {
+                    Button("Open Folder") { store.browse(folder) }
+                    Divider()
+                }
                 if row.eligible {
                     let selected = store.selectedIDs.contains(row.id)
                     Button(selected ? "Deselect" : "Select") { store.select(row.id, checked: !selected) }
@@ -171,6 +177,12 @@ private struct ResultCell: View {
             .frame(maxHeight: .infinity)
             .accessibilityLabel("Loading row")
         }
+    }
+    /// The row's path when it is a folder Storage Explorer can open.
+    private func openableFolder(_ row: CleanYourMacCore.ResultRow) -> String? {
+        guard row.moduleID == "storage", !store.isScanning, let path = row.path else { return nil }
+        var directory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &directory) && directory.boolValue ? path : nil
     }
     private func copy(_ value: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string) }
     /// The modifier held during the click that is being handled.

@@ -174,13 +174,16 @@ fn modules_can_be_replaced_and_failures_become_warnings() {
 }
 
 #[test]
-fn storage_lists_immediate_children_as_inventory() {
+fn storage_lists_immediate_children_that_can_be_reviewed_for_trash() {
     let f = Fixture::new();
     f.write("folder/a", "abc");
     f.write("file", "abcdef");
     let report = scan(&f, "storage");
     assert_eq!(report.findings.len(), 2);
-    assert!(report.findings.iter().all(|f| f.actions.is_empty()));
+    assert!(report
+        .findings
+        .iter()
+        .all(|f| f.actions == [ActionKind::Trash] && f.risk == Risk::Review));
     let folder = report
         .findings
         .iter()
