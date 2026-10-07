@@ -75,3 +75,32 @@ import Testing
     #expect(store.resultTotal == 50_000)
     #expect(store.overview.findings == 50_000)
 }
+
+@MainActor @Test func commandClickTogglesAndShiftClickSelectsAnEligibleRange() async throws {
+    let defaults = try #require(UserDefaults(suiteName: "org.cleanyourmac.test." + UUID().uuidString))
+    let store = AppStore(demo: true, demoRows: 5_000, defaults: defaults, core: CoreEngine())
+    await store.requery()
+    let rows = await store.rows(0..<40)
+    let eligible = rows.filter(\.eligible)
+    let first = try #require(eligible.first), last = try #require(eligible.last)
+    let firstIndex = try #require(rows.firstIndex(of: first)), lastIndex = try #require(rows.firstIndex(of: last))
+
+    store.click(first, at: firstIndex, .plain)
+    #expect(store.inspectedID == first.id)
+    #expect(store.selectedIDs.isEmpty)
+
+    store.click(first, at: firstIndex, .toggle)
+    #expect(store.selectedIDs == [first.id])
+
+    store.click(last, at: lastIndex, .extend)
+    for _ in 0..<200 where store.selectedIDs.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+    let range = Set(rows[firstIndex...lastIndex].filter(\.eligible).map(\.id))
+    #expect(store.selectedIDs == range)
+
+    store.click(first, at: firstIndex, .toggle)
+    #expect(!store.selectedIDs.contains(first.id))
+    if let blocked = rows.first(where: { !$0.eligible }) {
+        store.click(blocked, at: rows.firstIndex(of: blocked)!, .toggle)
+        #expect(!store.selectedIDs.contains(blocked.id))
+    }
+}

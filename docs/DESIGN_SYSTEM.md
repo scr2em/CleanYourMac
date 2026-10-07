@@ -44,7 +44,7 @@ Keep storage units, date formatting, path shortening, and pluralization in share
 | ActionButton | Native button behavior with a semantic role | Primary, secondary, destructive; enabled, disabled, pressed, focused, busy |
 | SearchField and FilterBar | Search and approved size/age/type filters | Empty, filled, active filters, disabled |
 | MetricTile and StorageBar | Storage summaries with clear labels | Known, estimated, unavailable; text equivalents |
-| ResultTable and ResultRow | Shared results, sorting, item selection, cleanup checkboxes | Unselected, selected, checked, protected, ineligible, stale, loading |
+| ResultTable and FindingRow | Shared results, sorting, item selection, cleanup checkboxes; Command-click toggles a row, Shift-click selects the eligible rows from the last clicked one | Unselected, selected, checked, protected, ineligible, stale, loading |
 | PathLabel and SizeLabel | Path/size formatting, full-path copy/reveal | Long path, uncertain size, unavailable data |
 | StatusBadge and RiskBadge | Human-readable status and action consequences | Complete, partial, active, unknown; review needed, rebuild required, permanent |
 | InspectorSection and KeyValueRow | Owner, evidence, tool state, and consequences | Available, missing, unknown, permission denied |

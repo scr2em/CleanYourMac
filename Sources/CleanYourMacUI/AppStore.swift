@@ -202,6 +202,43 @@ public final class AppStore {
     public func select(_ id: String, checked: Bool) {
         if checked { selectedIDs.insert(id) } else { selectedIDs.remove(id) }
     }
+    /// How a row was clicked: plainly, with Command, or with Shift.
+    public enum Click { case plain, toggle, extend }
+    /// The row a Shift-click range starts from, within the current query.
+    private var anchor: (query: UInt64, index: Int)?
+    /// A plain click inspects a row; Command-click also adds it to or removes it from the
+    /// selection; Shift-click selects every eligible row from the last clicked row to this one.
+    public func click(_ row: ResultRow, at index: Int, _ kind: Click) {
+        inspectedID = row.id
+        guard !isApplying else { return }
+        switch kind {
+        case .plain:
+            anchor = (queryID, index)
+        case .toggle:
+            if row.eligible { select(row.id, checked: !selectedIDs.contains(row.id)) }
+            anchor = (queryID, index)
+        case .extend:
+            guard let start = anchor, start.query == queryID else {
+                if row.eligible { select(row.id, checked: true) }
+                anchor = (queryID, index)
+                return
+            }
+            let range = min(start.index, index)..<(max(start.index, index) + 1)
+            Task { await selectEligible(in: range) }
+        }
+    }
+    /// Adds every eligible row in `range` of the current query, fetched in large pages.
+    private func selectEligible(in range: Range<Int>) async {
+        let query = queryID
+        var offset = range.lowerBound
+        while offset < range.upperBound {
+            let limit = min(5_000, range.upperBound - offset)
+            let rows = (try? await core.rows(queryID: query, offset: offset, limit: limit)) ?? []
+            guard query == queryID, !rows.isEmpty else { return }
+            selectedIDs.formUnion(rows.lazy.filter(\.eligible).map(\.id))
+            offset += rows.count
+        }
+    }
     public func refreshSelection() async {
         let ids = Array(selectedIDs)
         let summary = ids.isEmpty ? .empty : await core.selection(ids, preview: 0)

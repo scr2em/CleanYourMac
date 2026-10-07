@@ -284,7 +284,7 @@ public struct EmptyState: View {
     }
 }
 
-public struct ResultRow: View {
+public struct FindingRow: View {
     private let title: String, subtitle: String, value: String, badge: String, symbol: String
     private let active: Bool, eligible: Bool
     @Binding private var checked: Bool
@@ -372,9 +372,9 @@ public struct ComponentGallery: View {
                 Panel { StorageBar("Developer data", value: "12.4 GB", fraction: 0.6) }
                 Panel {
                     VStack(spacing: Space.xs) {
-                        ResultRow(title: "frontend", subtitle: "~/Projects/frontend/node_modules", value: "1.8 GB", badge: "Rebuild required", symbol: "shippingbox", active: false, eligible: true, checked: $checked) {}
-                        ResultRow(title: "node", subtitle: "~/Projects/frontend", value: "53% CPU · 240 MB", badge: "Review", symbol: "cpu", active: true, eligible: true, checked: $checked) {}
-                        ResultRow(title: "Main worktree", subtitle: "~/Projects/frontend", value: "2.1 GB", badge: "Protected", symbol: "arrow.triangle.branch", active: false, eligible: false, checked: .constant(false)) {}
+                        FindingRow(title: "frontend", subtitle: "~/Projects/frontend/node_modules", value: "1.8 GB", badge: "Rebuild required", symbol: "shippingbox", active: false, eligible: true, checked: $checked) {}
+                        FindingRow(title: "node", subtitle: "~/Projects/frontend", value: "53% CPU · 240 MB", badge: "Review", symbol: "cpu", active: true, eligible: true, checked: $checked) {}
+                        FindingRow(title: "Main worktree", subtitle: "~/Projects/frontend", value: "2.1 GB", badge: "Protected", symbol: "arrow.triangle.branch", active: false, eligible: false, checked: .constant(false)) {}
                     }
                 }
                 Panel { VStack(alignment: .leading, spacing: Space.lg) { KeyValueRow("State", "Incomplete scan · access denied"); KeyValueRow("Next action", "Choose a readable folder or grant access in System Settings.") } }

@@ -90,7 +90,7 @@ private struct ResultCell: View {
     let symbol: String
     var body: some View {
         if let row = store.row(at: index) {
-            ResultRow(
+            FindingRow(
                 title: row.title,
                 subtitle: (row.subtitle as NSString).abbreviatingWithTildeInPath,
                 value: Display.value(row),
@@ -99,7 +99,7 @@ private struct ResultCell: View {
                 active: store.inspectedID == row.id,
                 eligible: row.eligible && !store.isApplying,
                 checked: Binding(get: { store.selectedIDs.contains(row.id) }, set: { store.select(row.id, checked: $0) })
-            ) { store.inspectedID = row.id }
+            ) { store.click(row, at: index, Self.click) }
             .contextMenu {
                 Button("Reveal in Finder") { store.reveal(id: row.id, path: row.path) }
                 Button("Copy Path") { copy(row.path ?? row.subtitle) }
@@ -121,4 +121,11 @@ private struct ResultCell: View {
         }
     }
     private func copy(_ value: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string) }
+    /// The modifier held during the click that is being handled.
+    private static var click: AppStore.Click {
+        let flags = NSEvent.modifierFlags
+        if flags.contains(.shift) { return .extend }
+        if flags.contains(.command) { return .toggle }
+        return .plain
+    }
 }
