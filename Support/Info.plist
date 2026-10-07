@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>org.cleanyourmac.app</string>
+  <key>CFBundleName</key><string>CleanYourMac</string>
+  <key>CFBundleDisplayName</key><string>CleanYourMac</string>
+  <key>CFBundleExecutable</key><string>CleanYourMac</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>Find and review downloaded files and installers.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>Inspect storage and developer artifacts in folders you choose.</string>
+  <key>NSDesktopFolderUsageDescription</key><string>Inspect storage and developer artifacts in folders you choose.</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>NSHumanReadableCopyright</key><string>Copyright 2026 CleanYourMac contributors. MIT license.</string>
+</dict>
+</plist>

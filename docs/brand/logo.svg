@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">CleanYourMac</title>
+  <desc id="desc">A rounded mint leaf with a warm cream sparkle on a teal rounded square.</desc>
+  <rect width="1024" height="1024" rx="224" fill="#137969"/>
+  <path d="M265 740C202 642 209 491 307 382C405 272 589 226 776 246C784 422 741 603 632 713C526 819 371 830 265 740Z" fill="#5EBEA5"/>
+  <path d="M520 370L544 444L618 470L544 495L520 570L495 495L420 470L495 445Z" fill="#FFFDF5" stroke="#FFFDF5" stroke-width="14" stroke-linejoin="round"/>
+</svg>

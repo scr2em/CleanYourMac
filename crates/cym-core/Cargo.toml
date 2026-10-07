@@ -1,0 +1,26 @@
+[package]
+name = "cym-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[lib]
+name = "cym_core"
+crate-type = ["rlib", "staticlib"]
+
+[[bin]]
+name = "cym"
+path = "src/bin/cym.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+libc = "0.2"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[build-dependencies]
+cc = "1"
+
