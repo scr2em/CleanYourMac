@@ -108,6 +108,13 @@ fn dispatch(engine: &Engine, method: &str, p: &Value) -> Result<Value> {
                 .ok_or("This result view expired; query again.")?;
             value(snapshot.page(param(p, "offset")?, param::<usize>(p, "limit")?.min(5_000)))
         }
+        "eligibleIds" => {
+            let snapshot = engine
+                .results
+                .snapshot(param(p, "queryId")?)
+                .ok_or("This result view expired; query again.")?;
+            value(snapshot.eligible_ids(param(p, "offset")?, param(p, "limit")?))
+        }
         "position" => {
             let snapshot = engine
                 .results

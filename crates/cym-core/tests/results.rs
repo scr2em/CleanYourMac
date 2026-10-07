@@ -45,6 +45,17 @@ fn store_queries_filter_sort_and_page_snapshots() {
     assert_eq!(all.summary.modules.len(), 5);
     assert_eq!(all.largest.len(), 5);
     assert_eq!(all.largest[0].id, all.page(0, 1)[0].id);
+    // Range selection takes only the rows an action can apply to, in snapshot order.
+    let window = all.page(100, 200);
+    let expected: Vec<String> = window
+        .iter()
+        .filter(|r| r.eligible)
+        .map(|r| r.id.clone())
+        .collect();
+    assert!(expected.len() < window.len());
+    assert_eq!(all.eligible_ids(100, 200), expected);
+    assert_eq!(all.eligible, all.eligible_ids(0, usize::MAX).len());
+    assert!(all.eligible < all.len());
 
     // A snapshot stays consistent while the store changes.
     let ids: Vec<String> = all.page(0, 3).into_iter().map(|r| r.id).collect();

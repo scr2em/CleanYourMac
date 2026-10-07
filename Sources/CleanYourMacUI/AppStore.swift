@@ -77,6 +77,8 @@ public final class AppStore {
     // Current query: totals and a page cache. Rows are fetched only for what is on screen.
     public private(set) var queryID: UInt64 = 0
     public private(set) var resultTotal = 0
+    /// Rows in the current results an action can apply to.
+    public private(set) var eligibleTotal = 0
     /// Core-computed totals for the rows matching the search and filters.
     public private(set) var summary = Analytics.empty
     public private(set) var largest: [ResultRow] = []
@@ -144,7 +146,7 @@ public final class AppStore {
         let token = queryToken
         guard let info = try? await core.query(currentQuery), token == queryToken else { return }
         queryID = info.queryId; resultTotal = info.total; summary = info.summary
-        largest = info.largest; maxCPU = info.maxCpu
+        largest = info.largest; maxCPU = info.maxCpu; eligibleTotal = info.eligible
         pages = [:]; loadingPages = []
         if currentQuery.module == nil { overview = info.summary }
     }
@@ -204,22 +206,26 @@ public final class AppStore {
     }
     /// How a row was clicked: plainly, with Command, or with Shift.
     public enum Click { case plain, toggle, extend }
-    /// The row a Shift-click range starts from, within the current query.
-    private var anchor: (query: UInt64, index: Int)?
+    /// Where a Shift range starts, and the row last clicked or moved to, in one query.
+    @ObservationIgnored private var anchor: (query: UInt64, index: Int)?
+    @ObservationIgnored private var cursor: (query: UInt64, index: Int)?
+    /// The row last clicked or moved to, if it belongs to the current query.
+    public var cursorIndex: Int? { cursor.flatMap { $0.query == queryID ? $0.index : nil } }
     /// A plain click inspects a row; Command-click also adds it to or removes it from the
-    /// selection; Shift-click selects every eligible row from the last clicked row to this one.
+    /// selection; Shift-click selects every eligible row from the last plain or Command
+    /// click to this one.
     public func click(_ row: ResultRow, at index: Int, _ kind: Click) {
         inspectedID = row.id
-        guard !isApplying else { return }
+        cursor = (queryID, index)
         switch kind {
         case .plain:
             anchor = (queryID, index)
         case .toggle:
-            if row.eligible { select(row.id, checked: !selectedIDs.contains(row.id)) }
+            if row.eligible, !isApplying { select(row.id, checked: !selectedIDs.contains(row.id)) }
             anchor = (queryID, index)
         case .extend:
             guard let start = anchor, start.query == queryID else {
-                if row.eligible { select(row.id, checked: true) }
+                if row.eligible, !isApplying { select(row.id, checked: true) }
                 anchor = (queryID, index)
                 return
             }
@@ -227,16 +233,49 @@ public final class AppStore {
             Task { await selectEligible(in: range) }
         }
     }
-    /// Adds every eligible row in `range` of the current query, fetched in large pages.
+    /// Selects every eligible row of the current results.
+    public func selectAllResults() {
+        let total = resultTotal
+        Task { await selectEligible(in: 0..<total) }
+    }
+    public func deselectAll() { selectedIDs = [] }
+    /// Whether nothing, some or every selectable row of the current results is selected.
+    public enum SelectionState { case empty, partial, all }
+    public var selectionState: SelectionState {
+        if selectedIDs.isEmpty || eligibleTotal == 0 { return .empty }
+        return selectedIDs.count >= eligibleTotal ? .all : .partial
+    }
+    /// The header checkbox: selects every eligible row, or clears a complete selection.
+    public func toggleSelectAll() {
+        if selectionState == .all { deselectAll() } else { selectAllResults() }
+    }
+    /// Space: toggles the row last clicked or moved to.
+    public func toggleCursorRow() {
+        guard let index = cursorIndex, let row = row(at: index) else { return }
+        click(row, at: index, .toggle)
+    }
+    /// Arrow keys: inspects the next or previous row; with Shift, also selects from the
+    /// anchor to it. Returns the new row's index so the table can scroll to it.
+    public func moveCursor(by delta: Int, extend: Bool) async -> Int? {
+        guard resultTotal > 0 else { return nil }
+        let target = max(0, min(resultTotal - 1, (cursorIndex ?? -1) + delta))
+        let query = queryID
+        let found: ResultRow?
+        if let cached = row(at: target) { found = cached } else { found = await rows(target..<(target + 1)).first }
+        guard query == queryID, let row = found else { return nil }
+        click(row, at: target, extend ? .extend : .plain)
+        return target
+    }
+    /// Adds the eligible rows in `range` of the current query, fetched as IDs in large pages.
     private func selectEligible(in range: Range<Int>) async {
+        guard !isApplying else { return }
         let query = queryID
         var offset = range.lowerBound
         while offset < range.upperBound {
-            let limit = min(5_000, range.upperBound - offset)
-            let rows = (try? await core.rows(queryID: query, offset: offset, limit: limit)) ?? []
-            guard query == queryID, !rows.isEmpty else { return }
-            selectedIDs.formUnion(rows.lazy.filter(\.eligible).map(\.id))
-            offset += rows.count
+            let limit = min(100_000, range.upperBound - offset)
+            guard let ids = try? await core.eligibleIDs(queryID: query, offset: offset, limit: limit), query == queryID else { return }
+            selectedIDs.formUnion(ids)
+            offset += limit
         }
     }
     public func refreshSelection() async {

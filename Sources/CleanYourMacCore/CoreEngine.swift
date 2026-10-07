@@ -70,6 +70,11 @@ public final class CoreEngine: @unchecked Sendable {
         struct Params: Encodable { let queryId: UInt64; let offset: Int; let limit: Int }
         return try await detached { try self.value("rows", Params(queryId: queryID, offset: offset, limit: limit), as: [ResultRow].self) }
     }
+    /// IDs of the selectable rows in `offset..<offset + limit` of a query, without row data.
+    public func eligibleIDs(queryID: UInt64, offset: Int, limit: Int) async throws -> [String] {
+        struct Params: Encodable { let queryId: UInt64; let offset: Int; let limit: Int }
+        return try await detached { try self.value("eligibleIds", Params(queryId: queryID, offset: offset, limit: limit), as: [String].self) }
+    }
     public func position(queryID: UInt64, id: String) async -> Int? {
         struct Params: Encodable { let queryId: UInt64; let id: String }
         return (try? await detached { try self.call("position", Params(queryId: queryID, id: id), as: Int.self) }) ?? nil

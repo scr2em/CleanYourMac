@@ -198,6 +198,8 @@ private struct FinderView: View {
             if store.resultTotal == 0 {
                 EmptyState(store.isScanning ? "Looking for items…" : "No results to show", message: store.isScanning ? "Results appear as the scan progresses." : "Scan this tool or adjust your roots and search. Review warnings for incomplete coverage.", symbol: store.currentModule?.symbol ?? "tray")
             } else {
+                SelectionBar(store: store)
+                Divider()
                 ResultsTable(store: store, symbol: store.currentModule?.symbol ?? "doc")
             }
             Divider()
@@ -263,6 +265,50 @@ private struct WarningView: View {
                     }.font(TypeStyle.caption)
                 }.padding(.top, Space.sm)
             } label: { Label("\(store.warnings.count) scan warnings · coverage may be incomplete", systemImage: "exclamationmark.triangle").font(TypeStyle.caption).foregroundStyle(Palette.warning) }
+        }
+    }
+}
+
+/// The select-all checkbox, the selection count and how to select with the keyboard.
+private struct SelectionBar: View {
+    @Bindable var store: AppStore
+    var body: some View {
+        HStack(spacing: Space.md) {
+            Button { store.toggleSelectAll() } label: {
+                HStack(spacing: Space.sm) {
+                    Image(systemName: symbol)
+                        .font(TypeStyle.headline)
+                        .foregroundStyle(store.selectionState == .empty ? Palette.muted : Palette.accentSymbol)
+                    Text(title).font(TypeStyle.label)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .disabled(store.eligibleTotal == 0 || store.isApplying)
+            .help(store.selectionState == .all ? "Clear the selection" : "Select every item that can be acted on")
+            .accessibilityLabel(title)
+            if !store.selectedIDs.isEmpty {
+                Text("\(store.selectedIDs.count.formatted()) selected").font(TypeStyle.caption).foregroundStyle(Palette.muted)
+                Button("Clear") { store.deselectAll() }.buttonStyle(.borderless).font(TypeStyle.caption).disabled(store.isApplying)
+            }
+            Spacer()
+            Text("⌘-click to add · ⇧-click for a range · ⌘A for all · Esc to clear")
+                .font(TypeStyle.caption).foregroundStyle(Palette.muted).lineLimit(1).truncationMode(.head)
+        }
+        .padding(.horizontal, Space.lg)
+        .padding(.vertical, Space.sm)
+    }
+    private var title: String {
+        switch store.selectionState {
+        case .all: "Deselect all"
+        case .empty, .partial: store.eligibleTotal == store.resultTotal ? "Select all" : "Select all \(store.eligibleTotal.formatted()) eligible"
+        }
+    }
+    private var symbol: String {
+        switch store.selectionState {
+        case .empty: "square"
+        case .partial: "minus.square.fill"
+        case .all: "checkmark.square.fill"
         }
     }
 }

@@ -12,13 +12,17 @@ struct ResultsTable: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(store: store, symbol: symbol) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let table = NSTableView()
+        let table = KeyboardTableView()
+        let coordinator = context.coordinator
+        table.onKey = { [weak coordinator] event in coordinator?.handle(event) ?? false }
+        table.onSelectAll = { [weak coordinator] in coordinator?.store.selectAllResults() }
         table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("result")))
         table.headerView = nil
         table.style = .plain
         table.rowHeight = Layout.rowMinimum
         table.usesAutomaticRowHeights = false
         table.selectionHighlightStyle = .none
+        table.focusRingType = .none
         table.intercellSpacing = .zero
         table.gridStyleMask = .solidHorizontalGridLineMask
         table.backgroundColor = .clear
@@ -58,10 +62,50 @@ struct ResultsTable: NSViewRepresentable {
             store.prefetch(row)
             let identifier = NSUserInterfaceItemIdentifier("ResultCell")
             let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? HostingCell ?? HostingCell(identifier: identifier)
-            cell.show(ResultCell(store: store, index: row, symbol: symbol))
+            cell.show(ResultCell(store: store, index: row, symbol: symbol) { [weak tableView] in
+                // Keyboard selection follows the row last clicked.
+                tableView?.window?.makeFirstResponder(tableView)
+            })
             return cell
         }
+
+        /// Arrow keys move between rows (Shift extends the selection), Space toggles the
+        /// current row and Escape clears the selection.
+        func handle(_ event: NSEvent) -> Bool {
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            switch event.keyCode {
+            case 125, 126:
+                guard flags.isDisjoint(with: [.command, .option, .control]) else { return false }
+                let delta = event.keyCode == 125 ? 1 : -1
+                let extend = flags.contains(.shift)
+                Task { @MainActor [weak self] in
+                    guard let index = await self?.store.moveCursor(by: delta, extend: extend) else { return }
+                    self?.table?.scrollRowToVisible(index)
+                }
+                return true
+            case 49:
+                guard flags.isDisjoint(with: [.command, .option, .control, .shift]) else { return false }
+                store.toggleCursorRow()
+                return true
+            case 53:
+                store.deselectAll()
+                return true
+            default:
+                return false
+            }
+        }
     }
+}
+
+/// A table that hands keys and Edit > Select All to the result store.
+final class KeyboardTableView: NSTableView {
+    var onKey: (@MainActor (NSEvent) -> Bool)?
+    var onSelectAll: (@MainActor () -> Void)?
+    override var acceptsFirstResponder: Bool { true }
+    override func keyDown(with event: NSEvent) {
+        if onKey?(event) != true { super.keyDown(with: event) }
+    }
+    override func selectAll(_ sender: Any?) { onSelectAll?() }
 }
 
 /// A reusable table cell hosting one SwiftUI row.
@@ -88,6 +132,7 @@ private struct ResultCell: View {
     @Bindable var store: AppStore
     let index: Int
     let symbol: String
+    let focus: @MainActor () -> Void
     var body: some View {
         if let row = store.row(at: index) {
             FindingRow(
@@ -99,8 +144,15 @@ private struct ResultCell: View {
                 active: store.inspectedID == row.id,
                 eligible: row.eligible && !store.isApplying,
                 checked: Binding(get: { store.selectedIDs.contains(row.id) }, set: { store.select(row.id, checked: $0) })
-            ) { store.click(row, at: index, Self.click) }
+            ) { store.click(row, at: index, Self.click); focus() }
             .contextMenu {
+                if row.eligible {
+                    let selected = store.selectedIDs.contains(row.id)
+                    Button(selected ? "Deselect" : "Select") { store.select(row.id, checked: !selected) }
+                }
+                Button("Select All Results") { store.selectAllResults() }
+                if !store.selectedIDs.isEmpty { Button("Deselect All") { store.deselectAll() } }
+                Divider()
                 Button("Reveal in Finder") { store.reveal(id: row.id, path: row.path) }
                 Button("Copy Path") { copy(row.path ?? row.subtitle) }
                 if let pid = row.pid {

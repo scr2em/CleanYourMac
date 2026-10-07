@@ -119,6 +119,11 @@ pub struct Snapshot {
     pub summary: Analytics,
     pub largest: Vec<Row>,
     pub max_cpu: Option<f64>,
+    /// Rows an action can apply to, for a "select all" control.
+    pub eligible: usize,
+}
+fn eligible(f: &Finding) -> bool {
+    !f.actions.is_empty() && f.blocked_reason.is_none()
 }
 impl Snapshot {
     pub fn len(&self) -> usize {
@@ -135,6 +140,17 @@ impl Snapshot {
             .map(|f| Row::from(f.as_ref()))
             .collect()
     }
+    /// IDs of the rows in `offset..offset + limit` that can be selected for an action;
+    /// selecting a range or everything needs no row projections.
+    pub fn eligible_ids(&self, offset: usize, limit: usize) -> Vec<String> {
+        self.rows
+            .iter()
+            .skip(offset)
+            .take(limit)
+            .filter(|f| eligible(f))
+            .map(|f| f.id.clone())
+            .collect()
+    }
     /// The row's position in this snapshot, for keeping the inspected row in view.
     pub fn position(&self, id: &str) -> Option<usize> {
         self.rows.par_iter().position_first(|f| f.id == id)
@@ -149,6 +165,7 @@ pub struct SnapshotInfo {
     pub summary: Analytics,
     pub largest: Vec<Row>,
     pub max_cpu: Option<f64>,
+    pub eligible: usize,
 }
 impl From<&Snapshot> for SnapshotInfo {
     fn from(s: &Snapshot) -> Self {
@@ -159,6 +176,7 @@ impl From<&Snapshot> for SnapshotInfo {
             summary: s.summary.clone(),
             largest: s.largest.clone(),
             max_cpu: s.max_cpu,
+            eligible: s.eligible,
         }
     }
 }
@@ -342,6 +360,7 @@ impl ResultStore {
                 .par_iter()
                 .filter_map(|f| f.cpu_percent)
                 .max_by(|a, b| a.total_cmp(b)),
+            eligible: rows.par_iter().filter(|f| eligible(f)).count(),
             summary,
             rows,
         });

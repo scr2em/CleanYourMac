@@ -104,3 +104,30 @@ import Testing
         #expect(!store.selectedIDs.contains(blocked.id))
     }
 }
+
+@MainActor @Test func keyboardMovesTheCursorAndSelectsAllOrNothing() async throws {
+    let defaults = try #require(UserDefaults(suiteName: "org.cleanyourmac.test." + UUID().uuidString))
+    let store = AppStore(demo: true, demoRows: 5_000, defaults: defaults, core: CoreEngine())
+    await store.requery()
+    let rows = await store.rows(0..<3)
+    #expect(await store.moveCursor(by: 1, extend: false) == 0)
+    #expect(store.inspectedID == rows[0].id)
+    #expect(await store.moveCursor(by: -1, extend: false) == 0)
+    #expect(await store.moveCursor(by: 2, extend: true) == 2)
+    #expect(store.inspectedID == rows[2].id)
+    for _ in 0..<200 where store.selectedIDs.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+    #expect(store.selectedIDs == Set(rows.filter(\.eligible).map(\.id)))
+
+    #expect(store.selectionState == .partial)
+    store.deselectAll()
+    #expect(store.selectedIDs.isEmpty)
+    #expect(store.selectionState == .empty)
+    store.toggleSelectAll()
+    let eligible = await store.rows(0..<store.resultTotal).filter(\.eligible).count
+    #expect(store.eligibleTotal == eligible)
+    for _ in 0..<200 where store.selectedIDs.count < eligible { try await Task.sleep(for: .milliseconds(10)) }
+    #expect(store.selectedIDs.count == eligible)
+    #expect(store.selectionState == .all)
+    store.toggleSelectAll()
+    #expect(store.selectedIDs.isEmpty)
+}

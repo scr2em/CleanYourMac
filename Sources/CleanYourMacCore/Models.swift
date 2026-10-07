@@ -269,6 +269,8 @@ public struct QueryInfo: Codable, Sendable {
     public let summary: Analytics
     public let largest: [ResultRow]
     public let maxCpu: Double?
+    /// Rows an action can apply to.
+    public let eligible: Int
 }
 
 /// Totals and shared actions for selected IDs, with a bounded preview for review.

@@ -23,6 +23,13 @@ import SwiftUI
             .defaultSize(width: Layout.windowWidth, height: Layout.windowHeight)
             .commands {
                 CommandGroup(replacing: .newItem) {}
+                CommandMenu("Selection") {
+                    Button("Select All Results") { store.selectAllResults() }
+                        .disabled(store.eligibleTotal == 0 || store.isApplying)
+                    Button("Deselect All") { store.deselectAll() }
+                        .keyboardShortcut("a", modifiers: [.command, .shift])
+                        .disabled(store.selectedIDs.isEmpty)
+                }
                 CommandGroup(after: .toolbar) {
                     Button("Scan Current Tool") { store.scan() }.keyboardShortcut("r")
                     Button("Component Gallery") { store.selectedModuleID = "gallery" }
