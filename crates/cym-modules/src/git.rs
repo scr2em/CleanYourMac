@@ -18,6 +18,8 @@ pub struct Safety {
     pub reason: String,
     pub status: String,
     pub upstream: String,
+    /// Ignored files and folders that removal deletes, as Git lists them.
+    pub ignored: Vec<String>,
 }
 impl Safety {
     pub fn blocked(reason: &str, status: &str, upstream: &str) -> Self {
@@ -26,7 +28,28 @@ impl Safety {
             reason: reason.into(),
             status: status.into(),
             upstream: upstream.into(),
+            ignored: vec![],
         }
+    }
+}
+fn plural(count: usize) -> &'static str {
+    if count == 1 {
+        ""
+    } else {
+        "s"
+    }
+}
+/// The first `limit` names, then how many more.
+pub fn sample(names: &[String], limit: usize) -> String {
+    let shown = names
+        .iter()
+        .take(limit)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    match names.len().saturating_sub(limit) {
+        0 => shown,
+        more => format!("{shown} and {more} more"),
     }
 }
 
@@ -73,7 +96,13 @@ impl Git<'_> {
         }
         parse(&out.data)
     }
-    /// Whether a linked worktree can be removed without losing local-only work.
+    /// Whether removing a linked worktree loses anything Git cannot give back.
+    ///
+    /// `git worktree remove` deletes the folder but keeps the branch, its commits and the
+    /// repository's stashes. What it cannot keep is uncommitted work, files that were never
+    /// added, and commits reachable only from a detached HEAD, so only those block removal.
+    /// Ignored files (dependencies, build output, local settings) are deleted with the folder
+    /// and listed for review.
     pub fn safety(&self, record: &Worktree, control: &ScanControl) -> Result<Safety> {
         if record.main || record.bare {
             return Ok(Safety::blocked(
@@ -83,19 +112,16 @@ impl Git<'_> {
             ));
         }
         if record.locked {
-            return Ok(Safety::blocked("This worktree is locked.", "Locked", "—"));
+            return Ok(Safety::blocked(
+                "This worktree is locked. Unlock it with `git worktree unlock` to remove it.",
+                "Locked",
+                "—",
+            ));
         }
         if record.prunable {
             return Ok(Safety::blocked(
                 "Git reports stale registration metadata; inspect manually.",
                 "Orphaned",
-                "Unknown",
-            ));
-        }
-        if record.branch.is_empty() {
-            return Ok(Safety::blocked(
-                "Detached HEAD needs manual inspection.",
-                "Detached",
                 "Unknown",
             ));
         }
@@ -106,28 +132,108 @@ impl Git<'_> {
                 "Unknown",
             ));
         }
+        // Untracked and ignored folders are reported once, not file by file.
         let state = self.run(
             &record.path,
             &[
                 "status",
                 "--porcelain=v1",
                 "-z",
-                "--untracked-files=all",
-                "--ignored",
+                "--untracked-files=normal",
+                "--ignored=traditional",
             ],
             control,
         )?;
         if state.status != 0 {
             return Err("Git status is unavailable.".into());
         }
-        if !state.data.is_empty() {
+        let (mut changed, mut untracked, mut ignored) = (0, 0, vec![]);
+        let text = String::from_utf8_lossy(&state.data);
+        let mut entries = text.split('\0');
+        while let Some(entry) = entries.next() {
+            if entry.len() < 4 || !entry.is_char_boundary(3) {
+                continue;
+            }
+            match &entry[..2] {
+                "!!" => ignored.push(entry[3..].trim_end_matches('/').to_owned()),
+                "??" => untracked += 1,
+                code => {
+                    changed += 1;
+                    // A rename or copy is followed by its original path.
+                    if code.contains('R') || code.contains('C') {
+                        entries.next();
+                    }
+                }
+            }
+        }
+        if changed > 0 || untracked > 0 {
+            let mut parts = vec![];
+            if changed > 0 {
+                parts.push(format!("{changed} uncommitted change{}", plural(changed)));
+            }
+            if untracked > 0 {
+                parts.push(format!("{untracked} untracked item{}", plural(untracked)));
+            }
             return Ok(Safety::blocked(
-                "Contains changes, untracked or ignored files. Inspect before removal.",
-                "Local files",
+                &format!(
+                    "Has {}. Commit, stash or delete them first; removal would lose them.",
+                    parts.join(" and ")
+                ),
+                "Local changes",
                 "Not checked",
             ));
         }
-        let upstream = self.run(
+        let kept = if record.branch.is_empty() {
+            // A detached HEAD's commits survive only if a branch or tag also reaches them.
+            let refs = self.run(
+                &record.path,
+                &[
+                    "for-each-ref",
+                    "--count=1",
+                    "--contains=HEAD",
+                    "--format=%(refname:short)",
+                    "refs/heads",
+                    "refs/remotes",
+                    "refs/tags",
+                ],
+                control,
+            )?;
+            let reference = refs.text().trim().to_owned();
+            if refs.status != 0 || reference.is_empty() {
+                return Ok(Safety::blocked(
+                    "Detached HEAD has commits no branch or tag contains. Create a branch to keep them before removing.",
+                    "Detached",
+                    "None",
+                ));
+            }
+            format!("its commit is kept on {reference}")
+        } else {
+            format!(
+                "branch {} and its commits stay in the repository",
+                record.branch
+            )
+        };
+        let upstream = self.upstream(record, control);
+        let mut reason =
+            format!("No uncommitted or untracked work. Removing deletes the folder; {kept}.");
+        if !ignored.is_empty() {
+            reason += &format!(" Ignored files are deleted too: {}.", sample(&ignored, 4));
+        }
+        Ok(Safety {
+            eligible: true,
+            reason,
+            status: "Clean".into(),
+            upstream,
+            ignored,
+        })
+    }
+    /// The branch's upstream and how far ahead it is, for information only: removing a
+    /// worktree keeps the branch, so unpushed commits are not lost.
+    fn upstream(&self, record: &Worktree, control: &ScanControl) -> String {
+        if record.branch.is_empty() {
+            return "—".into();
+        }
+        let name = self.run(
             &record.path,
             &[
                 "rev-parse",
@@ -136,33 +242,25 @@ impl Git<'_> {
                 "@{upstream}",
             ],
             control,
-        )?;
-        if upstream.status != 0 {
-            return Ok(Safety::blocked(
-                "No verified upstream. Local commits may exist only here.",
-                "Clean",
-                "None",
-            ));
+        );
+        let Some(name) = name.ok().filter(|o| o.status == 0) else {
+            return "None".into();
+        };
+        let name = name.text().trim().to_owned();
+        let ahead = self
+            .run(
+                &record.path,
+                &["rev-list", "--count", "@{upstream}..HEAD"],
+                control,
+            )
+            .ok()
+            .filter(|o| o.status == 0)
+            .and_then(|o| o.text().trim().parse::<u64>().ok());
+        match ahead {
+            Some(0) => name,
+            Some(n) => format!("{name} ({n} ahead)"),
+            None => format!("{name} (unknown)"),
         }
-        let upstream = upstream.text().trim().to_owned();
-        let ahead = self.run(
-            &record.path,
-            &["rev-list", "--count", "@{upstream}..HEAD"],
-            control,
-        )?;
-        if ahead.status != 0 || ahead.text().trim().parse::<u64>() != Ok(0) {
-            return Ok(Safety::blocked(
-                "Has unpushed or unknown local commits.",
-                "Clean",
-                &upstream,
-            ));
-        }
-        Ok(Safety {
-            eligible: true,
-            reason: "Clean linked worktree with no ignored files or commits ahead of its local upstream reference. Review before removal.".into(),
-            status: "Clean".into(),
-            upstream,
-        })
     }
     /// Unix time of the checked-out commit, the worktree's last activity Git can vouch for.
     pub fn last_commit(&self, worktree: &str, control: &ScanControl) -> Option<f64> {

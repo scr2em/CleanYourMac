@@ -119,6 +119,14 @@ impl WorktreeModule {
                 detail("HEAD", record.head.clone()),
                 detail("State", state.status.clone()),
                 detail("Upstream (local ref)", state.upstream.clone()),
+                detail(
+                    "Ignored files deleted",
+                    if state.ignored.is_empty() {
+                        "None".into()
+                    } else {
+                        crate::git::sample(&state.ignored, 20)
+                    },
+                ),
                 detail("Type", if record.main { "Main" } else { "Linked" }),
             ];
             if in_scope && state.eligible && size.complete {

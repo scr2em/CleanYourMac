@@ -108,7 +108,7 @@ public enum ActionKind: String, Codable, CaseIterable, Sendable {
     public var consequence: String {
         switch self {
         case .trash: "Moves the selected items to Trash. Disk space is freed only after Trash is emptied. Restore is available while the item still exists."
-        case .removeWorktree: "Git removes the selected linked worktree. Ignored files may be lost. The branch is retained. This action cannot be undone here."
+        case .removeWorktree: "Git deletes the worktree folder, including the ignored files listed for it. Its branch and commits stay in the repository. This action cannot be undone here."
         case .resetSimulator: "Erases apps, data and settings on the selected simulator. The device remains. This cannot be undone."
         case .deleteSimulator: "Deletes the selected simulator and all its app data. Its runtime remains installed. This cannot be undone."
         case .terminate: "Requests a graceful exit with SIGTERM. A process may have unsaved work. No automatic force quit follows."

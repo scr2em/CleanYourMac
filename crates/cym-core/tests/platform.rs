@@ -31,8 +31,12 @@ fn worktree_parser_preserves_unusual_paths() {
 }
 
 #[test]
-fn worktree_with_ignored_files_cannot_be_removed() {
-    let runner = StubRunner::new(vec![output("!! .env\0", 0)]);
+fn ignored_files_are_listed_but_do_not_block_removal() {
+    // Status, then a missing upstream.
+    let runner = StubRunner::new(vec![
+        output("!! .env\0!! node_modules/\0", 0),
+        output("", 128),
+    ]);
     let record = Worktree {
         path: "/fixture/worktree".into(),
         branch: "feature".into(),
@@ -41,9 +45,39 @@ fn worktree_with_ignored_files_cannot_be_removed() {
     let safety = Git(runner.as_ref())
         .safety(&record, &ScanControl::default())
         .unwrap();
-    assert!(!safety.eligible);
-    assert!(safety.reason.contains("ignored"));
-    assert_eq!(runner.calls().len(), 1);
+    assert!(safety.eligible, "{}", safety.reason);
+    assert_eq!(safety.ignored, [".env", "node_modules"]);
+    assert!(safety.reason.contains("branch feature"));
+    assert!(safety.reason.contains(".env, node_modules"));
+    assert_eq!(safety.upstream, "None");
+    assert_eq!(runner.calls().len(), 2);
+}
+
+#[test]
+fn uncommitted_and_untracked_work_blocks_removal() {
+    let record = Worktree {
+        path: "/fixture/worktree".into(),
+        branch: "feature".into(),
+        ..Default::default()
+    };
+    let safety = |status: &str| {
+        let runner = StubRunner::new(vec![output(status, 0)]);
+        Git(runner.as_ref())
+            .safety(&record, &ScanControl::default())
+            .unwrap()
+    };
+    let both = safety(" M src/a.rs\0?? new.txt\0!! target/\0");
+    assert!(!both.eligible);
+    assert!(both
+        .reason
+        .contains("1 uncommitted change and 1 untracked item"));
+    // A rename's original path follows it and is not counted again.
+    let renamed = safety("R  b.rs\0a\0M  c.rs\0");
+    assert!(
+        renamed.reason.contains("2 uncommitted changes"),
+        "{}",
+        renamed.reason
+    );
 }
 
 fn git_available() -> bool {
@@ -140,8 +174,68 @@ fn real_git_worktree_rejects_late_changes_and_removes_only_an_eligible_tree() {
         .unwrap();
     assert_eq!(row.badge.as_deref(), Some("Detached"));
     assert!(row.subtitle.starts_with("Detached at "));
+    // Its commit is also on main, so removing it loses nothing.
+    assert_eq!(
+        row.actions,
+        vec![ActionKind::RemoveWorktree],
+        "{}",
+        row.reason
+    );
+    // A commit only the detached HEAD reaches blocks removal.
+    f.write("detached/readme.txt", "changed");
+    command(
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-am",
+            "detached work",
+        ],
+        &detached,
+    );
+    let report = scan();
+    let row = report
+        .findings
+        .iter()
+        .find(|r| r.resource.path() == Some(detached.as_str()))
+        .unwrap();
     assert!(row.actions.is_empty());
-    command(&["worktree", "remove", &detached], &repository);
+    assert!(
+        row.reason.contains("no branch or tag contains"),
+        "{}",
+        row.reason
+    );
+    command(&["worktree", "remove", "--force", &detached], &repository);
+
+    // Ignored files and a branch without an upstream do not block removal.
+    let unpublished = f.at("unpublished");
+    command(
+        &["worktree", "add", "-b", "unpublished", &unpublished, "main"],
+        &repository,
+    );
+    fs::write(f.at("main/.git/info/exclude"), "node_modules/\n").unwrap();
+    f.write("unpublished/node_modules/x/index.js", "x");
+    let report = scan();
+    let row = report
+        .findings
+        .iter()
+        .find(|r| r.resource.path() == Some(unpublished.as_str()))
+        .unwrap();
+    assert_eq!(
+        row.actions,
+        vec![ActionKind::RemoveWorktree],
+        "{}",
+        row.reason
+    );
+    assert!(row
+        .reason
+        .contains("Ignored files are deleted too: node_modules"));
+    assert_eq!(row.value("Upstream (local ref)"), Some("None"));
+    command(&["worktree", "remove", &unpublished], &repository);
 
     let identity = s.snapshot(&linked, &k).unwrap();
     f.write("linked/late-untracked.txt", "late");
