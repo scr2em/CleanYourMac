@@ -107,10 +107,20 @@ impl Walker for StackWalker {
 pub struct MetadataSizer {
     pub fs: Arc<dyn FileSystem>,
     pub limit: u64,
+    /// Pool for the parallel folder walk; the caller's pool when `None`.
+    pub pool: Option<Arc<rayon::ThreadPool>>,
 }
 impl MetadataSizer {
     pub fn new(fs: Arc<dyn FileSystem>) -> Self {
-        Self { fs, limit: 500_000 }
+        Self {
+            fs,
+            limit: 500_000,
+            pool: None,
+        }
+    }
+    pub fn on(mut self, pool: Arc<rayon::ThreadPool>) -> Self {
+        self.pool = Some(pool);
+        self
     }
 }
 #[derive(Default)]
@@ -234,7 +244,10 @@ impl Sizer for MetadataSizer {
             count: AtomicU64::new(0),
             limit: self.limit,
         };
-        let mut tally = walk.directory(root.path());
+        let mut tally = match &self.pool {
+            Some(pool) => pool.install(|| walk.directory(root.path())),
+            None => walk.directory(root.path()),
+        };
         control.check()?;
         let mut physical = HashSet::new();
         for (device, inode, allocated) in std::mem::take(&mut tally.shared) {

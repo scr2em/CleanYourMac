@@ -151,7 +151,9 @@ impl Engine {
         report.into_inner().unwrap_or_default()
     }
     pub fn execute(&self, request: &ActionRequest, control: &ScanControl) -> Vec<ActionResult> {
-        actions::execute(&self.services, &self.registry, request, control)
+        self.services
+            .io
+            .install(|| actions::execute(&self.services, &self.registry, request, control))
     }
     /// Executes an action on stored findings by ID and drops rows that were applied or are
     /// already gone.

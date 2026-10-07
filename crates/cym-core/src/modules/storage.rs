@@ -130,6 +130,7 @@ fn regroup<K: std::hash::Hash + Eq>(rows: Vec<(K, Entry)>) -> Vec<(K, Vec<Entry>
 impl DuplicatesModule {
     /// Hashes every candidate in parallel; failures become warnings and drop the file.
     fn stage(
+        io: &rayon::ThreadPool,
         sink: &mut dyn Sink,
         k: &ScanControl,
         groups: Vec<Vec<Entry>>,
@@ -139,10 +140,12 @@ impl DuplicatesModule {
             .into_iter()
             .enumerate()
             .flat_map(|(group, entries)| entries.into_iter().map(move |e| (group, e)))
-            .collect::<Vec<_>>()
-            .into_par_iter()
-            .map(|(group, e)| (group, hash(&e), e))
-            .collect();
+            .collect::<Vec<_>>();
+        let rows: Vec<_> = io.install(|| {
+            rows.into_par_iter()
+                .map(|(group, e)| (group, hash(&e), e))
+                .collect()
+        });
         k.check()?;
         let mut keyed = vec![];
         for (group, digest, e) in rows {
@@ -206,7 +209,7 @@ impl ScanModule for DuplicatesModule {
         let count: usize = groups.iter().map(Vec::len).sum();
         sink.progress(format!("Comparing {count} candidates"));
         let prefix = self.prefix_bytes;
-        let groups = Self::stage(sink, k, groups, |e| {
+        let groups = Self::stage(&s.io, sink, k, groups, |e| {
             if e.bytes > prefix {
                 s.hasher.hash(e.path(), Some(prefix), k)
             } else {
@@ -216,7 +219,7 @@ impl ScanModule for DuplicatesModule {
         let groups: Vec<_> = groups.into_iter().map(|(_, g)| g).collect();
         let count: usize = groups.iter().map(Vec::len).sum();
         sink.progress(format!("Verifying {count} files"));
-        let mut groups = Self::stage(sink, k, groups, |e| s.verified_hash(e.path(), k))?;
+        let mut groups = Self::stage(&s.io, sink, k, groups, |e| s.verified_hash(e.path(), k))?;
         for (_, group) in &mut groups {
             group.sort_by(|a, b| a.path().cmp(b.path()));
         }

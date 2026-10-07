@@ -35,6 +35,19 @@ pub struct Services {
     pub walk_limit: usize,
     /// Maximum findings one module may report in a scan.
     pub result_limit: usize,
+    /// Pool for blocking filesystem work (walking, sizing, hashing), kept apart from the
+    /// global pool that answers queries so the UI stays responsive during scans.
+    pub io: Arc<rayon::ThreadPool>,
+}
+/// Up to eight I/O threads: beyond that, measured filesystem walks stop getting faster.
+fn io_pool() -> rayon::ThreadPool {
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get().clamp(2, 8));
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .thread_name(|i| format!("cym-io-{i}"))
+        .build()
+        .or_else(|_| rayon::ThreadPoolBuilder::new().num_threads(1).build())
+        .expect("a single-thread pool can always be built")
 }
 impl Services {
     pub fn native() -> Self {
@@ -44,9 +57,10 @@ impl Services {
     }
     pub fn with_journal(journal: Arc<dyn Journal>) -> Self {
         let files: Arc<dyn FileSystem> = Arc::new(fs::StdFileSystem);
+        let io = Arc::new(io_pool());
         Self {
             walker: Arc::new(fs::StackWalker(files.clone())),
-            sizer: Arc::new(fs::MetadataSizer::new(files.clone())),
+            sizer: Arc::new(fs::MetadataSizer::new(files.clone()).on(io.clone())),
             fs: files,
             hasher: Arc::new(fs::Blake3Hasher),
             commands: Arc::new(command::SystemRunner),
@@ -58,6 +72,7 @@ impl Services {
             process_state: Default::default(),
             walk_limit: 20_000_000,
             result_limit: 2_000_000,
+            io,
         }
     }
 

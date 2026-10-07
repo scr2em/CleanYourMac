@@ -245,22 +245,24 @@ pub(crate) fn add_files(
         candidates.len(),
         if candidates.len() == 1 { "" } else { "s" }
     ));
-    let rows: Vec<_> = candidates
-        .into_par_iter()
-        .map(|c| {
-            let row = services.file_finding(
-                &c.entry,
-                module,
-                c.title.as_deref(),
-                &c.reason,
-                c.actions,
-                c.risk,
-                control,
-            );
-            let used = c.last_used.resolve(services, c.entry.path());
-            (c.entry.identity.path, c.details, c.blocked, used, row)
-        })
-        .collect();
+    let rows: Vec<_> = services.io.install(|| {
+        candidates
+            .into_par_iter()
+            .map(|c| {
+                let row = services.file_finding(
+                    &c.entry,
+                    module,
+                    c.title.as_deref(),
+                    &c.reason,
+                    c.actions,
+                    c.risk,
+                    control,
+                );
+                let used = c.last_used.resolve(services, c.entry.path());
+                (c.entry.identity.path, c.details, c.blocked, used, row)
+            })
+            .collect()
+    });
     control.check()?;
     for (path, details, blocked, used, row) in rows {
         match row {
