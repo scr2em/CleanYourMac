@@ -110,23 +110,38 @@ fn real_git_worktree_rejects_late_changes_and_removes_only_an_eligible_tree() {
         .unwrap();
     assert!(git.safety(&record, &k).unwrap().eligible);
 
-    // The module reports the linked tree as eligible and the main tree as protected.
-    let report = Engine::new(s.clone(), modules::builtin()).scan_report(
-        &["worktrees".into()],
-        &f.context(),
-        &k,
-    );
-    let linked_row = report
-        .findings
-        .iter()
-        .find(|r| r.subtitle == linked)
-        .unwrap();
+    // Only the linked tree is listed; the main checkout is not a cleanup candidate.
+    let scan = || {
+        Engine::new(s.clone(), modules::builtin()).scan_report(
+            &["worktrees".into()],
+            &f.context(),
+            &k,
+        )
+    };
+    let report = scan();
+    assert_eq!(report.findings.len(), 1, "{:?}", report.findings);
+    let linked_row = &report.findings[0];
+    assert_eq!(linked_row.resource.path(), Some(linked.as_str()));
+    assert_eq!(linked_row.subtitle, format!("fixture-feature · {linked}"));
     assert_eq!(linked_row.actions, vec![ActionKind::RemoveWorktree]);
     assert_eq!(linked_row.badge.as_deref(), Some("Linked"));
-    assert!(report
+
+    // A detached linked tree is labelled and needs manual inspection.
+    let detached = f.at("detached");
+    command(
+        &["worktree", "add", "--detach", &detached, "main"],
+        &repository,
+    );
+    let report = scan();
+    let row = report
         .findings
         .iter()
-        .any(|r| r.badge.as_deref() == Some("Main") && r.actions.is_empty()));
+        .find(|r| r.resource.path() == Some(detached.as_str()))
+        .unwrap();
+    assert_eq!(row.badge.as_deref(), Some("Detached"));
+    assert!(row.subtitle.starts_with("Detached at "));
+    assert!(row.actions.is_empty());
+    command(&["worktree", "remove", &detached], &repository);
 
     let identity = s.snapshot(&linked, &k).unwrap();
     f.write("linked/late-untracked.txt", "late");

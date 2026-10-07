@@ -15,6 +15,26 @@ fn title(path: &str) -> &str {
         .and_then(|s| s.to_str())
         .unwrap_or(path)
 }
+/// The worktree's state, shown as its row badge.
+fn state_badge(record: &Worktree) -> &'static str {
+    if record.prunable {
+        "Orphaned"
+    } else if record.locked {
+        "Locked"
+    } else if record.branch.is_empty() {
+        "Detached"
+    } else {
+        "Linked"
+    }
+}
+/// The checked-out branch, or the short commit for a detached HEAD.
+fn head_label(record: &Worktree) -> String {
+    if record.branch.is_empty() {
+        format!("Detached at {}", &record.head[..record.head.len().min(8)])
+    } else {
+        record.branch.clone()
+    }
+}
 fn is_repository(s: &Services, path: &str) -> bool {
     s.exists(&format!("{path}/.git"))
         || (s.is_file(&format!("{path}/HEAD")) && s.is_dir(&format!("{path}/objects")))
@@ -35,6 +55,10 @@ impl WorktreeModule {
         }
         for record in git.worktrees(repository, k)? {
             k.check()?;
+            // A repository's main checkout is not a cleanup candidate; only linked trees are.
+            if record.main || record.bare {
+                continue;
+            }
             if c.excludes(&record.path) {
                 continue;
             }
@@ -79,16 +103,8 @@ impl WorktreeModule {
             f.allocated_bytes = in_scope.then_some(size.allocated);
             f.modified_at = Some(e.modified());
             f.risk = Risk::Permanent;
-            f.badge = Some(
-                if record.prunable {
-                    "Orphaned"
-                } else if record.main {
-                    "Main"
-                } else {
-                    "Linked"
-                }
-                .into(),
-            );
+            f.subtitle = format!("{} · {}", head_label(&record), record.path);
+            f.badge = Some(state_badge(&record).into());
             f.details = vec![
                 detail("Repository", directory.clone()),
                 detail(
@@ -129,6 +145,7 @@ impl WorktreeModule {
             },
             "Git retains this registration, but its folder is missing. Inspect repository metadata before pruning it manually.",
         );
+        f.subtitle = format!("{} · {}", head_label(record), record.path);
         f.badge = Some("Orphaned".into());
         f.blocked_reason = Some("Missing worktree registrations are inspection only.".into());
         f.details = vec![

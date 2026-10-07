@@ -195,7 +195,7 @@ private struct FinderView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(store.visibleFindings) { finding in
-                            ResultRow(title: finding.title, subtitle: (finding.subtitle as NSString).abbreviatingWithTildeInPath, value: Display.value(finding), badge: finding.blockedReason == nil ? finding.risk.rawValue : "Inspect", symbol: store.currentModule?.symbol ?? "doc", active: store.inspectedID == finding.id, eligible: !finding.actions.isEmpty && finding.blockedReason == nil && !store.isApplying, checked: Binding(get: { store.selectedIDs.contains(finding.id) }, set: { store.select(finding.id, checked: $0) })) {
+                            ResultRow(title: finding.title, subtitle: (finding.subtitle as NSString).abbreviatingWithTildeInPath, value: Display.value(finding), badge: finding.badge ?? (finding.blockedReason == nil ? finding.risk.rawValue : "Inspect"), symbol: store.currentModule?.symbol ?? "doc", active: store.inspectedID == finding.id, eligible: !finding.actions.isEmpty && finding.blockedReason == nil && !store.isApplying, checked: Binding(get: { store.selectedIDs.contains(finding.id) }, set: { store.select(finding.id, checked: $0) })) {
                                 store.inspectedID = finding.id
                             }
                             .contextMenu {
