@@ -178,6 +178,16 @@ pub struct ResultStore {
     snapshots: Mutex<VecDeque<Arc<Snapshot>>>,
     /// Totals depend on the filter, not the order, so re-sorting reuses them.
     summaries: Mutex<VecDeque<(SummaryKey, Analytics)>>,
+    /// Fully sorted rows per (module, order), so filtering never re-sorts.
+    orders: Mutex<VecDeque<(OrderKey, Ordered)>>,
+}
+type Ordered = Arc<Vec<Arc<Finding>>>;
+#[derive(PartialEq)]
+struct OrderKey {
+    generation: u64,
+    module: Option<String>,
+    sort: SortKey,
+    ascending: bool,
 }
 #[derive(PartialEq)]
 struct SummaryKey {
@@ -270,18 +280,17 @@ impl ResultStore {
     /// Filters and sorts in parallel and keeps the snapshot for paging.
     pub fn query(&self, q: &Query) -> Arc<Snapshot> {
         let generation = self.generation();
-        let mut rows: Vec<Arc<Finding>> = {
-            let Ok(buckets) = self.buckets.read() else {
-                return Arc::new(empty(generation));
-            };
-            let sources: Vec<&Bucket> = match &q.module {
-                Some(m) => buckets.get(m).into_iter().collect(),
-                None => buckets.values().collect(),
-            };
-            let needle = Needle::new(&q.search);
-            sources
-                .into_par_iter()
-                .flat_map_iter(|b| b.rows.iter())
+        // Sort every row of the module once per store generation, then filter that order;
+        // a linear, order-preserving pass is far cheaper than re-sorting on each keystroke.
+        let ordered = self.ordered(q, generation);
+        let needle = Needle::new(&q.search);
+        let unfiltered =
+            q.min_bytes == 0 && q.modified_before.is_none() && needle.unicode.is_empty();
+        let rows: Vec<Arc<Finding>> = if unfiltered {
+            ordered.as_ref().clone()
+        } else {
+            ordered
+                .par_iter()
                 .filter(|f| {
                     (q.min_bytes == 0 || f.bytes.unwrap_or(0) >= q.min_bytes)
                         && q.modified_before
@@ -291,27 +300,6 @@ impl ResultStore {
                 .cloned()
                 .collect()
         };
-        let compare = |a: &Arc<Finding>, b: &Arc<Finding>| {
-            let order = match q.sort {
-                SortKey::Size => a
-                    .bytes
-                    .or(a.memory_bytes)
-                    .unwrap_or(0)
-                    .cmp(&b.bytes.or(b.memory_bytes).unwrap_or(0)),
-                SortKey::Cpu => a
-                    .cpu_percent
-                    .unwrap_or(0.)
-                    .total_cmp(&b.cpu_percent.unwrap_or(0.)),
-                SortKey::Name => natural(&a.title, &b.title),
-            }
-            .then_with(|| a.id.cmp(&b.id));
-            if q.ascending {
-                order
-            } else {
-                order.reverse()
-            }
-        };
-        rows.par_sort_unstable_by(compare);
         let key = SummaryKey {
             generation,
             module: q.module.clone(),
@@ -362,6 +350,63 @@ impl ResultStore {
         }
         snapshot
     }
+    /// All rows of the queried module(s) in the requested order, cached per generation.
+    fn ordered(&self, q: &Query, generation: u64) -> Ordered {
+        let key = OrderKey {
+            generation,
+            module: q.module.clone(),
+            sort: q.sort,
+            ascending: q.ascending,
+        };
+        if let Some(hit) = self
+            .orders
+            .lock()
+            .ok()
+            .and_then(|c| c.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()))
+        {
+            return hit;
+        }
+        let mut rows: Vec<Arc<Finding>> = match self.buckets.read() {
+            Ok(buckets) => match &q.module {
+                Some(m) => buckets.get(m).map(|b| b.rows.clone()).unwrap_or_default(),
+                None => buckets
+                    .values()
+                    .flat_map(|b| b.rows.iter().cloned())
+                    .collect(),
+            },
+            Err(_) => vec![],
+        };
+        let compare = |a: &Arc<Finding>, b: &Arc<Finding>| {
+            let order = match q.sort {
+                SortKey::Size => a
+                    .bytes
+                    .or(a.memory_bytes)
+                    .unwrap_or(0)
+                    .cmp(&b.bytes.or(b.memory_bytes).unwrap_or(0)),
+                SortKey::Cpu => a
+                    .cpu_percent
+                    .unwrap_or(0.)
+                    .total_cmp(&b.cpu_percent.unwrap_or(0.)),
+                SortKey::Name => natural(&a.title, &b.title),
+            }
+            .then_with(|| a.id.cmp(&b.id));
+            if q.ascending {
+                order
+            } else {
+                order.reverse()
+            }
+        };
+        rows.par_sort_unstable_by(compare);
+        let rows = Arc::new(rows);
+        if let Ok(mut cache) = self.orders.lock() {
+            cache.retain(|(k, _)| k.generation == generation);
+            cache.push_back((key, rows.clone()));
+            while cache.len() > 4 {
+                cache.pop_front();
+            }
+        }
+        rows
+    }
     pub fn snapshot(&self, id: u64) -> Option<Arc<Snapshot>> {
         self.snapshots
             .lock()
@@ -402,16 +447,6 @@ impl ResultStore {
                 .any(|f| matches!(f.resource, Resource::Process { .. })),
             preview: rows.into_iter().take(preview).collect(),
         }
-    }
-}
-fn empty(generation: u64) -> Snapshot {
-    Snapshot {
-        id: 0,
-        generation,
-        rows: vec![],
-        summary: Analytics::default(),
-        largest: vec![],
-        max_cpu: None,
     }
 }
 
