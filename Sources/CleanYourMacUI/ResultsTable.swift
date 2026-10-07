@@ -140,7 +140,7 @@ private struct ResultCell: View {
                 subtitle: (row.subtitle as NSString).abbreviatingWithTildeInPath,
                 value: Display.value(row),
                 badge: [row.badge ?? (row.blocked ? "Inspect" : row.risk.rawValue), Display.lastUsed(row.lastUsedAt)].compactMap { $0 }.joined(separator: " · "),
-                symbol: symbol,
+                icon: Display.icon(moduleID: row.moduleID, path: row.path, brand: row.brand, symbol: symbol),
                 active: store.inspectedID == row.id,
                 eligible: row.eligible && !store.isApplying,
                 checked: Binding(get: { store.selectedIDs.contains(row.id) }, set: { store.select(row.id, checked: $0) })

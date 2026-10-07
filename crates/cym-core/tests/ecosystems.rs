@@ -221,6 +221,45 @@ fn artifact_scan_reports_ecosystems_and_skips_dependency_stores() {
     let saved = report.findings.iter().find(|f| f.title == "Saved").unwrap();
     assert_eq!(saved.risk, Risk::Review);
     assert!(saved.reason.contains("autosaves"));
+    // Every finding carries its ecosystem's logo.
+    let brand = |title: &str| {
+        let f = report.findings.iter().find(|f| f.title == title).unwrap();
+        f.brand.as_deref()
+    };
+    assert_eq!(brand("ios/build"), Some("react"));
+    assert_eq!(brand(".venv"), Some("python"));
+    assert_eq!(brand("Saved"), Some("unrealengine"));
+}
+
+#[test]
+fn brands_follow_ecosystems_and_every_brand_has_a_logo() {
+    use cym_core::brand;
+    for (ecosystem, slug) in [
+        ("Next.js", "nextdotjs"),
+        ("Flutter / Dart", "flutter"),
+        ("Rust (Cargo)", "rust"),
+        ("PHP (Composer)", "composer"),
+        ("Haskell (Stack)", "haskell"),
+        ("Unreal Engine", "unrealengine"),
+        ("Node.js", "nodedotjs"),
+        ("pnpm", "pnpm"),
+        ("java", "openjdk"),
+    ] {
+        assert_eq!(brand::for_ecosystem(ecosystem), Some(slug), "{ecosystem}");
+    }
+    assert_eq!(brand::for_ecosystem("Something new"), None);
+    // The app's generated catalog must draw every slug the core can return.
+    let catalog = fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../Sources/CleanYourMacDesignSystem/BrandIcons.swift"),
+    )
+    .unwrap();
+    for slug in brand::slugs() {
+        assert!(
+            catalog.contains(&format!("\"{slug}\": (")),
+            "no logo for {slug}"
+        );
+    }
 }
 
 #[test]

@@ -84,6 +84,7 @@ pub struct Row {
     pub badge: Option<String>,
     pub blocked: bool,
     pub eligible: bool,
+    pub brand: Option<String>,
 }
 impl From<&Finding> for Row {
     fn from(f: &Finding) -> Self {
@@ -107,6 +108,7 @@ impl From<&Finding> for Row {
             badge: f.badge.clone(),
             blocked: f.blocked_reason.is_some(),
             eligible: !f.actions.is_empty() && f.blocked_reason.is_none(),
+            brand: f.brand.clone(),
         }
     }
 }

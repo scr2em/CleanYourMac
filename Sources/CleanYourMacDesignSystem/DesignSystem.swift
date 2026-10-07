@@ -8,7 +8,7 @@ public enum Layout {
     public static let sidebar: CGFloat = 220, inspector: CGFloat = 320, inspectorMin: CGFloat = 240, inspectorMax: CGFloat = 420
     public static let contentMin: CGFloat = 400, windowWidth: CGFloat = 1120, windowHeight: CGFloat = 760, windowMinWidth: CGFloat = 880, windowMinHeight: CGFloat = 560
     public static let reviewWidth: CGFloat = 640, reviewHeight: CGFloat = 540, rowMinimum: CGFloat = 52, panelRadius: CGFloat = 16, controlRadius: CGFloat = 10, smallRadius: CGFloat = 5
-    public static let iconSmall: CGFloat = 12, iconMedium: CGFloat = 16, iconLarge: CGFloat = 32, checkbox: CGFloat = 18
+    public static let iconSmall: CGFloat = 12, iconMedium: CGFloat = 16, iconLarge: CGFloat = 32, rowIcon: CGFloat = 24, checkbox: CGFloat = 18
     public static let sidebarRow: CGFloat = 36, controlHeight: CGFloat = 40
 }
 /// System font (SF Pro) on a compact macOS scale.
@@ -285,20 +285,23 @@ public struct EmptyState: View {
 }
 
 public struct FindingRow: View {
-    private let title: String, subtitle: String, value: String, badge: String, symbol: String
+    private let title: String, subtitle: String, value: String, badge: String, icon: RowIcon
     private let active: Bool, eligible: Bool
     @Binding private var checked: Bool
     private let inspect: () -> Void
-    public init(title: String, subtitle: String, value: String, badge: String, symbol: String, active: Bool, eligible: Bool, checked: Binding<Bool>, inspect: @escaping () -> Void) {
-        self.title = title; self.subtitle = subtitle; self.value = value; self.badge = badge; self.symbol = symbol
+    public init(title: String, subtitle: String, value: String, badge: String, icon: RowIcon, active: Bool, eligible: Bool, checked: Binding<Bool>, inspect: @escaping () -> Void) {
+        self.title = title; self.subtitle = subtitle; self.value = value; self.badge = badge; self.icon = icon
         self.active = active; self.eligible = eligible; _checked = checked; self.inspect = inspect
+    }
+    public init(title: String, subtitle: String, value: String, badge: String, symbol: String, active: Bool, eligible: Bool, checked: Binding<Bool>, inspect: @escaping () -> Void) {
+        self.init(title: title, subtitle: subtitle, value: value, badge: badge, icon: .symbol(symbol), active: active, eligible: eligible, checked: checked, inspect: inspect)
     }
     public var body: some View {
         HStack(spacing: Space.md) {
             Toggle("Select \(title) for review", isOn: $checked).labelsHidden().toggleStyle(.checkbox).disabled(!eligible)
             Button(action: inspect) {
                 HStack(spacing: Space.md) {
-                    Image(systemName: symbol).foregroundStyle(Palette.accentSymbol)
+                    RowIconView(icon: icon)
                     VStack(alignment: .leading, spacing: Space.xs) {
                         Text(title).font(TypeStyle.rowTitle).lineLimit(1)
                         Text(subtitle).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
@@ -313,6 +316,30 @@ public struct FindingRow: View {
         }
         .padding(.horizontal, Space.lg).padding(.vertical, Space.sm).frame(minHeight: Layout.rowMinimum)
         .background(active ? Palette.selection : .clear)
+    }
+}
+
+/// A row's leading icon in a fixed square, so titles align whatever the icon kind.
+public struct RowIconView: View {
+    let icon: RowIcon
+    public init(icon: RowIcon) { self.icon = icon }
+    public var body: some View {
+        Group {
+            switch icon {
+            case .symbol(let name):
+                Image(systemName: name).font(TypeStyle.headline).foregroundStyle(Palette.accentSymbol)
+            case .brand(let slug):
+                if let brand = BrandIcon(slug) {
+                    brand.padding(Space.xxs)
+                } else {
+                    Image(systemName: "shippingbox").font(TypeStyle.headline).foregroundStyle(Palette.accentSymbol)
+                }
+            case .file(let image):
+                Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+            }
+        }
+        .frame(width: Layout.rowIcon, height: Layout.rowIcon)
+        .accessibilityHidden(true)
     }
 }
 
@@ -372,9 +399,16 @@ public struct ComponentGallery: View {
                 Panel { StorageBar("Developer data", value: "12.4 GB", fraction: 0.6) }
                 Panel {
                     VStack(spacing: Space.xs) {
-                        FindingRow(title: "frontend", subtitle: "~/Projects/frontend/node_modules", value: "1.8 GB", badge: "Rebuild required", symbol: "shippingbox", active: false, eligible: true, checked: $checked) {}
+                        FindingRow(title: "frontend", subtitle: "~/Projects/frontend/node_modules", value: "1.8 GB", badge: "Rebuild required", icon: .brand("pnpm"), active: false, eligible: true, checked: $checked) {}
                         FindingRow(title: "node", subtitle: "~/Projects/frontend", value: "53% CPU · 240 MB", badge: "Review", symbol: "cpu", active: true, eligible: true, checked: $checked) {}
-                        FindingRow(title: "Main worktree", subtitle: "~/Projects/frontend", value: "2.1 GB", badge: "Protected", symbol: "arrow.triangle.branch", active: false, eligible: false, checked: .constant(false)) {}
+                        FindingRow(title: "Main worktree", subtitle: "~/Projects/frontend", value: "2.1 GB", badge: "Protected", icon: .brand("git"), active: false, eligible: false, checked: .constant(false)) {}
+                    }
+                }
+                Panel {
+                    HStack(spacing: Space.md) {
+                        ForEach(["nextdotjs", "react", "flutter", "rust", "python", "gradle", "swift", "xcode", "go", "dotnet", "unity", "pnpm"], id: \.self) { slug in
+                            RowIconView(icon: .brand(slug)).help(BrandCatalog.name(slug) ?? slug)
+                        }
                     }
                 }
                 Panel { VStack(alignment: .leading, spacing: Space.lg) { KeyValueRow("State", "Incomplete scan · access denied"); KeyValueRow("Next action", "Choose a readable folder or grant access in System Settings.") } }

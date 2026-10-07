@@ -115,6 +115,9 @@ pub struct Finding {
     pub reason: String,
     pub blocked_reason: Option<String>,
     pub badge: Option<String>,
+    /// The ecosystem's brand (a Simple Icons slug), drawn as the row's icon.
+    #[serde(default)]
+    pub brand: Option<String>,
 }
 impl Finding {
     pub fn new(module: &str, key: &str, title: &str, resource: Resource, reason: &str) -> Self {
@@ -136,6 +139,7 @@ impl Finding {
             reason: reason.into(),
             blocked_reason: None,
             badge: None,
+            brand: None,
         }
     }
     pub fn value(&self, label: &str) -> Option<&str> {

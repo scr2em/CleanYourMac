@@ -478,6 +478,14 @@ public final class AppStore {
 }
 
 public enum Display {
+    /// Modules whose findings are plain files, folders or apps, shown with their Finder icons.
+    static let fileModules: Set<String> = ["large", "duplicates", "downloads", "trash", "storage", "applications", "leftovers"]
+    /// A finding's leading icon: its ecosystem's logo, its Finder icon, or the module's symbol.
+    @MainActor public static func icon(moduleID: String, path: String?, brand: String?, symbol: String) -> RowIcon {
+        if let brand, BrandCatalog.contains(brand) { return .brand(brand) }
+        if fileModules.contains(moduleID), let path { return .file(FileIcons.icon(for: path)) }
+        return .symbol(symbol)
+    }
     public static func items(_ count: Int) -> String { "\(count.formatted()) " + (count == 1 ? "item" : "items") }
     public static func bytes(_ bytes: UInt64?) -> String {
         guard let bytes else { return "Unavailable" }

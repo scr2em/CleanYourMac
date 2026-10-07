@@ -69,7 +69,7 @@ private struct SidebarView: View {
                 Label("Activity", systemImage: "clock.arrow.circlepath").tag("activity")
                 Label("Component Gallery", systemImage: "paintpalette").tag("gallery")
             }
-        }.listStyle(.sidebar).scrollContentBackground(.hidden).background(Palette.sidebar).navigationTitle("CleanYourMac")
+        }.listStyle(.sidebar).scrollContentBackground(.hidden).background(Palette.sidebar).tint(Palette.accent).navigationTitle("CleanYourMac")
     }
 }
 
@@ -348,7 +348,13 @@ private struct InspectorView: View {
             if let finding = store.inspected {
                 VStack(alignment: .leading, spacing: Space.xl) {
                     PageHeader(finding.title, subtitle: finding.moduleID == "orphans" ? "Suspected orphan process" : "Item details")
-                    StatusBadge(finding.risk.rawValue, warning: finding.risk == .permanent)
+                    HStack(spacing: Space.sm) {
+                        RowIconView(icon: Display.icon(moduleID: finding.moduleID, path: finding.resource.path, brand: finding.brand, symbol: store.enabledModules.first { $0.id == finding.moduleID }?.symbol ?? "doc"))
+                        StatusBadge(finding.risk.rawValue, warning: finding.risk == .permanent)
+                        if let brand = finding.brand, let name = BrandCatalog.name(brand) {
+                            Text(name).font(TypeStyle.caption).foregroundStyle(.secondary)
+                        }
+                    }
                     Text(finding.reason).font(TypeStyle.secondary)
                     if let blocked = finding.blockedReason { Label(blocked, systemImage: "lock").font(TypeStyle.secondary).foregroundStyle(Palette.warning) }
                     if let bytes = finding.bytes { KeyValueRow("Logical size", Display.bytes(bytes)) }

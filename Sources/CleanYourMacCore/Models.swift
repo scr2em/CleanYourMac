@@ -143,14 +143,15 @@ public struct Finding: Identifiable, Codable, Hashable, Sendable {
     public var reason: String
     public var blockedReason: String?
     public var badge: String?
+    public var brand: String?
     private enum CodingKeys: String, CodingKey {
-        case id, moduleID = "moduleId", title, subtitle, resource, bytes, allocatedBytes, cpuPercent, memoryBytes, modifiedAt, lastUsedAt, details, actions, risk, reason, blockedReason, badge
+        case id, moduleID = "moduleId", title, subtitle, resource, bytes, allocatedBytes, cpuPercent, memoryBytes, modifiedAt, lastUsedAt, details, actions, risk, reason, blockedReason, badge, brand
     }
-    public init(id: String, moduleID: String, title: String, subtitle: String, resource: Resource, bytes: UInt64? = nil, allocatedBytes: UInt64? = nil, cpuPercent: Double? = nil, memoryBytes: UInt64? = nil, modifiedAt: Date? = nil, lastUsedAt: Date? = nil, details: [Detail] = [], actions: [ActionKind] = [], risk: Risk = .review, reason: String, blockedReason: String? = nil, badge: String? = nil) {
+    public init(id: String, moduleID: String, title: String, subtitle: String, resource: Resource, bytes: UInt64? = nil, allocatedBytes: UInt64? = nil, cpuPercent: Double? = nil, memoryBytes: UInt64? = nil, modifiedAt: Date? = nil, lastUsedAt: Date? = nil, details: [Detail] = [], actions: [ActionKind] = [], risk: Risk = .review, reason: String, blockedReason: String? = nil, badge: String? = nil, brand: String? = nil) {
         self.id = id; self.moduleID = moduleID; self.title = title; self.subtitle = subtitle; self.resource = resource
         self.bytes = bytes; self.allocatedBytes = allocatedBytes; self.cpuPercent = cpuPercent; self.memoryBytes = memoryBytes
         self.modifiedAt = modifiedAt; self.lastUsedAt = lastUsedAt
-        self.details = details; self.actions = actions; self.risk = risk; self.reason = reason; self.blockedReason = blockedReason; self.badge = badge
+        self.details = details; self.actions = actions; self.risk = risk; self.reason = reason; self.blockedReason = blockedReason; self.badge = badge; self.brand = brand
     }
     public func value(_ label: String) -> String? { details.first { $0.label == label }?.value }
 }
@@ -241,9 +242,11 @@ public struct ResultRow: Identifiable, Codable, Hashable, Sendable {
     public let badge: String?
     public let blocked: Bool
     public let eligible: Bool
+    /// The ecosystem's logo slug, when the core knows one.
+    public let brand: String?
     public var isProcess: Bool { pid != nil }
     private enum CodingKeys: String, CodingKey {
-        case id, moduleID = "moduleId", title, subtitle, path, pid, bytes, allocatedBytes, cpuPercent, memoryBytes, modifiedAt, lastUsedAt, risk, badge, blocked, eligible
+        case id, moduleID = "moduleId", title, subtitle, path, pid, bytes, allocatedBytes, cpuPercent, memoryBytes, modifiedAt, lastUsedAt, risk, badge, blocked, eligible, brand
     }
 }
 

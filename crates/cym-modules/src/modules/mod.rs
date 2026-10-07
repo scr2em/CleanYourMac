@@ -119,7 +119,10 @@ impl<'a> Guard<'a> {
     }
 }
 impl Sink for Guard<'_> {
-    fn finding(&mut self, finding: Finding) {
+    fn finding(&mut self, mut finding: Finding) {
+        if finding.brand.is_none() {
+            finding.brand = crate::brand::of(&finding).map(Into::into);
+        }
         if self.seen.len() >= self.limit {
             if !self.limited {
                 self.limited = true;
