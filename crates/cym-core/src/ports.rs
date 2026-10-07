@@ -43,6 +43,9 @@ pub struct Entry {
     pub allocated: u64,
     /// Hard-link count; items with one link cannot be shared with another path.
     pub links: u64,
+    /// Content evicted to iCloud (`SF_DATALESS`). Reading it would trigger a download, so
+    /// traversal, sizing and hashing must not open it.
+    pub dataless: bool,
 }
 impl Entry {
     /// Builds an entry from `lstat` metadata; adapters backed by other libraries can reuse it.
@@ -62,6 +65,7 @@ impl Entry {
             bytes: m.size(),
             allocated: m.blocks().saturating_mul(512),
             links: m.nlink(),
+            dataless: dataless(m),
         }
     }
     pub fn path(&self) -> &str {
@@ -76,6 +80,18 @@ impl Entry {
     pub fn modified(&self) -> f64 {
         self.identity.modified_seconds as f64 + self.identity.modified_nanos as f64 / 1e9
     }
+}
+
+#[cfg(target_os = "macos")]
+#[allow(deprecated)]
+fn dataless(m: &Metadata) -> bool {
+    use std::os::macos::fs::MetadataExt as _;
+    const SF_DATALESS: u32 = 0x4000_0000;
+    m.st_flags() & SF_DATALESS != 0
+}
+#[cfg(not(target_os = "macos"))]
+fn dataless(_: &Metadata) -> bool {
+    false
 }
 
 /// Path metadata and the few direct mutations the action executor needs.

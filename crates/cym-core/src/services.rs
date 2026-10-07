@@ -150,7 +150,10 @@ impl Services {
                         limited = true;
                         return Ok(Visit::Stop);
                     }
-                    if e.symlink || context.excludes(e.path()) || policy::system_excluded(e.path())
+                    if e.symlink
+                        || e.dataless
+                        || context.excludes(e.path())
+                        || policy::system_excluded(e.path())
                     {
                         return Ok(Visit::Skip);
                     }
@@ -177,6 +180,9 @@ impl Services {
         let before = self.entry(path)?;
         if !before.regular {
             return Err("Only regular files can be hashed".into());
+        }
+        if before.dataless {
+            return Err("File content is in iCloud only; hashing would download it".into());
         }
         let hash = self.hasher.hash(path, None, control)?;
         if self.entry(path)?.identity != before.identity {

@@ -192,7 +192,8 @@ impl Walk<'_> {
                     tally.allocated = tally.allocated.saturating_add(e.allocated);
                 }
             }
-            if e.directory && !e.symlink {
+            // An iCloud-evicted folder is counted as itself; entering it would download it.
+            if e.directory && !e.symlink && !e.dataless {
                 folders.push(e.identity.path);
             }
         }
