@@ -20,13 +20,29 @@ public enum TypeStyle {
 }
 /// Named Comfy palettes. Colors resolve at draw time, so switching applies on the next render.
 public enum ComfyTheme: String, CaseIterable, Identifiable, Sendable {
-    case honey = "Honey & Espresso", ember = "Ember", terracotta = "Terracotta & Navy", mauve = "Cream & Mauve", rose = "Linen & Rose"
+    case walnut = "Paper & Walnut", honey = "Honey & Espresso", ember = "Ember", terracotta = "Terracotta & Navy", mauve = "Cream & Mauve", rose = "Linen & Rose"
     public var id: String { rawValue }
-    nonisolated(unsafe) public static var current: ComfyTheme = .honey
+    nonisolated(unsafe) public static var current: ComfyTheme = .walnut
 
     /// Light and dark sRGB values, mirroring docs/brand/tokens.json.
     func hex(_ token: Palette.Token) -> (light: UInt32, dark: UInt32) {
         switch (self, token) {
+        // Paper & Walnut: #FCFCFB paper with the brown ramp (docs/brand/tokens.json → ramps.brown).
+        case (.walnut, .canvas): (0xFCFCFB, 0x161210)
+        case (.walnut, .sidebar): (0xF6F3EF, 0x1D1814)
+        case (.walnut, .sidebarSelection): (0xEBE2D8, 0x3A2C20)
+        case (.walnut, .surface): (0xFFFFFF, 0x231D18)
+        case (.walnut, .elevated): (0xFFFFFF, 0x2C241E)
+        case (.walnut, .border): (0xE8E1D9, 0x3A3029)
+        case (.walnut, .borderStrong): (0xCDBDAC, 0x52443A)
+        case (.walnut, .track): (0xEFE9E2, 0x2C241E)
+        case (.walnut, .accent): (0x6E5139, 0xC9A27E)
+        case (.walnut, .onAccent): (0xFFFFFF, 0x1E150E)
+        case (.walnut, .accentText): (0x6E5139, 0xD9BC9F)
+        case (.walnut, .accentSymbol): (0x8A6B50, 0xC9A27E)
+        case (.walnut, .selection): (0xF2ECE5, 0x3A2C20)
+        case (.walnut, .ink): (0x261B12, 0xF3EEE8)
+        case (.walnut, .muted): (0x6F6258, 0xB3A69A)
         case (.honey, .canvas): (0xFBF3E4, 0x1A130C)
         case (.honey, .sidebar): (0xF5E9D4, 0x211810)
         case (.honey, .sidebarSelection): (0xF2DCB8, 0x3D2A15)
