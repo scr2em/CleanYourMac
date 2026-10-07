@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 public enum Space {
@@ -6,26 +7,45 @@ public enum Space {
 public enum Layout {
     public static let sidebar: CGFloat = 220, inspector: CGFloat = 320, inspectorMin: CGFloat = 240, inspectorMax: CGFloat = 420
     public static let contentMin: CGFloat = 400, windowWidth: CGFloat = 1120, windowHeight: CGFloat = 760, windowMinWidth: CGFloat = 880, windowMinHeight: CGFloat = 560
-    public static let reviewWidth: CGFloat = 640, reviewHeight: CGFloat = 540, rowMinimum: CGFloat = 52, panelRadius: CGFloat = 10
+    public static let reviewWidth: CGFloat = 640, reviewHeight: CGFloat = 540, rowMinimum: CGFloat = 52, panelRadius: CGFloat = 16, controlRadius: CGFloat = 10
 }
 public enum TypeStyle {
-    public static let pageTitle = Font.title2.weight(.semibold)
-    public static let sectionTitle = Font.headline
+    public static let pageTitle = Font.system(size: 28, weight: .semibold, design: .serif)
+    public static let sectionTitle = Font.system(size: 17, weight: .semibold, design: .serif)
     public static let body = Font.body
     public static let secondary = Font.callout
     public static let caption = Font.caption
-    public static let metric = Font.title.weight(.semibold).monospacedDigit()
+    public static let metric = Font.system(size: 32, weight: .semibold, design: .serif).monospacedDigit()
     public static let code = Font.system(.caption, design: .monospaced)
 }
+/// Comfy palette: warm off-white canvas, linen and sand neutrals and a dusty-rose accent,
+/// with a warm espresso dark mode. Values mirror docs/brand/tokens.json.
 public enum Palette {
-    public static let canvas = Color(nsColor: .windowBackgroundColor)
-    public static let surface = Color(nsColor: .controlBackgroundColor)
-    public static let elevated = Color(nsColor: .textBackgroundColor)
-    public static let accent = Color.accentColor
-    public static let warning = Color.orange
-    public static let destructive = Color.red
-    public static let success = Color.green
-    public static let selection = Color.accentColor.opacity(0.12)
+    public static let canvas = dynamic(0xF9F5F2, 0x1E1A17)
+    public static let sidebar = dynamic(0xEDE3D5, 0x26211D)
+    public static let surface = dynamic(0xFDFBF9, 0x2B2622)
+    public static let elevated = dynamic(0xFFFFFF, 0x332D28)
+    public static let ink = dynamic(0x2B2621, 0xF1EBE1)
+    public static let muted = dynamic(0x6B6157, 0xB3A99B)
+    public static let border = dynamic(0xD6C4B2, 0x4A4038)
+    public static let track = dynamic(0xEDE3D5, 0x3A332D)
+    /// Fills: primary buttons, bars and highlights. Pair with `onAccent` text.
+    public static let accent = dynamic(0xD0A097, 0xD9A79E)
+    public static let onAccent = dynamic(0x2B2621, 0x2A1A16)
+    /// Accent-colored text and symbols on cream surfaces.
+    public static let accentText = dynamic(0x9A5F55, 0xE2B3AA)
+    public static let leaf = dynamic(0x5EBEA5, 0x76CFB4)
+    public static let warning = dynamic(0x7A520F, 0xEDC783)
+    public static let destructive = dynamic(0xA12D2A, 0xF0857A)
+    public static let success = dynamic(0x3B7A5E, 0x86C9A8)
+    public static let selection = dynamic(0xEFE0D9, 0x4A3530)
+
+    private static func dynamic(_ light: UInt32, _ dark: UInt32) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let hex = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+            return NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+        })
+    }
 }
 public enum ButtonKind: Equatable { case primary, secondary, destructive }
 
@@ -38,12 +58,30 @@ public struct ActionButton: View {
         self.title = title; self.kind = kind; self.disabled = disabled; self.action = action
     }
     public var body: some View {
-        Group {
-            if kind == .secondary { button.buttonStyle(.bordered) }
-            else { button.buttonStyle(.borderedProminent).tint(kind == .destructive ? Palette.destructive : Palette.accent) }
-        }.disabled(disabled)
+        Button(title, role: kind == .destructive ? .destructive : nil, action: action)
+            .buttonStyle(ComfyButtonStyle(kind: kind)).disabled(disabled)
     }
-    private var button: some View { Button(title, role: kind == .destructive ? .destructive : nil, action: action) }
+}
+
+struct ComfyButtonStyle: ButtonStyle {
+    let kind: ButtonKind
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(TypeStyle.body.weight(.medium))
+            .foregroundStyle(foreground)
+            .padding(.horizontal, Space.lg).padding(.vertical, Space.sm - Space.xxs)
+            .background(fill, in: RoundedRectangle(cornerRadius: Layout.controlRadius))
+            .overlay(RoundedRectangle(cornerRadius: Layout.controlRadius).strokeBorder(kind == .secondary ? Palette.border : .clear))
+            .opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.45)
+            .contentShape(RoundedRectangle(cornerRadius: Layout.controlRadius))
+    }
+    private var fill: Color {
+        switch kind { case .primary: Palette.accent; case .secondary: Palette.surface; case .destructive: Palette.destructive }
+    }
+    private var foreground: Color {
+        switch kind { case .primary: Palette.onAccent; case .secondary: Palette.ink; case .destructive: Palette.canvas }
+    }
 }
 
 public struct Panel<Content: View>: View {
@@ -52,6 +90,8 @@ public struct Panel<Content: View>: View {
     public var body: some View {
         content.padding(Space.lg).frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: Layout.panelRadius))
+            .overlay(RoundedRectangle(cornerRadius: Layout.panelRadius).strokeBorder(Palette.border.opacity(0.6)))
+            .shadow(color: Palette.ink.opacity(0.06), radius: Space.sm, y: Space.xxs)
     }
 }
 
@@ -107,7 +147,7 @@ public struct ResultRow: View {
             Toggle("Select \(title) for review", isOn: $checked).labelsHidden().toggleStyle(.checkbox).disabled(!eligible)
             Button(action: inspect) {
                 HStack(spacing: Space.md) {
-                    Image(systemName: symbol).foregroundStyle(Palette.accent)
+                    Image(systemName: symbol).foregroundStyle(Palette.accentText)
                     VStack(alignment: .leading, spacing: Space.xs) {
                         Text(title).font(TypeStyle.body).lineLimit(1)
                         Text(subtitle).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
@@ -155,7 +195,7 @@ public struct StorageBar: View {
         VStack(alignment: .leading, spacing: Space.xs) {
             HStack { Text(title).lineLimit(1); Spacer(); Text(value).monospacedDigit() }.font(TypeStyle.caption)
             GeometryReader { geometry in
-                Capsule().fill(Palette.selection)
+                Capsule().fill(Palette.track)
                     .overlay(alignment: .leading) { Capsule().fill(Palette.accent).frame(width: geometry.size.width * min(max(fraction, 0), 1)) }
             }.frame(height: Space.sm)
         }.accessibilityElement(children: .combine)

@@ -5,10 +5,13 @@ cd "$TASK_REPO"
 TASK_APP="$TASK_REPO/build/CleanYourMac.app"
 TASK_UNIVERSAL=""
 if [ "$#" -gt 0 ]; then TASK_UNIVERSAL="$1"; fi
+export CYM_SKIP_CORE=1
 if [ "$TASK_UNIVERSAL" = "--universal" ]; then
+  bash scripts/build-core.sh --universal
   bash scripts/swift.sh build -c release --triple arm64-apple-macosx14.0
   bash scripts/swift.sh build -c release --triple x86_64-apple-macosx14.0
 else
+  bash scripts/build-core.sh
   bash scripts/swift.sh build -c release
 fi
 mkdir -p "$TASK_APP/Contents/MacOS" "$TASK_APP/Contents/Resources"

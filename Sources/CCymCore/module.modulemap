@@ -1,0 +1,4 @@
+module CCymCore [system] {
+    header "../../crates/cym-core/include/cym_core.h"
+    export *
+}

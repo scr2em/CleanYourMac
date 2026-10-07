@@ -1,10 +1,12 @@
 import Foundation
 
+// Wire models decoded from the Rust core. Dates cross the boundary as Unix seconds.
+
 public enum Category: String, Codable, CaseIterable, Sendable {
     case storage = "Storage", developer = "Developer", applications = "Applications", tools = "Tools"
 }
 
-public struct ModuleDescriptor: Identifiable, Hashable, Sendable {
+public struct ModuleDescriptor: Identifiable, Hashable, Codable, Sendable {
     public let id: String
     public let name: String
     public let category: Category
@@ -27,9 +29,6 @@ public struct FileIdentity: Codable, Hashable, Sendable {
         self.path = path; self.device = device; self.inode = inode; self.modifiedSeconds = modifiedSeconds; self.modifiedNanos = modifiedNanos
         self.treeSignature = treeSignature
     }
-    public func withTreeSignature(_ signature: String?) -> FileIdentity {
-        FileIdentity(path: path, device: device, inode: inode, modifiedSeconds: modifiedSeconds, modifiedNanos: modifiedNanos, treeSignature: signature)
-    }
 }
 
 public struct ProcessIdentity: Codable, Hashable, Sendable {
@@ -44,7 +43,7 @@ public struct ProcessIdentity: Codable, Hashable, Sendable {
     public var key: String { "\(pid):\(startedSeconds):\(startedMicroseconds)" }
 }
 
-public enum Resource: Codable, Hashable, Sendable {
+public enum Resource: Hashable, Sendable {
     case file(FileIdentity)
     case process(ProcessIdentity)
     case worktree(file: FileIdentity, repository: String, head: String)
@@ -57,6 +56,36 @@ public enum Resource: Codable, Hashable, Sendable {
         case .worktreeRegistration(let path, _): path
         case .process(let process): process.executable
         case .simulator: nil
+        }
+    }
+}
+
+// Matches the core's internally tagged representation: {"kind": "file", "file": {...}}.
+extension Resource: Codable {
+    private enum Keys: String, CodingKey { case kind, file, process, repository, head, path, id, state }
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        switch try c.decode(String.self, forKey: .kind) {
+        case "file": self = .file(try c.decode(FileIdentity.self, forKey: .file))
+        case "process": self = .process(try c.decode(ProcessIdentity.self, forKey: .process))
+        case "worktree": self = .worktree(file: try c.decode(FileIdentity.self, forKey: .file), repository: try c.decode(String.self, forKey: .repository), head: try c.decode(String.self, forKey: .head))
+        case "worktreeRegistration": self = .worktreeRegistration(path: try c.decode(String.self, forKey: .path), repository: try c.decode(String.self, forKey: .repository))
+        case "simulator": self = .simulator(id: try c.decode(String.self, forKey: .id), state: try c.decode(String.self, forKey: .state))
+        case let kind: throw DecodingError.dataCorruptedError(forKey: .kind, in: c, debugDescription: "Unknown resource kind \(kind)")
+        }
+    }
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: Keys.self)
+        switch self {
+        case .file(let file): try c.encode("file", forKey: .kind); try c.encode(file, forKey: .file)
+        case .process(let process): try c.encode("process", forKey: .kind); try c.encode(process, forKey: .process)
+        case .worktree(let file, let repository, let head):
+            try c.encode("worktree", forKey: .kind); try c.encode(file, forKey: .file)
+            try c.encode(repository, forKey: .repository); try c.encode(head, forKey: .head)
+        case .worktreeRegistration(let path, let repository):
+            try c.encode("worktreeRegistration", forKey: .kind); try c.encode(path, forKey: .path); try c.encode(repository, forKey: .repository)
+        case .simulator(let id, let state):
+            try c.encode("simulator", forKey: .kind); try c.encode(id, forKey: .id); try c.encode(state, forKey: .state)
         }
     }
 }
@@ -112,52 +141,29 @@ public struct Finding: Identifiable, Codable, Hashable, Sendable {
     public var reason: String
     public var blockedReason: String?
     public var badge: String?
+    private enum CodingKeys: String, CodingKey {
+        case id, moduleID = "moduleId", title, subtitle, resource, bytes, allocatedBytes, cpuPercent, memoryBytes, modifiedAt, details, actions, risk, reason, blockedReason, badge
+    }
     public init(id: String, moduleID: String, title: String, subtitle: String, resource: Resource, bytes: UInt64? = nil, allocatedBytes: UInt64? = nil, cpuPercent: Double? = nil, memoryBytes: UInt64? = nil, modifiedAt: Date? = nil, details: [Detail] = [], actions: [ActionKind] = [], risk: Risk = .review, reason: String, blockedReason: String? = nil, badge: String? = nil) {
         self.id = id; self.moduleID = moduleID; self.title = title; self.subtitle = subtitle; self.resource = resource
         self.bytes = bytes; self.allocatedBytes = allocatedBytes; self.cpuPercent = cpuPercent; self.memoryBytes = memoryBytes
         self.modifiedAt = modifiedAt
         self.details = details; self.actions = actions; self.risk = risk; self.reason = reason; self.blockedReason = blockedReason; self.badge = badge
     }
+    public func value(_ label: String) -> String? { details.first { $0.label == label }?.value }
 }
 
-public struct ScanContext: Sendable {
+public struct ScanContext: Codable, Sendable {
     public let roots: [String]
     public let exclusions: [String]
-    public let ignoredProcessNames: Set<String>
+    public let ignoredProcessNames: [String]
     public let limitToRoots: Bool
-    public init(roots: [String], exclusions: [String] = [], ignoredProcessNames: Set<String> = ["ssh-agent", "gpg-agent", "keyboxd", "dirmngr"], limitToRoots: Bool = false) {
+    public init(roots: [String], exclusions: [String] = [], ignoredProcessNames: [String] = ["ssh-agent", "gpg-agent", "keyboxd", "dirmngr"], limitToRoots: Bool = false) {
         self.roots = roots; self.exclusions = exclusions; self.ignoredProcessNames = ignoredProcessNames; self.limitToRoots = limitToRoots
     }
-    public func excludes(_ path: String) -> Bool { exclusions.contains { PathPolicy.contains(path, in: $0) } }
-    public func allows(_ path: String) -> Bool {
-        !excludes(path) && (!limitToRoots || roots.contains { PathPolicy.contains(path, in: $0) })
-    }
-    public func protectsSelection(_ path: String) -> Bool {
-        excludes(path) || exclusions.contains { PathPolicy.contains($0, in: path) }
-    }
 }
 
-public enum ScanEvent: Sendable {
-    case finding(Finding)
-    case progress(String)
-    case warning(String)
-}
-
-public protocol ScanModule: Sendable {
-    var descriptor: ModuleDescriptor { get }
-    func scan(in context: ScanContext) -> AsyncThrowingStream<ScanEvent, Error>
-}
-
-public struct ModuleRegistry: Sendable {
-    public let modules: [any ScanModule]
-    public init(_ modules: [any ScanModule]) {
-        precondition(Set(modules.map(\.descriptor.id)).count == modules.count, "Module IDs must be unique")
-        self.modules = modules
-    }
-    public func module(_ id: String) -> (any ScanModule)? { modules.first { $0.descriptor.id == id } }
-}
-
-public struct ActionRequest: Sendable {
+public struct ActionRequest: Codable, Sendable {
     public let findings: [Finding]
     public let kind: ActionKind
     public let context: ScanContext
@@ -180,56 +186,40 @@ public struct ActionResult: Identifiable, Codable, Sendable {
     public let findingID: String?
     public let trashIdentity: FileIdentity?
     public var journalWarning: String?
-    public init(title: String, originalPath: String?, action: ActionKind, outcome: Outcome, message: String, trashPath: String? = nil, findingID: String? = nil, trashIdentity: FileIdentity? = nil) {
-        id = UUID(); date = Date(); self.title = title; self.originalPath = originalPath
-        self.action = action; self.outcome = outcome; self.message = message; self.trashPath = trashPath
-        self.findingID = findingID; self.trashIdentity = trashIdentity
+    private enum CodingKeys: String, CodingKey {
+        case id, date, title, originalPath, action, outcome, message, trashPath, findingID = "findingId", trashIdentity, journalWarning
     }
+}
+
+public struct ModuleTotal: Codable, Hashable, Sendable {
+    public let moduleId: String
+    public let count: Int
+    public let bytes: UInt64
+    public let reclaimableBytes: UInt64
+}
+
+/// Aggregate figures computed by the core. Disk totals count overlapping paths once; process
+/// memory is reported separately.
+public struct Analytics: Codable, Hashable, Sendable {
+    public let findings: Int
+    public let diskBytes: UInt64
+    public let allocatedBytes: UInt64
+    public let reclaimableBytes: UInt64
+    public let blocked: Int
+    public let processCount: Int
+    public let processMemoryBytes: UInt64
+    public let modules: [ModuleTotal]
+    public static let empty = Analytics(findings: 0, diskBytes: 0, allocatedBytes: 0, reclaimableBytes: 0, blocked: 0, processCount: 0, processMemoryBytes: 0, modules: [])
+}
+
+public enum ScanEvent: Sendable {
+    case finding(Finding)
+    case progress(String)
+    case warning(String)
+    case moduleFinished(String)
 }
 
 public enum CleanError: LocalizedError, Sendable {
     case message(String)
     public var errorDescription: String? { if case .message(let message) = self { message } else { nil } }
-}
-
-public enum PathPolicy {
-    public static func canonical(_ path: String) -> String {
-        URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL.path
-    }
-    public static func contains(_ path: String, in root: String) -> Bool {
-        let path = canonical(path), root = canonical(root)
-        return path == root || path.hasPrefix(root == "/" ? "/" : root + "/")
-    }
-    public static func protected(_ path: String, home: String = NSHomeDirectory()) -> Bool {
-        let path = canonical(path)
-        let exact = ["/", home, home + "/Library", home + "/Documents", home + "/Desktop", home + "/Downloads", "/Applications", home + "/Applications"]
-        let prefixes = ["/System", "/bin", "/sbin", "/usr", "/private", home + "/.ssh", home + "/.aws", home + "/.gnupg", home + "/Library/Keychains", home + "/Library/Mobile Documents", home + "/Library/CloudStorage"]
-        return exact.contains(path) || prefixes.contains { contains(path, in: $0) } || path.split(separator: "/").contains { $0 == ".git" || $0 == ".env" || $0.hasPrefix(".env.") }
-    }
-    public static func traversalExcluded(_ path: String) -> Bool {
-        let home = NSHomeDirectory()
-        let prefixes = ["/System", "/Library", "/bin", "/sbin", "/usr", "/dev", "/Network", "/private", "/var", "/etc", "/tmp", home + "/.ssh", home + "/.aws", home + "/.gnupg", home + "/Library/Keychains", home + "/Library/Mobile Documents", home + "/Library/CloudStorage"]
-        return prefixes.contains { contains(path, in: $0) } || path.split(separator: "/").contains { $0 == ".git" || $0 == ".env" || $0.hasPrefix(".env.") }
-    }
-    /// Duplicate inspection skips generated outputs and dependency stores in every ecosystem.
-    public static let duplicateIgnoredDirectories: Set<String> = [
-        "node_modules", "packages", ".git", "build", ".build", "dist", "out", "target", "bin", "obj",
-        ".next", ".nuxt", ".turbo", ".parcel-cache", "coverage", ".cache", ".gradle", ".m2",
-        "vendor", "pods", "carthage", ".swiftpm", "deriveddata", ".venv", "venv", "env",
-        "__pycache__", ".tox", ".nox", ".pytest_cache", ".mypy_cache", ".ruff_cache", "site-packages",
-        ".dart_tool", ".pub-cache", ".pub", ".bundle", ".cargo", ".cabal", "_build", "deps", "bower_components"
-    ]
-    public static func duplicateExcluded(_ path: String) -> Bool {
-        traversalExcluded(path) || path.split(separator: "/").contains { duplicateIgnoredDirectories.contains($0.lowercased()) }
-    }
-    public static func normalizedSelection(_ findings: [Finding]) -> [Finding] {
-        let unique = Dictionary(findings.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }).values
-        return unique.filter { finding in
-            guard let path = finding.resource.path, case .file = finding.resource else { return true }
-            return !unique.contains { other in
-                guard other.id != finding.id, case .file = other.resource, let parent = other.resource.path else { return false }
-                return parent != path && contains(path, in: parent)
-            }
-        }.sorted { $0.id < $1.id }
-    }
 }

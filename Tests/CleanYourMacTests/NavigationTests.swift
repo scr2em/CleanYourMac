@@ -1,13 +1,14 @@
+import CleanYourMacCore
 import CleanYourMacUI
 import Foundation
 import Testing
 
 @MainActor @Test func unscannedToolNeverInheritsAnotherToolsCompletion() async throws {
     let fixture = try Fixture(); defer { fixture.clean() }
-    _ = try fixture.write("app/package.json", "{}")
-    _ = try fixture.write("app/node_modules/fixture/index.js")
+    try fixture.write("app/package.json", "{}")
+    try fixture.write("app/node_modules/fixture/index.js")
     let defaults = try #require(UserDefaults(suiteName: "org.cleanyourmac.test." + UUID().uuidString))
-    let store = AppStore(defaults: defaults)
+    let store = AppStore(defaults: defaults, core: CoreEngine(journalPath: fixture.path + "/history.json"))
     store.roots = [fixture.path]
     store.selectedModuleID = "node"
     store.scan()

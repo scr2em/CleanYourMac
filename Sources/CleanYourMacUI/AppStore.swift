@@ -1,7 +1,5 @@
 import AppKit
 import CleanYourMacCore
-import CleanYourMacModules
-import CleanYourMacPlatform
 import Foundation
 import Observation
 
@@ -21,9 +19,8 @@ public enum AgeFilter: String, CaseIterable {
 
 @MainActor @Observable
 public final class AppStore {
-    public let processes: ProcessService
-    public let registry: ModuleRegistry
-    public let executor: ActionExecutor
+    public let core: CoreEngine
+    public let modules: [ModuleDescriptor]
     public var selectedModuleID: String? = "overview" {
         didSet {
             if selectedModuleID != oldValue {
@@ -57,6 +54,8 @@ public final class AppStore {
     public var showInspector = true
     public var menuBarEnabled = false { didSet { persist(); configureMonitor() } }
     public var forceEligible = Set<String>()
+    /// Core-computed totals for the current findings; refreshed after scans and actions.
+    public var analytics = Analytics.empty
     public var restoredIDs = Set<UUID>()
     public var storageNavigation: [String] = []
     private var scanStatuses: [String: String] = [:]
@@ -71,13 +70,11 @@ public final class AppStore {
     private var resultLimitReached = false
     private let defaults: UserDefaults
 
-    public init(demo: Bool = false, defaults: UserDefaults = .standard) {
-        self.defaults = defaults; self.demo = demo
-        processes = ProcessService()
-        registry = BuiltInModules.registry(processes: processes)
-        executor = ActionExecutor(processes: processes)
-        let initial = KnownLocations.projectRoots
-        roots = FileService().roots(defaults.stringArray(forKey: "scanRoots") ?? (initial.isEmpty ? [NSHomeDirectory() + "/Downloads"] : initial))
+    public init(demo: Bool = false, defaults: UserDefaults = .standard, core: CoreEngine = .shared) {
+        self.defaults = defaults; self.demo = demo; self.core = core
+        modules = core.modules()
+        let initial = core.projectRoots()
+        roots = core.normalizeRoots(defaults.stringArray(forKey: "scanRoots") ?? (initial.isEmpty ? [NSHomeDirectory() + "/Downloads"] : initial))
         exclusions = defaults.stringArray(forKey: "excludedPaths") ?? []
         ignoredNames = defaults.stringArray(forKey: "ignoredProcessNames") ?? ["ssh-agent", "gpg-agent", "keyboxd", "dirmngr"]
         disabledModules = defaults.stringArray(forKey: "disabledModules") ?? []
@@ -85,9 +82,9 @@ public final class AppStore {
         configureMonitor()
         if demo { roots = ["/Users/demo/Projects"]; exclusions = []; disabledModules = []; loadDemo() }
     }
-    public var context: ScanContext { ScanContext(roots: selectedModuleID == "storage" && !storageNavigation.isEmpty ? [storageNavigation.last!] : roots, exclusions: exclusions, ignoredProcessNames: Set(ignoredNames)) }
-    public var enabledModules: [any ScanModule] { registry.modules.filter { !disabledModules.contains($0.descriptor.id) } }
-    public var currentModule: ModuleDescriptor? { selectedModuleID.flatMap { registry.module($0)?.descriptor } }
+    public var context: ScanContext { ScanContext(roots: selectedModuleID == "storage" && !storageNavigation.isEmpty ? [storageNavigation.last!] : roots, exclusions: exclusions, ignoredProcessNames: ignoredNames) }
+    public var enabledModules: [ModuleDescriptor] { modules.filter { !disabledModules.contains($0.id) } }
+    public var currentModule: ModuleDescriptor? { modules.first { $0.id == selectedModuleID } }
     public var visibleFindings: [Finding] {
         let rows = findings.filter { finding in
             (selectedModuleID == "overview" || finding.moduleID == selectedModuleID)
@@ -124,7 +121,7 @@ public final class AppStore {
         panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = true
         panel.message = "Choose folders to inspect. Scanning never removes files."
         if panel.runModal() == .OK {
-            roots = FileService().roots(roots + panel.urls.map(\.path)); storageNavigation = []; persist()
+            roots = core.normalizeRoots(roots + panel.urls.map(\.path)); storageNavigation = []; persist()
         }
     }
     public func select(_ id: String, checked: Bool) {
@@ -137,15 +134,15 @@ public final class AppStore {
         scanTask?.cancel()
         let id = UUID(), selected = selectedModuleID ?? "overview", context = self.context
         scanID = id; isScanning = true; progress = "Starting scan…"; warnings = []; scanHadWarnings = false; resultLimitReached = false; selectedIDs = []; inspectedID = nil
-        let ids = selected == "overview" ? enabledModules.map(\.descriptor.id) : [selected]
+        let ids = selected == "overview" ? enabledModules.map(\.id) : [selected]
         scanningModules = Array(Set(ids + [selected]))
         findings.removeAll { ids.contains($0.moduleID) }
-        let coordinator = ScanCoordinator(registry: registry)
+        let stream = core.scan(moduleIDs: ids, context: context)
         scanTask = Task { [weak self] in
             guard let self else { return }
             do {
                 var seen = Set(self.findings.map(\.id))
-                for try await event in coordinator.scan(moduleIDs: ids, context: context) {
+                for try await event in stream {
                     guard self.scanID == id else { return }
                     try Task.checkCancellation()
                     switch event {
@@ -159,6 +156,7 @@ public final class AppStore {
                     case .warning(let message):
                         self.scanHadWarnings = true
                         if self.warnings.count < 200 { self.warnings.append(message) }
+                    case .moduleFinished: break
                     }
                 }
                 if self.scanID == id {
@@ -176,10 +174,19 @@ public final class AppStore {
         progress = scanStatuses[selectedModuleID ?? "overview"] ?? "Ready · scan this tool"
         warnings = moduleWarnings[selectedModuleID ?? "overview"] ?? []
         scanningModules = []
+        refreshAnalytics()
+    }
+    public func refreshAnalytics() {
+        let rows = findings
+        Task { [weak self] in
+            guard let self else { return }
+            let totals = await self.core.analytics(rows)
+            if self.findings.count == rows.count { self.analytics = totals }
+        }
     }
     public func cancelScan() { scanTask?.cancel(); scanID = nil; finishScanStatus("Scan cancelled · partial results") }
     public func browse(_ path: String) {
-        guard !demo, roots.contains(where: { PathPolicy.contains(path, in: $0) }), !context.excludes(path) else { return }
+        guard !demo, roots.contains(where: { core.contains(path, in: $0) }), !exclusions.contains(where: { core.contains(path, in: $0) }) else { return }
         storageNavigation.append(path); scan()
     }
     public func browseBack() {
@@ -191,7 +198,9 @@ public final class AppStore {
         guard !demo else { error = "Demo mode cannot modify files or processes."; return }
         isApplying = true
         let freshRequest = ActionRequest(findings: draft.request.findings, kind: draft.request.kind, context: self.context)
-        let results = await executor.execute(freshRequest)
+        let results: [ActionResult]
+        do { results = try await core.execute(freshRequest) }
+        catch { self.error = error.localizedDescription; isApplying = false; return }
         for result in results {
             if let id = result.findingID {
                 if result.outcome == .requested && result.action == .terminate { forceEligible.insert(id) }
@@ -200,8 +209,9 @@ public final class AppStore {
                 }
             }
         }
-        mergeHistory(results + (await ActionJournal.shared.read()))
+        mergeHistory(results + (await core.history()))
         isApplying = false; review = nil
+        refreshAnalytics()
         if let failed = results.first(where: { $0.outcome == .failed }) { error = failed.message }
         else if let warning = results.compactMap(\.journalWarning).first { error = warning }
     }
@@ -209,9 +219,9 @@ public final class AppStore {
         var seen = Set<UUID>()
         history = (rows + history).filter { seen.insert($0.id).inserted }.sorted { $0.date > $1.date }
     }
-    public func loadHistory() async { mergeHistory(await ActionJournal.shared.read()) }
+    public func loadHistory() async { mergeHistory(await core.history()) }
     public func clearHistory() async {
-        do { try await ActionJournal.shared.clear(); history = []; restoredIDs = [] }
+        do { try await core.clearHistory(); history = []; restoredIDs = [] }
         catch { self.error = error.localizedDescription }
     }
     private func configureMonitor() {
@@ -230,7 +240,7 @@ public final class AppStore {
         defer { isRefreshingOrphans = false }
         do {
             var refreshed: [Finding] = []
-            for try await event in OrphanModule(processes: processes).scan(in: context) {
+            for try await event in core.scan(moduleIDs: ["orphans"], context: context) {
                 if case .finding(let finding) = event { refreshed.append(finding) }
             }
             let freshIDs = Set(refreshed.map(\.id))
@@ -250,7 +260,7 @@ public final class AppStore {
         guard !demo, !isApplying else { return }
         isApplying = true
         defer { isApplying = false }
-        do { try await executor.restore(result); restoredIDs.insert(result.id) }
+        do { try await core.restore(result); restoredIDs.insert(result.id) }
         catch { self.error = error.localizedDescription }
     }
     public func protect(_ finding: Finding) {

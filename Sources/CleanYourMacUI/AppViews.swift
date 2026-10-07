@@ -1,7 +1,6 @@
 import AppKit
 import CleanYourMacCore
 import CleanYourMacDesignSystem
-import CleanYourMacPlatform
 import SwiftUI
 
 public struct WorkspaceView: View {
@@ -60,8 +59,8 @@ private struct SidebarView: View {
             Label("Overview", systemImage: "square.grid.2x2").tag("overview")
             ForEach(Category.allCases, id: \.self) { category in
                 Section(category.rawValue) {
-                    ForEach(store.enabledModules.filter { $0.descriptor.category == category }, id: \.descriptor.id) { module in
-                        Label(module.descriptor.name, systemImage: module.descriptor.symbol).tag(module.descriptor.id)
+                    ForEach(store.enabledModules.filter { $0.category == category }, id: \.id) { module in
+                        Label(module.name, systemImage: module.symbol).tag(module.id)
                     }
                 }
             }
@@ -69,7 +68,7 @@ private struct SidebarView: View {
                 Label("Activity", systemImage: "clock.arrow.circlepath").tag("activity")
                 Label("Component Gallery", systemImage: "paintpalette").tag("gallery")
             }
-        }.listStyle(.sidebar).navigationTitle("CleanYourMac")
+        }.listStyle(.sidebar).scrollContentBackground(.hidden).background(Palette.sidebar).navigationTitle("CleanYourMac")
     }
 }
 
@@ -81,6 +80,8 @@ private struct OverviewView: View {
                 PageHeader("Your Mac, with room to work", subtitle: "Inspect storage and developer clutter. Every removal starts with your selection.")
                 HStack {
                     MetricTile("Scan results", value: String(store.findings.count), detail: "Across enabled modules")
+                    MetricTile("Ready to review", value: Display.bytes(store.analytics.reclaimableBytes), detail: "Eligible items, overlaps counted once")
+                    MetricTile("Found on disk", value: Display.bytes(store.analytics.diskBytes), detail: "Logical size of scanned items")
                     MetricTile("Root folders", value: String(store.roots.count), detail: "Chosen by you")
                 }
                 ScopeView(store: store, usesRoots: true)
@@ -92,17 +93,17 @@ private struct OverviewView: View {
                 ForEach(Category.allCases, id: \.self) { category in
                     VStack(alignment: .leading, spacing: Space.md) {
                         Text(category.rawValue).font(TypeStyle.sectionTitle)
-                        ForEach(store.enabledModules.filter { $0.descriptor.category == category }, id: \.descriptor.id) { module in
-                            Button { store.selectedModuleID = module.descriptor.id; store.search = "" } label: {
+                        ForEach(store.enabledModules.filter { $0.category == category }, id: \.id) { module in
+                            Button { store.selectedModuleID = module.id; store.search = "" } label: {
                                 Panel {
                                     HStack(spacing: Space.lg) {
-                                        Image(systemName: module.descriptor.symbol).foregroundStyle(Palette.accent)
+                                        Image(systemName: module.symbol).foregroundStyle(Palette.accentText)
                                         VStack(alignment: .leading, spacing: Space.xs) {
-                                            Text(module.descriptor.name).font(TypeStyle.sectionTitle)
-                                            Text(module.descriptor.summary).font(TypeStyle.secondary).foregroundStyle(.secondary)
+                                            Text(module.name).font(TypeStyle.sectionTitle)
+                                            Text(module.summary).font(TypeStyle.secondary).foregroundStyle(.secondary)
                                         }
                                         Spacer()
-                                        Text(String(store.findings.filter { $0.moduleID == module.descriptor.id }.count)).font(TypeStyle.body).monospacedDigit()
+                                        Text(String(store.findings.filter { $0.moduleID == module.id }.count)).font(TypeStyle.body).monospacedDigit()
                                         Image(systemName: "chevron.right").foregroundStyle(.secondary)
                                     }
                                 }
@@ -245,7 +246,7 @@ private struct SelectionFooter: View {
     private var summary: String {
         if store.selectedFindings.contains(where: { if case .process = $0.resource { true } else { false } }) { return "Process actions do not delete files or reclaim disk space." }
         if store.selectedIDs.isEmpty { return "Select items to review an action." }
-        let bytes = PathPolicy.normalizedSelection(store.selectedFindings).reduce(UInt64(0)) { $0 + ($1.bytes ?? 0) }
+        let bytes = store.core.normalizedSelection(store.selectedFindings).reduce(UInt64(0)) { $0 + ($1.bytes ?? 0) }
         return Display.bytes(bytes) + " logical size · review consequences before applying"
     }
 }
@@ -267,7 +268,7 @@ private struct InspectorView: View {
                     if let path = finding.resource.path { KeyValueRow("Path", path) }
                     ForEach(Array(finding.details.enumerated()), id: \.offset) { _, detail in KeyValueRow(detail.label, detail.value) }
                     ActionButton("Reveal in Finder") { store.reveal(finding) }
-                    if finding.moduleID == "storage", let path = finding.resource.path, (try? FileService().entry(path).isDirectory) == true {
+                    if finding.moduleID == "storage", let path = finding.resource.path, store.core.isDirectory(path) {
                         ActionButton("Inspect folder", kind: .primary, disabled: store.isScanning || store.demo) { store.browse(path) }
                     }
                     if case .process = finding.resource { ActionButton("Ignore process name") { store.ignore(finding) } }
@@ -377,11 +378,11 @@ public struct PreferencesView: View {
                     Panel {
                         VStack(alignment: .leading, spacing: Space.md) {
                             Text("Modules").font(TypeStyle.sectionTitle)
-                            ForEach(store.registry.modules, id: \.descriptor.id) { module in
-                                Toggle(module.descriptor.name, isOn: Binding(get: { !store.disabledModules.contains(module.descriptor.id) }, set: { enabled in
-                                    store.disabledModules.removeAll { $0 == module.descriptor.id }
-                                    if !enabled { store.disabledModules.append(module.descriptor.id) }
-                                    if !enabled && store.selectedModuleID == module.descriptor.id { store.selectedModuleID = "overview" }
+                            ForEach(store.modules, id: \.id) { module in
+                                Toggle(module.name, isOn: Binding(get: { !store.disabledModules.contains(module.id) }, set: { enabled in
+                                    store.disabledModules.removeAll { $0 == module.id }
+                                    if !enabled { store.disabledModules.append(module.id) }
+                                    if !enabled && store.selectedModuleID == module.id { store.selectedModuleID = "overview" }
                                     store.persist()
                                 }))
                             }
