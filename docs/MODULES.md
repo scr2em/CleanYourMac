@@ -1,72 +1,86 @@
 # Adding a module
 
-CleanYourMac uses compiled, trusted Swift modules. It does not load arbitrary binary plugins or execute rule scripts. A finder can be added without modifying the shared result or review screens.
+CleanYourMac uses compiled, trusted Rust modules. It does not load arbitrary binary plugins or execute rule scripts. A finder can be added without modifying the engine, the executor, the CLI or the shared SwiftUI screens: the app and CLI read descriptors from the registry.
 
-## Target boundaries
+## Layout
 
-| Target | Owns |
+| Path | Owns |
 | --- | --- |
-| CleanYourMacCore | ModuleDescriptor, ScanModule, Finding, resource identities, ActionRequest, results, registry, scan coordinator |
-| CleanYourMacPlatform | Filesystem, Git, simctl, process inspection/signals, approved command runner, action executor/journal |
-| CleanYourMacModules | Concrete discovery modules and built-in registration |
-| CleanYourMacDesignSystem | Semantic tokens, shared components and gallery; no cleanup dependencies |
-| CleanYourMacUI | Observable app state and common page patterns |
-| CleanYourMac / CleanYourMacCLI | Native app and read-only CLI composition |
-
-Core imports Foundation only. DesignSystem imports SwiftUI only. Scanner logic is independent of presentation. The modules currently share one SwiftPM target, with separate ScanModule types; larger features can move to their own targets while retaining the same protocol.
+| `crates/cym-core/src/ports.rs` | Replaceable boundaries: filesystem, walker, sizer, hasher, commands, processes, apps, Trash, journal, sink |
+| `src/adapters/` | Default implementations of the ports |
+| `src/services.rs` | The adapter bundle plus scope, traversal and identity rules |
+| `src/modules/` | `ScanModule`, `Registry`, built-in modules |
+| `src/actions.rs`, `src/analytics.rs`, `src/policy.rs` | Shared executor, totals and path policy |
+| `src/ffi.rs`, `include/cym_core.h` | Versioned C ABI |
+| `Sources/CleanYourMacCore` | Swift wire models and `CoreEngine` bridge |
+| `Sources/CleanYourMacDesignSystem`, `Sources/CleanYourMacUI` | Tokens, components and presentation only |
 
 ## A discovery-only module
 
-~~~swift
-import CleanYourMacCore
+~~~rust
+use cym_core::{model::*, modules::ScanModule, ports::*, Services};
 
-public struct ExampleModule: ScanModule {
-    public let descriptor = ModuleDescriptor(
-        id: "example",
-        name: "Example",
-        category: .developer,
-        symbol: "folder",
-        summary: "Inspect a documented kind of generated data."
-    )
-
-    public init() {}
-
-    public func scan(in context: ScanContext)
-        -> AsyncThrowingStream<ScanEvent, Error>
-    {
-        AsyncThrowingStream { continuation in
-            continuation.yield(.progress("Inspecting"))
-            // Return findings from injected readers or the platform services.
-            continuation.finish()
-        }
+pub struct ExampleModule;
+impl ScanModule for ExampleModule {
+    fn descriptor(&self) -> ModuleDescriptor {
+        ModuleDescriptor::new("example", "Example", "Developer", "folder",
+            "Inspect a documented kind of generated data.", true)
+    }
+    fn scan(&self, s: &Services, c: &ScanContext, k: &ScanControl, sink: &mut dyn Sink) -> Result<()> {
+        let mut warnings = vec![];
+        s.walk(c, k, &mut warnings, &mut |e| {
+            if e.directory && e.name() == ".example-cache" {
+                sink.finding(s.file_finding(e, "example", None, "Regenerated on demand.", vec![], Risk::Rebuild, k)?);
+                return Ok(false);
+            }
+            Ok(true)
+        })?;
+        for w in warnings { sink.warning(w); }
+        Ok(())
     }
 }
+
+let registry = cym_core::modules::builtin().register(std::sync::Arc::new(ExampleModule));
 ~~~
 
-Register ExampleModule() in BuiltInModules.registry. A unique ID is required. The app and CLI expose the descriptor automatically. Add settings only when the feature needs them; all modules already have an enable/disable toggle.
+`register` replaces a module with the same ID in place, and `remove` drops one. Category is one of Storage, Developer, Applications or Tools. `symbol` is an SF Symbol name.
 
-Use FileService.walk for chosen-root traversal and Streams.make for cancellable async work. Streams.file captures sizes, coverage, a fresh identity and a directory metadata fingerprint. Avoid following symbolic links. Preserve the owning project and show evidence rather than inferring that a folder name is disposable.
+Use `Services::walk` for chosen-root traversal: it enforces exclusions, system locations, package boundaries and the entry limit around whichever `Walker` is configured. Use `Services::file_finding`, or the parallel `add_files` helper inside the crate, to capture size, coverage, a fresh identity and a folder fingerprint. Never follow symbolic links. Preserve the owning project and show evidence rather than inferring that a folder name is disposable. Express rule data as tables on the module struct so it can be extended without code changes.
 
-Yield warnings for unavailable tools, permission denial, coverage limits and skipped items. A tool failure must not appear as an empty successful scan. Check Task cancellation inside loops and wire stream termination to the underlying Task.
+Report warnings for unavailable tools, permission denial, coverage limits and skipped items. Return an error when the integration fails; the engine turns it into a warning. Check `ScanControl` inside loops.
 
 ## Actions
 
-A finding names a typed Resource and declares available ActionKind values. Empty actions make it discovery-only. blockedReason explains ineligibility. Defaults must leave findings unselected.
+A finding names a typed `Resource` and declares `ActionKind` values. An empty action list makes it discovery-only. `blocked_reason` explains why an item is ineligible. Findings start unselected in the app.
 
-Existing file actions use the common Trash workflow. New known-location features must declare their approved action roots and their active-owner checks. New destructive operations require a typed action, a resource-specific adapter, a consequence/recovery description, fresh validation in ActionExecutor, and meaningful tests. Do not add arbitrary command strings or route mutations through scan().
+File actions use the shared Trash path. A module that acts outside the user's chosen roots declares those locations in `action_roots`, and adds its own pre-action checks in `preflight`, for example active tools, running apps, Git-tracked files or rehashing. The executor still normalizes overlapping selections, rechecks current exclusions and scope, revalidates identities and records an outcome for each item. A new destructive operation needs:
 
-The executor normalizes overlapping file selections, checks current exclusions and scope, revalidates identities, and records an outcome for each attempted item. Git and simulator operations use platform commands with argument arrays. Process identity includes PID, UID, start time at microsecond resolution and executable. Force Quit requires a prior graceful request and a two-second grace period.
+- a typed action;
+- a resource-specific adapter behind a port;
+- a consequence and recovery description in the Swift `ActionKind`;
+- fresh validation;
+- meaningful tests.
+
+Do not add arbitrary command strings or route mutations through `scan`.
 
 An unchanged item in Trash can be restored to its original unoccupied location. Git worktree removal, simulator actions, permanent Trash removal and process termination have no app-level undo.
 
+## Replacing an implementation
+
+Implement the port and swap it into `Services`:
+
+~~~rust
+struct JwalkWalker;
+impl Walker for JwalkWalker { /* honor Visit::Skip/Stop; never follow links */ }
+let services = Services { walker: Arc::new(JwalkWalker), ..Services::native() };
+~~~
+
+The sizer's folder signature format belongs to the implementation. Use the same `Services` for scanning and for actions.
+
 ## Visual additions
 
-Use the shared Finder, Inspector, Action Review, Activity and Settings patterns. Feature backends cannot return custom SwiftUI views. Reuse Space, Layout, TypeStyle, Palette and approved components.
-
-A new component belongs in CleanYourMacDesignSystem, with gallery examples, semantic variants, keyboard/accessibility behavior and light/dark review. Run scripts/lint-design.py; it rejects raw feature-local colors, font sizes, corner radii, padding and frame dimensions.
+Use the shared Finder, Inspector, Action Review, Activity and Settings patterns. Feature backends cannot return custom views. Reuse Space, Layout, TypeStyle, Palette and approved components. A new component belongs in CleanYourMacDesignSystem, with gallery examples, semantic variants, keyboard and accessibility behavior, and a light and dark review. `scripts/lint-design.py` rejects raw feature-local colors, font sizes, corner radii, padding and frame dimensions.
 
 ## Required verification
 
-Use synthetic fixtures under .build/TestFixtures. Cover positive identification, ambiguous ownership, exclusions, changed resources, incomplete coverage and cancellation where applicable. Tool adapters accept CommandRunning for recorded responses. Trash operations accept TrashMoving, so normal tests never write to the user's Trash.
-
-Real Git tests create and remove only fixture repositories. Native Trash/process/simulator tests are opt-in and operate only on resources generated by those tests. Keep process commands and personal paths out of committed fixtures and screenshots.
+Add Rust tests under `crates/cym-core/tests` with fixtures from `tests/common`. They should cover positive identification, ambiguous ownership, exclusions, changed resources, incomplete coverage and cancellation where they apply. Inject `StubRunner` for tool output, `FakeProcesses` for process tables and `FixtureTrash` so tests never write to the user's Trash. Real Git tests create and remove only fixture repositories. Native tests (`tests/native.rs`) are opt-in through `scripts/test-native.sh` and touch only resources they create. Keep process commands and personal paths out of committed fixtures and screenshots.
