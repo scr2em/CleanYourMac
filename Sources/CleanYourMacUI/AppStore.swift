@@ -82,7 +82,7 @@ public final class AppStore {
         ignoredNames = defaults.stringArray(forKey: "ignoredProcessNames") ?? ["ssh-agent", "gpg-agent", "keyboxd", "dirmngr"]
         disabledModules = defaults.stringArray(forKey: "disabledModules") ?? []
         menuBarEnabled = !demo && defaults.bool(forKey: "menuBarEnabled")
-        theme = defaults.string(forKey: "theme").flatMap(ComfyTheme.init(rawValue:)) ?? .mauve
+        theme = defaults.string(forKey: "theme").flatMap(ComfyTheme.init(rawValue:)) ?? .terracotta
         ComfyTheme.current = theme
         configureMonitor()
         if demo { roots = ["/Users/demo/Projects"]; exclusions = []; disabledModules = []; loadDemo() }

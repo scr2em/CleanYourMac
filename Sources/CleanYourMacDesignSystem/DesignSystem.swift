@@ -20,13 +20,28 @@ public enum TypeStyle {
 }
 /// Named Comfy palettes. Colors resolve at draw time, so switching applies on the next render.
 public enum ComfyTheme: String, CaseIterable, Identifiable, Sendable {
-    case mauve = "Cream & Mauve", rose = "Linen & Rose"
+    case terracotta = "Terracotta & Navy", mauve = "Cream & Mauve", rose = "Linen & Rose"
     public var id: String { rawValue }
-    nonisolated(unsafe) public static var current: ComfyTheme = .mauve
+    nonisolated(unsafe) public static var current: ComfyTheme = .terracotta
 
     /// Light and dark sRGB values, mirroring docs/brand/tokens.json.
     func hex(_ token: Palette.Token) -> (light: UInt32, dark: UInt32) {
         switch (self, token) {
+        case (.terracotta, .canvas): (0xF7F1E8, 0x241E1C)
+        case (.terracotta, .sidebar): (0xF2EADF, 0x2C2523)
+        case (.terracotta, .sidebarSelection): (0xEBD6CB, 0x4A3029)
+        case (.terracotta, .surface): (0xFCF9F4, 0x332B29)
+        case (.terracotta, .elevated): (0xFFFFFF, 0x403533)
+        case (.terracotta, .border): (0xE6DCCD, 0x4D423F)
+        case (.terracotta, .borderStrong): (0xD3C5B4, 0x615350)
+        case (.terracotta, .track): (0xEBE1D3, 0x3A312F)
+        case (.terracotta, .accent): (0xE07D63, 0xE8896F)
+        case (.terracotta, .onAccent): (0x2A2220, 0x2A1A14)
+        case (.terracotta, .accentText): (0x3B5A86, 0x9DB6DB)
+        case (.terracotta, .accentSymbol): (0xC0583F, 0xEE9A82)
+        case (.terracotta, .selection): (0xF6DED5, 0x4A3029)
+        case (.terracotta, .ink): (0x403533, 0xF2EADF)
+        case (.terracotta, .muted): (0x6E625E, 0xB9ABA2)
         case (.mauve, .canvas): (0xF8F4EC, 0x1F1A1A)
         case (.mauve, .sidebar): (0xEEE5D3, 0x282121)
         case (.mauve, .sidebarSelection): (0xE6D2CC, 0x4A3636)
