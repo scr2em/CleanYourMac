@@ -340,7 +340,8 @@ public final class AppStore {
         scanTask?.cancel()
         let id = UUID(), selected = selectedModuleID ?? "overview", context = self.context
         scanID = id; isScanning = true; progress = "Starting scan…"; warnings = []; scanHadWarnings = false; selectedIDs = []; inspectedID = nil
-        let ids = selected == "overview" ? enabledModules.map(\.id) : [selected]
+        // The overview scans every enabled module except those the user must run explicitly.
+        let ids = selected == "overview" ? enabledModules.filter(\.inOverview).map(\.id) : [selected]
         scanningModules = Array(Set(ids + [selected]))
         let stream = core.scan(moduleIDs: ids, context: context, store: true)
         scanTask = Task { [weak self] in

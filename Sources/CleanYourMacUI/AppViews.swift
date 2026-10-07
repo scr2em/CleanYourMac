@@ -207,6 +207,9 @@ private struct AllToolsView: View {
                                     VStack(alignment: .leading, spacing: Space.xs) {
                                         Text(module.name).font(TypeStyle.sectionTitle)
                                         Text(module.summary).font(TypeStyle.secondary).foregroundStyle(.secondary)
+                                        if !module.inOverview {
+                                            Text("Not part of the scan above. Open it to scan.").font(TypeStyle.caption).foregroundStyle(.secondary)
+                                        }
                                     }
                                     Spacer()
                                     Text(store.count(for: module.id).formatted()).font(TypeStyle.numeric)

@@ -169,6 +169,13 @@ pub struct ModuleDescriptor {
     pub symbol: String,
     pub summary: String,
     pub uses_roots: bool,
+    /// Whether the overview's scan runs this module. Slow or deliberate tools run only when
+    /// the user scans them from their own page.
+    #[serde(default = "included")]
+    pub in_overview: bool,
+}
+fn included() -> bool {
+    true
 }
 impl ModuleDescriptor {
     pub fn new(
@@ -186,7 +193,13 @@ impl ModuleDescriptor {
             symbol: symbol.into(),
             summary: summary.into(),
             uses_roots,
+            in_overview: true,
         }
+    }
+    /// Leaves the module out of the overview's scan; the user runs it explicitly.
+    pub fn explicit(mut self) -> Self {
+        self.in_overview = false;
+        self
     }
 }
 #[derive(Default, Debug, Serialize, Deserialize)]

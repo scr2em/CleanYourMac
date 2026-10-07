@@ -216,3 +216,22 @@ fn duplicate_stages_separate_files_that_share_only_a_prefix() {
     assert!(!titles.contains(&"prefix-only"));
     assert!(report.findings.iter().all(|f| f.value("BLAKE3").is_some()));
 }
+
+#[test]
+fn overview_scan_leaves_out_explicit_only_modules() {
+    let explicit: Vec<String> = modules::builtin()
+        .descriptors()
+        .into_iter()
+        .filter(|d| !d.in_overview)
+        .map(|d| d.id)
+        .collect();
+    assert_eq!(explicit, ["duplicates"]);
+    let json = serde_json::to_value(modules::builtin().descriptors()).unwrap();
+    let duplicates = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["id"] == "duplicates")
+        .unwrap();
+    assert_eq!(duplicates["inOverview"], false);
+}

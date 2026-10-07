@@ -13,8 +13,10 @@ public struct ModuleDescriptor: Identifiable, Hashable, Codable, Sendable {
     public let symbol: String
     public let summary: String
     public let usesRoots: Bool
-    public init(id: String, name: String, category: Category, symbol: String, summary: String, usesRoots: Bool = true) {
-        self.id = id; self.name = name; self.category = category; self.symbol = symbol; self.summary = summary; self.usesRoots = usesRoots
+    /// Whether the overview's scan runs this module; otherwise only its own page scans it.
+    public let inOverview: Bool
+    public init(id: String, name: String, category: Category, symbol: String, summary: String, usesRoots: Bool = true, inOverview: Bool = true) {
+        self.id = id; self.name = name; self.category = category; self.symbol = symbol; self.summary = summary; self.usesRoots = usesRoots; self.inOverview = inOverview
     }
 }
 

@@ -172,6 +172,8 @@ impl ScanModule for DuplicatesModule {
             "Verified matching files. Build and dependency folders are skipped.",
             true,
         )
+        // Reading every candidate file is slow; it runs only when the user asks for it.
+        .explicit()
     }
     fn scan(
         &self,
