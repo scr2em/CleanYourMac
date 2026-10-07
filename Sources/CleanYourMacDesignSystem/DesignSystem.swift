@@ -7,16 +7,25 @@ public enum Space {
 public enum Layout {
     public static let sidebar: CGFloat = 220, inspector: CGFloat = 320, inspectorMin: CGFloat = 240, inspectorMax: CGFloat = 420
     public static let contentMin: CGFloat = 400, windowWidth: CGFloat = 1120, windowHeight: CGFloat = 760, windowMinWidth: CGFloat = 880, windowMinHeight: CGFloat = 560
-    public static let reviewWidth: CGFloat = 640, reviewHeight: CGFloat = 540, rowMinimum: CGFloat = 52, panelRadius: CGFloat = 16, controlRadius: CGFloat = 10
+    public static let reviewWidth: CGFloat = 640, reviewHeight: CGFloat = 540, rowMinimum: CGFloat = 52, panelRadius: CGFloat = 16, controlRadius: CGFloat = 10, smallRadius: CGFloat = 5
+    public static let iconSmall: CGFloat = 12, iconMedium: CGFloat = 16, iconLarge: CGFloat = 32, checkbox: CGFloat = 18
+    public static let sidebarRow: CGFloat = 36, controlHeight: CGFloat = 40
 }
+/// System font (SF Pro) on a compact macOS scale.
 public enum TypeStyle {
-    public static let pageTitle = Font.system(size: 28, weight: .semibold, design: .serif)
-    public static let sectionTitle = Font.system(size: 17, weight: .semibold, design: .serif)
-    public static let body = Font.body
-    public static let secondary = Font.callout
-    public static let caption = Font.caption
-    public static let metric = Font.system(size: 32, weight: .semibold, design: .serif).monospacedDigit()
-    public static let code = Font.system(.caption, design: .monospaced)
+    public static let pageTitle = Font.system(size: 24, weight: .semibold)
+    public static let title = Font.system(size: 17, weight: .semibold)
+    public static let headline = Font.system(size: 15, weight: .semibold)
+    public static let sectionTitle = Font.system(size: 13, weight: .semibold)
+    public static let rowTitle = Font.system(size: 13, weight: .medium)
+    public static let secondary = Font.system(size: 13)
+    public static let body = Font.system(size: 12)
+    public static let label = Font.system(size: 12, weight: .medium)
+    public static let numeric = Font.system(size: 12).monospacedDigit()
+    public static let caption = Font.system(size: 11)
+    public static let captionEmphasis = Font.system(size: 11, weight: .medium)
+    public static let metric = Font.system(size: 32, weight: .medium).monospacedDigit()
+    public static let code = Font.system(size: 11, design: .monospaced)
 }
 /// Named Comfy palettes. Colors resolve at draw time, so switching applies on the next render.
 public enum ComfyTheme: String, CaseIterable, Identifiable, Sendable {
@@ -167,6 +176,12 @@ public enum Palette {
         })
     }
 }
+public enum Stroke {
+    public static let hairline: CGFloat = 1, focus: CGFloat = 2
+}
+public enum Opacity {
+    public static let disabled = 0.45, pressed = 0.8
+}
 public enum ButtonKind: Equatable { case primary, secondary, destructive }
 
 public struct ActionButton: View {
@@ -192,8 +207,8 @@ struct ComfyButtonStyle: ButtonStyle {
             .foregroundStyle(foreground)
             .padding(.horizontal, Space.lg).padding(.vertical, Space.sm - Space.xxs)
             .background(fill, in: RoundedRectangle(cornerRadius: Layout.controlRadius))
-            .overlay(RoundedRectangle(cornerRadius: Layout.controlRadius).strokeBorder(kind == .secondary ? Palette.borderStrong : .clear))
-            .opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.45)
+            .overlay(RoundedRectangle(cornerRadius: Layout.controlRadius).strokeBorder(kind == .secondary ? Palette.borderStrong : .clear, lineWidth: Stroke.hairline))
+            .opacity(enabled ? (configuration.isPressed ? Opacity.pressed : 1) : Opacity.disabled)
             .contentShape(RoundedRectangle(cornerRadius: Layout.controlRadius))
     }
     private var fill: Color {
@@ -210,7 +225,7 @@ public struct Panel<Content: View>: View {
     public var body: some View {
         content.padding(Space.lg).frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: Layout.panelRadius))
-            .overlay(RoundedRectangle(cornerRadius: Layout.panelRadius).strokeBorder(Palette.border))
+            .overlay(RoundedRectangle(cornerRadius: Layout.panelRadius).strokeBorder(Palette.border, lineWidth: Stroke.hairline))
             .shadow(color: Palette.ink.opacity(0.06), radius: Space.sm, y: Space.xxs)
     }
 }
@@ -221,12 +236,12 @@ public struct StatChip: View {
     public init(_ label: String, value: String, emphasized: Bool = false) { self.label = label; self.value = value; self.emphasized = emphasized }
     public var body: some View {
         VStack(alignment: .leading, spacing: Space.xxs) {
-            Text(value).font(TypeStyle.sectionTitle).monospacedDigit().foregroundStyle(emphasized ? Palette.accentText : Palette.ink).lineLimit(1)
+            Text(value).font(TypeStyle.headline).monospacedDigit().foregroundStyle(emphasized ? Palette.accentText : Palette.ink).lineLimit(1)
             Text(label).font(TypeStyle.caption).foregroundStyle(Palette.muted).lineLimit(1)
         }
         .padding(.horizontal, Space.md).padding(.vertical, Space.sm)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: Layout.controlRadius))
-        .overlay(RoundedRectangle(cornerRadius: Layout.controlRadius).strokeBorder(Palette.border))
+        .overlay(RoundedRectangle(cornerRadius: Layout.controlRadius).strokeBorder(Palette.border, lineWidth: Stroke.hairline))
         .accessibilityElement(children: .combine)
     }
 }
@@ -285,12 +300,12 @@ public struct ResultRow: View {
                 HStack(spacing: Space.md) {
                     Image(systemName: symbol).foregroundStyle(Palette.accentSymbol)
                     VStack(alignment: .leading, spacing: Space.xs) {
-                        Text(title).font(TypeStyle.body).lineLimit(1)
+                        Text(title).font(TypeStyle.rowTitle).lineLimit(1)
                         Text(subtitle).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: Space.xs) {
-                        Text(value).font(TypeStyle.secondary).monospacedDigit()
+                        Text(value).font(TypeStyle.numeric)
                         Text(badge).font(TypeStyle.caption).foregroundStyle(.secondary)
                     }
                 }.contentShape(Rectangle())
