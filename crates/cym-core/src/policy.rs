@@ -86,54 +86,125 @@ pub fn protected(path: &str) -> bool {
     .contains(&p.as_str())
         || system_excluded(&p)
 }
+/// Generated output, dependency stores and tool caches across ecosystems. Duplicate
+/// detection never descends into these (matched case-insensitively, at any depth).
 pub const DUPLICATE_IGNORES: &[&str] = &[
-    "node_modules",
-    "packages",
+    // Version control
     ".git",
-    "build",
-    ".build",
-    "dist",
-    "out",
-    "target",
-    "bin",
-    "obj",
+    ".hg",
+    ".svn",
+    ".jj",
+    // JavaScript and TypeScript
+    "node_modules",
+    "bower_components",
+    "jspm_packages",
+    "web_modules",
+    ".pnpm-store",
+    ".yarn",
+    ".npm",
+    ".angular",
     ".next",
     ".nuxt",
+    ".output",
+    ".svelte-kit",
+    ".vite",
     ".turbo",
     ".parcel-cache",
+    ".expo",
+    ".docusaurus",
+    ".astro",
+    ".vercel",
+    ".netlify",
+    ".serverless",
+    "storybook-static",
+    ".nyc_output",
     "coverage",
-    ".cache",
-    ".gradle",
-    ".m2",
-    "vendor",
-    "pods",
-    "carthage",
+    ".sass-cache",
+    "dist",
+    "out",
+    "build",
+    // Swift, Objective-C and Xcode
+    ".build",
     ".swiftpm",
     "deriveddata",
+    "pods",
+    "carthage",
+    "xcuserdata",
+    // Rust, Go, Zig, C and C++
+    "target",
+    ".cargo",
+    "zig-cache",
+    ".zig-cache",
+    "zig-out",
+    "cmake-build-debug",
+    "cmake-build-release",
+    "cmakefiles",
+    ".cxx",
+    ".ccls-cache",
+    ".clangd",
+    "bazel-bin",
+    "bazel-out",
+    "bazel-testlogs",
+    "buck-out",
+    // JVM and Android
+    ".gradle",
+    ".m2",
+    ".ivy2",
+    ".sbt",
+    ".bloop",
+    ".metals",
+    ".kotlin",
+    ".externalnativebuild",
+    "bin",
+    "obj",
+    // .NET
+    "packages",
+    ".vs",
+    // Python
+    "__pycache__",
+    "__pypackages__",
     ".venv",
     "venv",
     "env",
-    "__pycache__",
     ".tox",
     ".nox",
+    ".eggs",
     ".pytest_cache",
     ".mypy_cache",
     ".ruff_cache",
+    ".hypothesis",
+    ".ipynb_checkpoints",
     "site-packages",
+    "htmlcov",
+    // Ruby, PHP, Elixir, Erlang, Haskell, Elm, Dart
+    ".bundle",
+    "vendor",
+    "_build",
+    "deps",
+    ".elixir_ls",
+    ".stack-work",
+    "dist-newstyle",
+    ".cabal",
+    "elm-stuff",
     ".dart_tool",
     ".pub-cache",
     ".pub",
-    ".bundle",
-    ".cargo",
-    ".cabal",
-    "_build",
-    "deps",
-    "bower_components",
+    // Infrastructure and general caches
+    ".terraform",
+    ".aws-sam",
+    ".cache",
+    ".tmp",
 ];
+/// Name suffixes treated like `DUPLICATE_IGNORES` entries.
+pub const DUPLICATE_IGNORE_SUFFIXES: &[&str] = &[".egg-info", ".xcarchive", ".dSYM"];
 pub fn duplicate_excluded(path: &str) -> bool {
     system_excluded(path)
         || Path::new(path).components().any(|c| {
-            DUPLICATE_IGNORES.contains(&c.as_os_str().to_string_lossy().to_lowercase().as_str())
+            let name = c.as_os_str().to_string_lossy().to_lowercase();
+            DUPLICATE_IGNORES.contains(&name.as_str())
+                || DUPLICATE_IGNORE_SUFFIXES
+                    .iter()
+                    .any(|suffix| name.ends_with(&suffix.to_lowercase()))
         })
 }
 pub fn normalized_selection(rows: &[Finding]) -> Vec<Finding> {

@@ -1,8 +1,13 @@
 //! Versioned C ABI. Requests and results are UTF-8 JSON. Every string returned by this
 //! library is released with `cym_string_free`; see `include/cym_core.h` for ownership rules.
 use crate::{
-    adapters::journal::JsonJournal, model::*, modules, policy, ports::ScanControl,
-    services::Services, Engine,
+    adapters::journal::JsonJournal,
+    model::*,
+    modules, policy,
+    ports::ScanControl,
+    results::{Query, SnapshotInfo},
+    services::Services,
+    Engine,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -36,6 +41,9 @@ struct ScanRequest {
     context: ScanContext,
     #[serde(default = "concurrency")]
     concurrency: usize,
+    /// Write findings to the engine's result store instead of streaming each one.
+    #[serde(default)]
+    store: bool,
 }
 fn concurrency() -> usize {
     3
@@ -89,6 +97,57 @@ fn dispatch(engine: &Engine, method: &str, p: &Value) -> Result<Value> {
         "restore" => engine
             .restore(&param::<ActionResult>(p, "result")?)
             .map(|_| Value::Null),
+        "query" => {
+            let snapshot = engine.results.query(&param::<Query>(p, "query")?);
+            value(SnapshotInfo::from(snapshot.as_ref()))
+        }
+        "rows" => {
+            let snapshot = engine
+                .results
+                .snapshot(param(p, "queryId")?)
+                .ok_or("This result view expired; query again.")?;
+            value(snapshot.page(param(p, "offset")?, param::<usize>(p, "limit")?.min(5_000)))
+        }
+        "position" => {
+            let snapshot = engine
+                .results
+                .snapshot(param(p, "queryId")?)
+                .ok_or("This result view expired; query again.")?;
+            value(snapshot.position(&param::<String>(p, "id")?))
+        }
+        "finding" => value(
+            engine
+                .results
+                .get(&param::<String>(p, "id")?)
+                .map(|f| f.as_ref().clone()),
+        ),
+        "selection" => value(engine.results.selection(
+            &param::<Vec<String>>(p, "ids")?,
+            param::<Option<usize>>(p, "preview")?.unwrap_or(200),
+        )),
+        "executeSelection" => value(engine.execute_ids(
+            &param::<Vec<String>>(p, "ids")?,
+            param(p, "kind")?,
+            &param(p, "context")?,
+            &ScanControl::default(),
+        )),
+        "removeResults" => value(engine.results.remove(&param::<Vec<String>>(p, "ids")?)),
+        "loadResults" => {
+            engine.results.clear();
+            engine.results.insert(param(p, "findings")?);
+            value(engine.results.len())
+        }
+        "synthesize" => {
+            engine.results.clear();
+            engine.results.insert(crate::results::synthetic(
+                param::<usize>(p, "count")?.min(5_000_000),
+            ));
+            value(engine.results.len())
+        }
+        "resultCount" => value(json!({
+            "total": engine.results.len(),
+            "generation": engine.results.generation(),
+        })),
         "scan" => {
             let request: ScanRequest =
                 serde_json::from_value(p.clone()).map_err(|e| e.to_string())?;
@@ -209,13 +268,24 @@ pub unsafe extern "C" fn cym_scan_start(
             }
         };
         let finished = catch_unwind(AssertUnwindSafe(|| {
-            engine.scan(
-                &request.modules,
-                &request.context,
-                &worker,
-                request.concurrency,
-                &|event| deliver(&event),
-            )
+            let emit = |event: ScanEvent| deliver(&event);
+            if request.store {
+                engine.scan_to_store(
+                    &request.modules,
+                    &request.context,
+                    &worker,
+                    request.concurrency,
+                    &emit,
+                )
+            } else {
+                engine.scan(
+                    &request.modules,
+                    &request.context,
+                    &worker,
+                    request.concurrency,
+                    &emit,
+                )
+            }
         }));
         if finished.is_err() {
             deliver(&ScanEvent::Warning {

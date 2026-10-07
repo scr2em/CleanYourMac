@@ -28,6 +28,22 @@ fn path_boundaries_and_sensitive_items() {
     assert!(policy::duplicate_excluded("/Projects/app/node_modules/x"));
     assert!(policy::duplicate_excluded("/Projects/app/Pods/x"));
     assert!(!policy::duplicate_excluded("/Projects/app/src/x"));
+    for ignored in [
+        ".angular",
+        "node_modules",
+        ".svelte-kit",
+        "zig-out",
+        "bazel-out",
+        "__pycache__",
+        "dist-newstyle",
+        "DerivedData",
+        "lib.egg-info",
+    ] {
+        assert!(
+            policy::duplicate_excluded(&format!("/Projects/app/{ignored}/cache/file")),
+            "{ignored}"
+        );
+    }
     assert!(policy::package("/Applications/Editor.app"));
 }
 

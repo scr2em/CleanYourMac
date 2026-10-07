@@ -80,7 +80,7 @@ impl Registry {
     ) -> Result<ScanReport> {
         let module = self.get(id).ok_or("Unknown module")?;
         let mut report = ScanReport::default();
-        let mut sink = Guard::new(&mut report);
+        let mut sink = Guard::new(&mut report, services.result_limit);
         run(module.as_ref(), services, context, control, &mut sink);
         report.cancelled = control.is_cancelled();
         Ok(report)
@@ -105,19 +105,21 @@ pub(crate) struct Guard<'a> {
     inner: &'a mut dyn Sink,
     seen: HashSet<String>,
     limited: bool,
+    limit: usize,
 }
 impl<'a> Guard<'a> {
-    pub(crate) fn new(inner: &'a mut dyn Sink) -> Self {
+    pub(crate) fn new(inner: &'a mut dyn Sink, limit: usize) -> Self {
         Self {
             inner,
             seen: HashSet::new(),
             limited: false,
+            limit,
         }
     }
 }
 impl Sink for Guard<'_> {
     fn finding(&mut self, finding: Finding) {
-        if self.seen.len() >= 30_000 {
+        if self.seen.len() >= self.limit {
             if !self.limited {
                 self.limited = true;
                 self.inner

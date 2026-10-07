@@ -32,6 +32,8 @@ pub struct Services {
     pub process_state: Arc<Mutex<ProcessState>>,
     /// Maximum entries visited by one module's traversal.
     pub walk_limit: usize,
+    /// Maximum findings one module may report in a scan.
+    pub result_limit: usize,
 }
 impl Services {
     pub fn native() -> Self {
@@ -52,7 +54,8 @@ impl Services {
             trash: Arc::new(native::NativeTrash),
             journal,
             process_state: Default::default(),
-            walk_limit: 300_000,
+            walk_limit: 20_000_000,
+            result_limit: 2_000_000,
         }
     }
 

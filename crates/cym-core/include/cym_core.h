@@ -28,11 +28,14 @@ void cym_engine_free(CymEngine *engine);
 // {"ok": true, "result": ...} or {"ok": false, "error": "..."}. Actions may take seconds;
 // call off the main thread. Methods: version, modules, projectRoots, normalizeRoots,
 // pathContains, isDirectory, normalizedSelection, analytics, execute, history,
-// clearHistory, restore, scan.
+// clearHistory, restore, scan; result store: query, rows, position, finding, selection,
+// executeSelection, removeResults, loadResults, synthesize, resultCount.
 char *cym_call(const CymEngine *engine, const char *request_json);
 void cym_string_free(char *string);
 
-// Starts {"modules": [...], "context": {...}, "concurrency": 3} on a background thread.
+// Starts {"modules": [...], "context": {...}, "concurrency": 3, "store": false} on a
+// background thread. With "store": true, findings replace those modules' rows in the
+// engine's result store and only throttled {"type": "stored"} counts are delivered.
 // Events arrive one at a time; the last is always {"type": "finished", "cancelled": bool},
 // after which context is never used again. Returns NULL, with no callbacks, if invalid.
 CymScan *cym_scan_start(const CymEngine *engine, const char *request_json,

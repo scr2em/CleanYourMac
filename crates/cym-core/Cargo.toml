@@ -22,6 +22,7 @@ libc = "0.2"
 uuid = { version = "1", features = ["v4", "serde"] }
 plist = "1"
 rayon = "1"
+rustc-hash = "2"
 blake3 = "1"
 
 [build-dependencies]

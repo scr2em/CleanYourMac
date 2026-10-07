@@ -269,6 +269,12 @@ pub enum ScanEvent {
     ModuleFinished {
         module_id: String,
     },
+    /// Findings were added to the engine's result store; `total` counts every stored row.
+    #[serde(rename_all = "camelCase")]
+    Stored {
+        module_id: String,
+        total: usize,
+    },
     Finished {
         cancelled: bool,
     },
