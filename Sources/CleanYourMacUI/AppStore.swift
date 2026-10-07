@@ -108,6 +108,12 @@ public final class AppStore {
     /// Modules the running scan covers, and how many have finished.
     public private(set) var scanTotal = 0
     public private(set) var scanFinished = 0
+    /// Modules of the running scan whose results are complete, and so can be acted on.
+    public private(set) var finishedModuleIDs = Set<String>()
+    /// Whether a fix's results are final: no scan is running, or its module has finished.
+    public func canReview(_ fix: Recommendation) -> Bool {
+        !isApplying && (!isScanning || finishedModuleIDs.contains(fix.moduleID))
+    }
     /// The running scan's completed share, when it covers more than one module.
     public var scanFraction: Double? { scanTotal > 1 ? min(1, Double(scanFinished) / Double(scanTotal)) : nil }
     public let demo: Bool
@@ -176,7 +182,7 @@ public final class AppStore {
     public var recommendedBytes: UInt64 { recommendations.filter { $0.action == .trash }.reduce(0) { $0 + $1.bytes } }
     /// Opens the review for one recommended fix, with its items selected.
     public func review(_ fix: Recommendation) {
-        guard !isApplying, !isScanning else { return }
+        guard canReview(fix) else { return }
         selectedIDs = Set(fix.ids)
         reviewSelection(fix.action)
     }
@@ -348,7 +354,7 @@ public final class AppStore {
         // The overview scans every enabled module except those the user must run explicitly.
         let ids = selected == "overview" ? enabledModules.filter(\.inOverview).map(\.id) : [selected]
         scanningModules = Array(Set(ids + [selected]))
-        scanTotal = ids.count; scanFinished = 0
+        scanTotal = ids.count; scanFinished = 0; finishedModuleIDs = []
         let stream = core.scan(moduleIDs: ids, context: context, store: true)
         scanTask = Task { [weak self] in
             guard let self else { return }
@@ -362,7 +368,9 @@ public final class AppStore {
                     case .warning(let message):
                         self.scanHadWarnings = true
                         if self.warnings.count < 200 { self.warnings.append(message) }
-                    case .moduleFinished: self.scanFinished += 1
+                    case .moduleFinished(let module):
+                        self.scanFinished += 1
+                        self.finishedModuleIDs.insert(module)
                     case .finding: break
                     }
                 }

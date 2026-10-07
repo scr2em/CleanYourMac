@@ -75,9 +75,9 @@ private struct SidebarView: View {
 private struct OverviewView: View {
     @Bindable var store: AppStore
     @Namespace private var orb
-    /// While scanning, and before there is anything to show, the orb is the page; afterwards
-    /// the findings are.
-    private var hero: Bool { store.isScanning || (store.lastScanAt == nil && store.overview.findings == 0) }
+    /// Until there is something to show, the orb is the page. Results appear as soon as the
+    /// first ones arrive, while the scan carries on.
+    private var hero: Bool { store.overview.findings == 0 && (store.isScanning || store.lastScanAt == nil) }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xl) {
@@ -167,16 +167,22 @@ private struct ScanSummary: View {
     var body: some View {
         Panel {
             HStack(spacing: Space.lg) {
-                ScanOrb("Scan again", phase: .idle, diameter: Layout.scanOrbCompact) { store.scan() }
+                ScanOrb("Scan again", phase: store.isScanning ? .scanning(progress: store.scanFraction) : .idle, diameter: Layout.scanOrbCompact) { store.scan() }
                     .matchedGeometryEffect(id: "orb", in: orb)
                     .disabled(store.isApplying || store.demo)
                 VStack(alignment: .leading, spacing: Space.xs) {
-                    Text("Found \(Display.bytes(store.overview.diskBytes)) in \(Display.items(store.overview.findings))").font(TypeStyle.headline)
-                    Text(lastScanned).font(TypeStyle.caption).foregroundStyle(.secondary)
+                    Text("Found \(Display.bytes(store.overview.diskBytes)) in \(Display.items(store.overview.findings))\(store.isScanning ? " so far" : "")")
+                        .font(TypeStyle.headline).contentTransition(.numericText())
+                    if store.isScanning {
+                        Text(store.scanTotal > 1 ? "\(store.scanFinished) of \(store.scanTotal) tools done · \(store.progress)" : store.progress)
+                            .font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    } else {
+                        Text(lastScanned).font(TypeStyle.caption).foregroundStyle(.secondary)
+                    }
                     Text(placeDescription(store)).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 }
                 Spacer()
-                ScanPlacePicker(store: store)
+                if store.isScanning { ActionButton("Cancel") { store.cancelScan() } } else { ScanPlacePicker(store: store) }
             }
         }
     }
@@ -195,7 +201,10 @@ private struct RecommendationsView: View {
                 HStack(alignment: .firstTextBaseline, spacing: Space.md) {
                     VStack(alignment: .leading, spacing: Space.xs) {
                         Text("Recommended").font(TypeStyle.title)
-                        Text("Free up \(Display.bytes(store.recommendedBytes)) with these fixes").font(TypeStyle.secondary).foregroundStyle(.secondary)
+                        Text(store.isScanning
+                             ? "Free up \(Display.bytes(store.recommendedBytes)) so far · fixes open for review as each tool finishes"
+                             : "Free up \(Display.bytes(store.recommendedBytes)) with these fixes")
+                            .font(TypeStyle.secondary).foregroundStyle(.secondary).contentTransition(.numericText())
                     }
                     Spacer()
                     if store.recommendations.contains(where: { $0.action == .trash }) {
@@ -203,6 +212,7 @@ private struct RecommendationsView: View {
                     }
                 }
                 ForEach(store.recommendations) { fix in RecommendationCard(store: store, fix: fix) }
+                    .animation(.spring(duration: 0.5), value: store.recommendations.map(\.id))
             }
         } else if store.lastScanAt != nil, !store.isScanning {
             Panel {
@@ -232,8 +242,15 @@ private struct RecommendationCard: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: Space.sm) {
-                    Text(Display.bytes(fix.bytes)).font(TypeStyle.headline).monospacedDigit()
-                    ActionButton("Review", kind: fix.risk == .permanent ? .destructive : .secondary, disabled: store.isApplying || store.isScanning) { store.review(fix) }
+                    Text(Display.bytes(fix.bytes)).font(TypeStyle.headline).monospacedDigit().contentTransition(.numericText())
+                    if store.canReview(fix) {
+                        ActionButton("Review", kind: fix.risk == .permanent ? .destructive : .secondary) { store.review(fix) }
+                    } else {
+                        HStack(spacing: Space.xs) {
+                            ProgressView().controlSize(.small)
+                            Text("Still scanning").font(TypeStyle.caption).foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
         }
