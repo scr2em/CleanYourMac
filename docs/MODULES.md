@@ -81,6 +81,8 @@ The sizer's folder signature format belongs to the implementation. Use the same 
 
 ## Visual additions
 
+A finding's row icon is its ecosystem's logo when `cym_model::brand` names one (from the module, the "Ecosystem" detail or the package manager), its Finder icon for plain files, folders and apps, and otherwise the module's SF Symbol. Logos are single-colour 24×24 SVG files in `Sources/CleanYourMacDesignSystem/BrandIcons`, named by slug, with the brand colour as the root `fill`. To add one, map the ecosystem in `brand.rs` and drop `<slug>.svg` into the folder, or run `scripts/update-brand-icons.py` against a Simple Icons package. A test fails if a slug has no file.
+
 Use the shared Finder, Inspector, Action Review, Activity and Settings patterns. Feature backends cannot return custom views. Reuse Space, Layout, TypeStyle, Palette and approved components. A new component belongs in CleanYourMacDesignSystem, with gallery examples, semantic variants, keyboard and accessibility behavior, and a light and dark review. `scripts/lint-design.py` rejects raw feature-local colors, font sizes, corner radii, padding and frame dimensions.
 
 ## Required verification

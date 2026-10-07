@@ -25,9 +25,10 @@ let package = Package(
                 .linkedFramework("CoreServices"),
             ]
         ),
-        .target(name: "CleanYourMacDesignSystem"),
+        // Brand logos are SVG files; add or replace one by dropping `<slug>.svg` into the folder.
+        .target(name: "CleanYourMacDesignSystem", resources: [.copy("BrandIcons")]),
         .target(name: "CleanYourMacUI", dependencies: ["CleanYourMacCore", "CleanYourMacDesignSystem"]),
         .executableTarget(name: "CleanYourMac", dependencies: ["CleanYourMacUI", "CleanYourMacDesignSystem"]),
-        .testTarget(name: "CleanYourMacTests", dependencies: ["CleanYourMacCore", "CleanYourMacUI"]),
+        .testTarget(name: "CleanYourMacTests", dependencies: ["CleanYourMacCore", "CleanYourMacUI", "CleanYourMacDesignSystem"]),
     ]
 )

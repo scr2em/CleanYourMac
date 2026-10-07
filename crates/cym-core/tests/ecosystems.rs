@@ -248,16 +248,15 @@ fn brands_follow_ecosystems_and_every_brand_has_a_logo() {
         assert_eq!(brand::for_ecosystem(ecosystem), Some(slug), "{ecosystem}");
     }
     assert_eq!(brand::for_ecosystem("Something new"), None);
-    // The app's generated catalog must draw every slug the core can return.
-    let catalog = fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../Sources/CleanYourMacDesignSystem/BrandIcons.swift"),
-    )
-    .unwrap();
+    // The app's logo folder must hold a coloured SVG for every slug the core can return.
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../Sources/CleanYourMacDesignSystem/BrandIcons");
     for slug in brand::slugs() {
+        let svg = fs::read_to_string(folder.join(format!("{slug}.svg")))
+            .unwrap_or_else(|_| panic!("no logo for {slug}"));
         assert!(
-            catalog.contains(&format!("\"{slug}\": (")),
-            "no logo for {slug}"
+            svg.starts_with("<svg fill=\"#"),
+            "{slug} has no brand colour"
         );
     }
 }

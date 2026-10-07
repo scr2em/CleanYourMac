@@ -2,44 +2,51 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Ecosystem logos (from Simple Icons), parsed once into paths in a 24×24 box.
+/// Ecosystem logos: the single-colour SVGs in the bundled `BrandIcons` folder, named by slug,
+/// with the brand colour as each file's `fill`. Read and parsed once, on first use.
 public enum BrandCatalog {
-    static let paths: [String: Path] = icons.mapValues { parse($0.path) }
+    /// Inside the app's Resources when packaged; SwiftPM's resource bundle when run from a build.
+    static let folder: URL? = {
+        if let url = Bundle.main.url(forResource: "CleanYourMac_CleanYourMacDesignSystem", withExtension: "bundle"),
+           let folder = Bundle(url: url)?.url(forResource: "BrandIcons", withExtension: nil) {
+            return folder
+        }
+        return Bundle.module.url(forResource: "BrandIcons", withExtension: nil)
+    }()
+    static let icons: [String: SVGIcon] = {
+        guard let folder, let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return [:] }
+        var icons: [String: SVGIcon] = [:]
+        for file in files where file.pathExtension == "svg" {
+            if let text = try? String(contentsOf: file, encoding: .utf8), let icon = SVGIcon(svg: text) {
+                icons[file.deletingPathExtension().lastPathComponent] = icon
+            }
+        }
+        return icons
+    }()
+    /// Each logo as a path in a 24×24 box.
+    static let paths: [String: Path] = icons.mapValues(path)
 
+    public static var slugs: [String] { icons.keys.sorted() }
     /// Whether a logo exists for `slug`.
     public static func contains(_ slug: String) -> Bool { icons[slug] != nil }
-    public static func name(_ slug: String) -> String? { icons[slug]?.name }
-    static func hex(_ slug: String) -> UInt32? { icons[slug]?.hex }
+    public static func name(_ slug: String) -> String? { icons[slug]?.title }
+    static func hex(_ slug: String) -> UInt32? { icons[slug]?.fill }
 
-    /// Reads the generated absolute M, L, C, Q and Z commands.
-    static func parse(_ text: String) -> Path {
+    static func path(_ icon: SVGIcon) -> Path {
         var path = Path()
-        var command: Character?
-        var values: [CGFloat] = []
-        func point(_ i: Int) -> CGPoint { CGPoint(x: values[i], y: values[i + 1]) }
-        func flush() {
+        for command in icon.commands {
             switch command {
-            case "M" where values.count >= 2: path.move(to: point(0))
-            case "L" where values.count >= 2: path.addLine(to: point(0))
-            case "C" where values.count >= 6: path.addCurve(to: point(4), control1: point(0), control2: point(2))
-            case "Q" where values.count >= 4: path.addQuadCurve(to: point(2), control: point(0))
-            case "Z": path.closeSubpath()
-            default: break
+            case let .move(x, y): path.move(to: CGPoint(x: x, y: y))
+            case let .line(x, y): path.addLine(to: CGPoint(x: x, y: y))
+            case let .cubic(x1, y1, x2, y2, x, y): path.addCurve(to: CGPoint(x: x, y: y), control1: CGPoint(x: x1, y: y1), control2: CGPoint(x: x2, y: y2))
+            case let .quad(x1, y1, x, y): path.addQuadCurve(to: CGPoint(x: x, y: y), control: CGPoint(x: x1, y: y1))
+            case .close: path.closeSubpath()
             }
         }
-        for token in text.split(separator: " ") {
-            guard let first = token.first else { continue }
-            if first.isLetter {
-                flush()
-                command = first
-                values = []
-                if let value = Double(token.dropFirst()) { values.append(CGFloat(value)) }
-            } else if let value = Double(token) {
-                values.append(CGFloat(value))
-            }
-        }
-        flush()
-        return path
+        // Fit any view box into the 24-point square the shape scales from.
+        let box = icon.viewBox
+        let scale = 24 / max(box.width, box.height, 1)
+        return path.applying(CGAffineTransform(scaleX: scale, y: scale).translatedBy(x: -box.x, y: -box.y))
     }
 }
 
