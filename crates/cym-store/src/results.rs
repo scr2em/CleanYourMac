@@ -60,6 +60,9 @@ pub struct Query {
     pub min_bytes: u64,
     /// Only rows last modified before this Unix time.
     pub modified_before: Option<f64>,
+    /// Only rows last used before this Unix time; rows with no recorded use count by their
+    /// modification time.
+    pub last_used_before: Option<f64>,
     pub sort: SortKey,
     pub ascending: bool,
 }
@@ -290,6 +293,7 @@ struct SummaryKey {
     search: String,
     min_bytes: u64,
     modified_before: Option<u64>,
+    last_used_before: Option<u64>,
 }
 impl ResultStore {
     fn changed(&self) {
@@ -390,8 +394,10 @@ impl ResultStore {
         // a linear, order-preserving pass is far cheaper than re-sorting on each keystroke.
         let ordered = self.ordered(q, generation);
         let needle = Needle::new(&q.search);
-        let unfiltered =
-            q.min_bytes == 0 && q.modified_before.is_none() && needle.unicode.is_empty();
+        let unfiltered = q.min_bytes == 0
+            && q.modified_before.is_none()
+            && q.last_used_before.is_none()
+            && needle.unicode.is_empty();
         // With no filter the snapshot shares the cached order instead of copying it.
         let rows: Ordered = if unfiltered {
             ordered
@@ -403,6 +409,9 @@ impl ResultStore {
                         (q.min_bytes == 0 || f.bytes.unwrap_or(0) >= q.min_bytes)
                             && q.modified_before
                                 .is_none_or(|t| f.modified_at.is_some_and(|m| m < t))
+                            && q.last_used_before.is_none_or(|t| {
+                                f.last_used_at.or(f.modified_at).is_some_and(|u| u < t)
+                            })
                             && needle.matches(f)
                     })
                     .cloned()
@@ -415,6 +424,7 @@ impl ResultStore {
             search: q.search.trim().to_owned(),
             min_bytes: q.min_bytes,
             modified_before: q.modified_before.map(f64::to_bits),
+            last_used_before: q.last_used_before.map(f64::to_bits),
         };
         // Totals, largest items, busiest process and eligible count depend on which rows
         // match, not on their order, so a re-sort or repeat query reuses them.

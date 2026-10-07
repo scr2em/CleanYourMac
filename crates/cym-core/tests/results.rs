@@ -535,3 +535,40 @@ fn recommendations_offer_conservative_one_click_fixes() {
     assert_eq!(fixes[2].action, ActionKind::EmptyTrash);
     assert_eq!(fixes[2].risk, Risk::Permanent);
 }
+
+#[test]
+fn last_used_filter_falls_back_to_modification_time() {
+    let now = 2_000_000_000.0;
+    let day = 86_400.0;
+    let mut rows = synthetic(4);
+    rows[0].last_used_at = Some(now - 40.0 * day); // used over a month ago
+    rows[1].last_used_at = Some(now - 2.0 * day); // used this week
+    rows[2].last_used_at = None;
+    rows[2].modified_at = Some(now - 400.0 * day); // never used, modified over a year ago
+    rows[3].last_used_at = None;
+    rows[3].modified_at = None; // nothing known
+    let ids: Vec<String> = rows.iter().map(|f| f.id.clone()).collect();
+    let store = ResultStore::default();
+    store.insert(rows);
+    let older_than = |days: f64| {
+        let mut found: Vec<String> = store
+            .query(&Query {
+                last_used_before: Some(now - days * day),
+                ..Default::default()
+            })
+            .page(0, 10)
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        found.sort();
+        found
+    };
+    let expect = |indices: &[usize]| {
+        let mut v: Vec<String> = indices.iter().map(|&i| ids[i].clone()).collect();
+        v.sort();
+        v
+    };
+    assert_eq!(older_than(30.0), expect(&[0, 2]));
+    assert_eq!(older_than(1.0), expect(&[0, 1, 2]));
+    assert_eq!(older_than(365.0), expect(&[2]));
+}

@@ -341,10 +341,17 @@ private struct FinderView: View {
                     else { ActionButton("Scan", kind: .primary, disabled: store.isApplying || store.demo) { store.scan() } }
                 }
                 SearchSummary(store: store)
-                if ["large", "downloads", "duplicates", "applications", "artifacts", "node"].contains(store.selectedModuleID ?? "") {
+                // Processes have no file dates or disk size; every other tool can be filtered.
+                if store.selectedModuleID != "orphans" {
                     HStack(spacing: Space.md) {
-                        Picker("Size", selection: $store.sizeFilter) { ForEach(SizeFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
-                        Picker("Modified", selection: $store.ageFilter) { ForEach(AgeFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                        Picker("Size", selection: $store.sizeFilter) { ForEach(SizeFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.fixedSize()
+                        Picker("Modified", selection: $store.ageFilter) { ForEach(AgeFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.fixedSize()
+                        Picker("Last used", selection: $store.usedFilter) { ForEach(AgeFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.fixedSize()
+                        if store.sizeFilter != .all || store.ageFilter != .all || store.usedFilter != .all {
+                            Button("Clear filters") { store.sizeFilter = .all; store.ageFilter = .all; store.usedFilter = .all }
+                                .buttonStyle(.link)
+                        }
+                        Spacer()
                     }.font(TypeStyle.caption)
                 }
                 HStack {

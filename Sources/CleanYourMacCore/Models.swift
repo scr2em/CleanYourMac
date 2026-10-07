@@ -280,10 +280,13 @@ public struct ResultQuery: Codable, Hashable, Sendable {
     public var search: String
     public var minBytes: UInt64
     public var modifiedBefore: Date?
+    /// Only items last used before this; items with no recorded use count by modification.
+    public var lastUsedBefore: Date?
     public var sort: ResultSort
     public var ascending: Bool
-    public init(module: String?, search: String = "", minBytes: UInt64 = 0, modifiedBefore: Date? = nil, sort: ResultSort = .size, ascending: Bool = false) {
-        self.module = module; self.search = search; self.minBytes = minBytes; self.modifiedBefore = modifiedBefore; self.sort = sort; self.ascending = ascending
+    public init(module: String?, search: String = "", minBytes: UInt64 = 0, modifiedBefore: Date? = nil, lastUsedBefore: Date? = nil, sort: ResultSort = .size, ascending: Bool = false) {
+        self.module = module; self.search = search; self.minBytes = minBytes; self.modifiedBefore = modifiedBefore
+        self.lastUsedBefore = lastUsedBefore; self.sort = sort; self.ascending = ascending
     }
 }
 
