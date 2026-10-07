@@ -20,6 +20,7 @@ public struct WorkspaceView: View {
         }
         .frame(minWidth: Layout.windowMinWidth, minHeight: Layout.windowMinHeight)
         .background(Palette.canvas)
+        .id(store.theme)
         .toolbar {
             ToolbarItemGroup {
                 if store.demo { Text("Demo · actions disabled").font(TypeStyle.caption).foregroundStyle(.secondary) }
@@ -97,7 +98,7 @@ private struct OverviewView: View {
                             Button { store.selectedModuleID = module.id; store.search = "" } label: {
                                 Panel {
                                     HStack(spacing: Space.lg) {
-                                        Image(systemName: module.symbol).foregroundStyle(Palette.accentText)
+                                        Image(systemName: module.symbol).foregroundStyle(Palette.accentSymbol)
                                         VStack(alignment: .leading, spacing: Space.xs) {
                                             Text(module.name).font(TypeStyle.sectionTitle)
                                             Text(module.summary).font(TypeStyle.secondary).foregroundStyle(.secondary)
@@ -386,6 +387,14 @@ public struct PreferencesView: View {
                                     store.persist()
                                 }))
                             }
+                        }
+                    }
+                    Panel {
+                        VStack(alignment: .leading, spacing: Space.md) {
+                            Text("Appearance").font(TypeStyle.sectionTitle)
+                            Picker("Palette", selection: $store.theme) {
+                                ForEach(ComfyTheme.allCases) { Text($0.rawValue).tag($0) }
+                            }.pickerStyle(.segmented)
                         }
                     }
                     Toggle("Show menu bar summary and monitor orphan processes", isOn: $store.menuBarEnabled)

@@ -1,24 +1,33 @@
-# Figma handoff
+# Figma
 
-Figma publication is blocked by connector authentication. The design agent tried the account lookup three times. The first two responses requested a retry after authentication; the third returned `UNAUTHORIZED` / `TRIGGER_REAUTHENTICATION`. No Figma file or URL was created.
+The Comfy design system lives in Figma: https://www.figma.com/design/LwVoq8tzYDa6dqRG6dm1m4
 
-The saved source artifacts are:
+The file is still named "Untitled" because the plugin API cannot rename documents. Rename it by hand.
 
-- `docs/brand/tokens.json`: canonical Comfy light/dark colors, spacing, radii and typography.
-- `docs/brand/logo.svg` and `glyph.svg`: original leaf/sparkle branding.
-- `design/figma/screens.json`: screen content and fixture data.
-- `design/figma/build.js`: editable Figma Plugin API builder for foundations, components, screens and audit phases.
-- `design/figma/prepare-plugin.py`: prepares a local development-plugin bundle under `build/figma-plugin/`.
-- `design/figma/render-boards.py` and `docs/design-concepts/`: local design boards, clearly separate from actual app screenshots.
+| Page | Node | Contents |
+| --- | --- | --- |
+| 00 · Cover | `0:1` | Cover |
+| 01 · Foundations | `14:2` | Light and dark palette, type, space, radius, elevation, layout, brand |
+| 02 · Components | `14:3` | Icons, Checkbox, ActionButton (kind × state), StatusBadge, Panel, PageHeader, MetricTile, KeyValueRow, StorageBar, ResultRow, EmptyState, plus app-shell pieces |
+| 03 · App screens | `14:4` | Node Dependencies finder and Review sheet, in light and dark |
 
-These assets were prepared while the connection was unavailable. The builder has **not been executed or verified in Figma**, and the boards are **not evidence of a published Figma file**.
+## Variables and code names
 
-After reconnecting Figma, the next agent should read the Figma create-file, use, generate-library, generate-design and SwiftUI skills. Create the new file, run the builder incrementally, inspect each screen and component, verify variable bindings and font availability, and record the actual file URL here.
+Collections: Comfy · Primitives, Comfy · Colors (Light and Dark modes), Comfy · Dimensions, Comfy · Motion and Comfy · Typography. Semantic variables carry iOS code names that match the SwiftUI tokens: `Palette.<name>`, `Space.<name>` and `Layout.<name>`. `docs/brand/tokens.json` is the shared source, and `Sources/CleanYourMacDesignSystem/DesignSystem.swift` mirrors it.
 
-For a local development-plugin attempt:
+## Fonts
 
-~~~sh
-python3 design/figma/prepare-plugin.py
-~~~
+Apple fonts do not render in the Figma environment used to build the file, so text styles use variables with two modes:
 
-Then import the generated manifest through Figma's development-plugin UI. The builder requires the declared SF Pro, SF Pro Rounded and SF Mono fonts; it does not silently substitute fonts. The generated plugin is an unverified handoff artifact.
+| Mode | Headings | UI text | Code |
+| --- | --- | --- | --- |
+| Figma substitute | Newsreader | Inter | Roboto Mono |
+| Apple SF | New York | SF Pro | SF Mono |
+
+Switch the Comfy · Typography collection to "Apple SF" on a Mac that has those fonts installed. Icon components are named after SF Symbols and drawn with outlined stand-in glyphs.
+
+## Not yet done
+
+Code Connect mappings, and screens beyond the two examples.
+
+`design/figma/build.js` and `docs/design-concepts/` are earlier offline artifacts kept for reference.

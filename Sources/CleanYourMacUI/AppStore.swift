@@ -1,5 +1,6 @@
 import AppKit
 import CleanYourMacCore
+import CleanYourMacDesignSystem
 import Foundation
 import Observation
 
@@ -53,6 +54,8 @@ public final class AppStore {
     public var showSettings = false
     public var showInspector = true
     public var menuBarEnabled = false { didSet { persist(); configureMonitor() } }
+    /// The Comfy palette; colors resolve against it at draw time.
+    public var theme: ComfyTheme = ComfyTheme.current { didSet { ComfyTheme.current = theme; persist() } }
     public var forceEligible = Set<String>()
     /// Core-computed totals for the current findings; refreshed after scans and actions.
     public var analytics = Analytics.empty
@@ -79,6 +82,8 @@ public final class AppStore {
         ignoredNames = defaults.stringArray(forKey: "ignoredProcessNames") ?? ["ssh-agent", "gpg-agent", "keyboxd", "dirmngr"]
         disabledModules = defaults.stringArray(forKey: "disabledModules") ?? []
         menuBarEnabled = !demo && defaults.bool(forKey: "menuBarEnabled")
+        theme = defaults.string(forKey: "theme").flatMap(ComfyTheme.init(rawValue:)) ?? .mauve
+        ComfyTheme.current = theme
         configureMonitor()
         if demo { roots = ["/Users/demo/Projects"]; exclusions = []; disabledModules = []; loadDemo() }
     }
@@ -114,7 +119,7 @@ public final class AppStore {
         guard !demo else { return }
         defaults.set(roots, forKey: "scanRoots"); defaults.set(exclusions, forKey: "excludedPaths")
         defaults.set(ignoredNames, forKey: "ignoredProcessNames"); defaults.set(disabledModules, forKey: "disabledModules")
-        defaults.set(menuBarEnabled, forKey: "menuBarEnabled")
+        defaults.set(menuBarEnabled, forKey: "menuBarEnabled"); defaults.set(theme.rawValue, forKey: "theme")
     }
     public func addRoot() {
         let panel = NSOpenPanel()

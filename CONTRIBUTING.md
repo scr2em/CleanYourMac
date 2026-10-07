@@ -2,11 +2,14 @@
 
 Start with an issue or a small focused change. Follow the contracts in [module authoring](docs/MODULES.md), and keep UI additions inside the [design system](docs/DESIGN_SYSTEM.md).
 
-Use Swift 6 and macOS 14-compatible APIs. This project has no external package dependencies. Add a dependency only when it solves a concrete problem and its license and platform support have been reviewed.
+Core logic is Rust (stable, edition 2021) in `crates/cym-core`; the app is Swift 6 with macOS 14-compatible APIs. Platform access goes through the traits in `ports.rs`. Add a crate only when it solves a concrete problem and its license and platform support have been reviewed. Current Rust dependencies are serde, serde_json, sha2, blake3, rayon, plist, uuid and libc. Swift has no package dependencies.
 
 Before submitting a change:
 
 ~~~sh
+cargo fmt --all --check
+cargo clippy --all-targets -- -D warnings
+cargo test
 python3 scripts/lint-design.py
 bash scripts/swift.sh test
 bash scripts/build-app.sh --universal

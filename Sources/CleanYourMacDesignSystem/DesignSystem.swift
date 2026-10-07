@@ -18,31 +18,87 @@ public enum TypeStyle {
     public static let metric = Font.system(size: 32, weight: .semibold, design: .serif).monospacedDigit()
     public static let code = Font.system(.caption, design: .monospaced)
 }
-/// Comfy palette: warm off-white canvas, linen and sand neutrals and a dusty-rose accent,
-/// with a warm espresso dark mode. Values mirror docs/brand/tokens.json.
-public enum Palette {
-    public static let canvas = dynamic(0xF9F5F2, 0x1E1A17)
-    public static let sidebar = dynamic(0xEDE3D5, 0x26211D)
-    public static let surface = dynamic(0xFDFBF9, 0x2B2622)
-    public static let elevated = dynamic(0xFFFFFF, 0x332D28)
-    public static let ink = dynamic(0x2B2621, 0xF1EBE1)
-    public static let muted = dynamic(0x6B6157, 0xB3A99B)
-    public static let border = dynamic(0xD6C4B2, 0x4A4038)
-    public static let track = dynamic(0xEDE3D5, 0x3A332D)
-    /// Fills: primary buttons, bars and highlights. Pair with `onAccent` text.
-    public static let accent = dynamic(0xD0A097, 0xD9A79E)
-    public static let onAccent = dynamic(0x2B2621, 0x2A1A16)
-    /// Accent-colored text and symbols on cream surfaces.
-    public static let accentText = dynamic(0x9A5F55, 0xE2B3AA)
-    public static let leaf = dynamic(0x5EBEA5, 0x76CFB4)
-    public static let warning = dynamic(0x7A520F, 0xEDC783)
-    public static let destructive = dynamic(0xA12D2A, 0xF0857A)
-    public static let success = dynamic(0x3B7A5E, 0x86C9A8)
-    public static let selection = dynamic(0xEFE0D9, 0x4A3530)
+/// Named Comfy palettes. Colors resolve at draw time, so switching applies on the next render.
+public enum ComfyTheme: String, CaseIterable, Identifiable, Sendable {
+    case mauve = "Cream & Mauve", rose = "Linen & Rose"
+    public var id: String { rawValue }
+    nonisolated(unsafe) public static var current: ComfyTheme = .mauve
 
-    private static func dynamic(_ light: UInt32, _ dark: UInt32) -> Color {
+    /// Light and dark sRGB values, mirroring docs/brand/tokens.json.
+    func hex(_ token: Palette.Token) -> (light: UInt32, dark: UInt32) {
+        switch (self, token) {
+        case (.mauve, .canvas): (0xF8F4EC, 0x1F1A1A)
+        case (.mauve, .sidebar): (0xEEE5D3, 0x282121)
+        case (.mauve, .sidebarSelection): (0xE6D2CC, 0x4A3636)
+        case (.mauve, .surface): (0xFCFAF5, 0x2D2626)
+        case (.mauve, .elevated): (0xFFFFFF, 0x362E2E)
+        case (.mauve, .border): (0xE6DCCD, 0x4A3F3E)
+        case (.mauve, .borderStrong): (0xD5B6B3, 0x5E4E4D)
+        case (.mauve, .track): (0xEEE5D3, 0x3A3030)
+        case (.mauve, .accent): (0xBC9796, 0xC9A3A1)
+        case (.mauve, .onAccent): (0x2B2621, 0x2A1B1B)
+        case (.mauve, .accentText): (0x7A5C5A, 0xD9B8B5)
+        case (.mauve, .accentSymbol): (0x937371, 0xD9B8B5)
+        case (.mauve, .selection): (0xF0E2DF, 0x4A3636)
+        case (.rose, .canvas): (0xF9F5F2, 0x1E1A17)
+        case (.rose, .sidebar): (0xEDE3D5, 0x26211D)
+        case (.rose, .sidebarSelection): (0xE4D2C8, 0x4A3530)
+        case (.rose, .surface): (0xFDFBF9, 0x2B2622)
+        case (.rose, .elevated): (0xFFFFFF, 0x332D28)
+        case (.rose, .border): (0xE6DACB, 0x4A4038)
+        case (.rose, .borderStrong): (0xD6C4B2, 0x5E5147)
+        case (.rose, .track): (0xEDE3D5, 0x3A332D)
+        case (.rose, .accent): (0xD0A097, 0xD9A79E)
+        case (.rose, .onAccent): (0x2B2621, 0x2A1A16)
+        case (.rose, .accentText), (.rose, .accentSymbol): (0x8E554B, 0xE2B3AA)
+        case (.rose, .selection): (0xEFE0D9, 0x4A3530)
+        case (_, .ink): (0x2B2621, 0xF1EBE1)
+        case (_, .muted): (0x6B6157, 0xB3A99B)
+        case (_, .leaf): (0x5EBEA5, 0x76CFB4)
+        case (_, .warning): (0x7A520F, 0xEDC783)
+        case (_, .destructive): (0xA12D2A, 0xF0857A)
+        case (_, .onDestructive): (0xFFFBF5, 0x2A1810)
+        case (_, .success): (0x3B7A5E, 0x86C9A8)
+        }
+    }
+}
+
+public enum Palette {
+    enum Token: Sendable {
+        case canvas, sidebar, sidebarSelection, surface, elevated, border, borderStrong, track
+        case accent, onAccent, accentText, accentSymbol, selection
+        case ink, muted, leaf, warning, destructive, onDestructive, success
+    }
+    public static let canvas = color(.canvas)
+    public static let sidebar = color(.sidebar)
+    public static let sidebarSelection = color(.sidebarSelection)
+    public static let surface = color(.surface)
+    public static let elevated = color(.elevated)
+    public static let ink = color(.ink)
+    public static let muted = color(.muted)
+    /// Hairlines on cards and dividers.
+    public static let border = color(.border)
+    /// Outlines on controls.
+    public static let borderStrong = color(.borderStrong)
+    public static let track = color(.track)
+    /// Fills: primary buttons, bars and highlights. Pair with `onAccent` content.
+    public static let accent = color(.accent)
+    public static let onAccent = color(.onAccent)
+    /// Accent-colored text on cream surfaces (AA on every background).
+    public static let accentText = color(.accentText)
+    /// Accent-colored symbols and non-text marks.
+    public static let accentSymbol = color(.accentSymbol)
+    public static let selection = color(.selection)
+    public static let leaf = color(.leaf)
+    public static let warning = color(.warning)
+    public static let destructive = color(.destructive)
+    public static let onDestructive = color(.onDestructive)
+    public static let success = color(.success)
+
+    private static func color(_ token: Token) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
-            let hex = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+            let pair = ComfyTheme.current.hex(token)
+            let hex = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? pair.dark : pair.light
             return NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
         })
     }
@@ -72,7 +128,7 @@ struct ComfyButtonStyle: ButtonStyle {
             .foregroundStyle(foreground)
             .padding(.horizontal, Space.lg).padding(.vertical, Space.sm - Space.xxs)
             .background(fill, in: RoundedRectangle(cornerRadius: Layout.controlRadius))
-            .overlay(RoundedRectangle(cornerRadius: Layout.controlRadius).strokeBorder(kind == .secondary ? Palette.border : .clear))
+            .overlay(RoundedRectangle(cornerRadius: Layout.controlRadius).strokeBorder(kind == .secondary ? Palette.borderStrong : .clear))
             .opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.45)
             .contentShape(RoundedRectangle(cornerRadius: Layout.controlRadius))
     }
@@ -80,7 +136,7 @@ struct ComfyButtonStyle: ButtonStyle {
         switch kind { case .primary: Palette.accent; case .secondary: Palette.surface; case .destructive: Palette.destructive }
     }
     private var foreground: Color {
-        switch kind { case .primary: Palette.onAccent; case .secondary: Palette.ink; case .destructive: Palette.canvas }
+        switch kind { case .primary: Palette.onAccent; case .secondary: Palette.ink; case .destructive: Palette.onDestructive }
     }
 }
 
@@ -90,7 +146,7 @@ public struct Panel<Content: View>: View {
     public var body: some View {
         content.padding(Space.lg).frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: Layout.panelRadius))
-            .overlay(RoundedRectangle(cornerRadius: Layout.panelRadius).strokeBorder(Palette.border.opacity(0.6)))
+            .overlay(RoundedRectangle(cornerRadius: Layout.panelRadius).strokeBorder(Palette.border))
             .shadow(color: Palette.ink.opacity(0.06), radius: Space.sm, y: Space.xxs)
     }
 }
@@ -147,7 +203,7 @@ public struct ResultRow: View {
             Toggle("Select \(title) for review", isOn: $checked).labelsHidden().toggleStyle(.checkbox).disabled(!eligible)
             Button(action: inspect) {
                 HStack(spacing: Space.md) {
-                    Image(systemName: symbol).foregroundStyle(Palette.accentText)
+                    Image(systemName: symbol).foregroundStyle(Palette.accentSymbol)
                     VStack(alignment: .leading, spacing: Space.xs) {
                         Text(title).font(TypeStyle.body).lineLimit(1)
                         Text(subtitle).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)

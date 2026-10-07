@@ -8,15 +8,17 @@
 
 A comfy, modular, open-source macOS cleaner for people who build things. Find bulky dependencies, forgotten worktrees, simulator data, duplicate files, and processes left behind by their parents. Inspect exact items, then review each cleanup action.
 
-**Development preview:** the functional Swift prototype is being migrated to a Rust core with a thin SwiftUI interface. The Rust crate and versioned bridge are under active development. This repository currently builds the Swift prototype; a trusted, notarized binary release is not available yet. See the [architecture and migration plan](docs/ARCHITECTURE.md).
+**Development preview:** scanning, safety policy, actions, history and analytics run in a Rust core (`crates/cym-core`) behind replaceable interfaces. A thin SwiftUI app talks to it over a versioned C ABI. A trusted, notarized binary release is not available yet. See [the architecture](docs/ARCHITECTURE.md).
 
-The [Comfy design system](docs/brand/README.md) includes original branding and shared light/dark tokens. The app and Figma screens are being updated to use it.
+The [Comfy design system](docs/brand/README.md) has original branding and shared light and dark tokens: a warm off-white canvas, linen and sand neutrals, and a dusty-rose accent. The app and the [Figma library](docs/FIGMA.md) both use it.
 
 ![Overview design concept with warm cream surfaces and mint analytics](docs/design-concepts/overview.png)
 
 *Design concept for the upcoming interface; the current prototype has not been restyled yet.* [Design boards and Figma builder](design/figma) · [Migration handoff](docs/HANDOFF.md)
 
 ## Run the app
+
+Requires Xcode (Swift 6) and a Rust toolchain (`rustup target add aarch64-apple-darwin x86_64-apple-darwin` for universal builds).
 
 ~~~sh
 bash scripts/build-app.sh
@@ -67,11 +69,11 @@ Docker/VM integrations, AI models, similar-image detection, app updates, backup 
 ## Read-only CLI
 
 ~~~sh
-bash scripts/swift.sh build
-.build/debug/cym modules
-.build/debug/cym scan node ~/Projects --json
-.build/debug/cym scan worktrees ~/Projects
-.build/debug/cym scan simulators --json
+cargo build --release --bin cym
+./target/release/cym modules
+./target/release/cym scan node ~/Projects --json
+./target/release/cym scan worktrees ~/Projects
+./target/release/cym scan simulators --json
 ~~~
 
 CLI scans never apply cleanup actions. JSON omits process commands and abbreviates the home directory. Exit codes: 0 complete, 1 failed, 2 invalid invocation, 3 partial coverage.
@@ -79,11 +81,13 @@ CLI scans never apply cleanup actions. JSON omits process commands and abbreviat
 ## Development
 
 ~~~sh
+cargo fmt --all --check && cargo clippy --all-targets -- -D warnings
+cargo test
 python3 scripts/lint-design.py
 bash scripts/swift.sh test
 ~~~
 
-Open Package.swift in Xcode, or use the SwiftPM scripts. scripts/swift.sh keeps compiler/package caches inside the workspace, which also supports restricted development environments.
+`scripts/swift.sh` builds the Rust static library (`scripts/build-core.sh`) and then runs SwiftPM, keeping compiler and package caches inside the workspace. To work in Xcode, run `bash scripts/build-core.sh` once and then open Package.swift.
 
 Optional live tests use only generated disposable resources and require an installed iOS simulator runtime:
 
@@ -97,7 +101,7 @@ For UI review in a separate preview bundle with isolated preferences:
 bash scripts/preview-app.sh --dark
 ~~~
 
-The prototype has separate Core, Platform, Modules, DesignSystem and UI targets. The migration moves scanning, policy, actions, persistence, and analytics into crates/cym-core. The SwiftUI shell will retain native folder pickers, Finder integration, and presentation. Features use registered modules rather than adding feature-specific cleanup code to views.
+The Rust core reaches the platform only through traits: filesystem, directory walker, sizer, hasher, command runner, process inspector, app inventory, Trash and journal. Any implementation can be swapped, for example for a library-backed walker, without touching scanners or safety rules. Features are registered modules, not feature-specific code in views. The SwiftUI shell keeps native folder pickers, Finder integration and presentation.
 
 See [module authoring](docs/MODULES.md), [the design system](docs/DESIGN_SYSTEM.md), [the original product plan](docs/PLAN.md), and [verification](docs/VERIFICATION.md).
 
