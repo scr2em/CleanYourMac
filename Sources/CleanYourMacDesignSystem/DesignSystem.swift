@@ -20,13 +20,28 @@ public enum TypeStyle {
 }
 /// Named Comfy palettes. Colors resolve at draw time, so switching applies on the next render.
 public enum ComfyTheme: String, CaseIterable, Identifiable, Sendable {
-    case ember = "Ember", terracotta = "Terracotta & Navy", mauve = "Cream & Mauve", rose = "Linen & Rose"
+    case honey = "Honey & Espresso", ember = "Ember", terracotta = "Terracotta & Navy", mauve = "Cream & Mauve", rose = "Linen & Rose"
     public var id: String { rawValue }
-    nonisolated(unsafe) public static var current: ComfyTheme = .ember
+    nonisolated(unsafe) public static var current: ComfyTheme = .honey
 
     /// Light and dark sRGB values, mirroring docs/brand/tokens.json.
     func hex(_ token: Palette.Token) -> (light: UInt32, dark: UInt32) {
         switch (self, token) {
+        case (.honey, .canvas): (0xFBF3E4, 0x1A130C)
+        case (.honey, .sidebar): (0xF5E9D4, 0x211810)
+        case (.honey, .sidebarSelection): (0xF2DCB8, 0x3D2A15)
+        case (.honey, .surface): (0xFFFAF1, 0x281D12)
+        case (.honey, .elevated): (0xFFFFFF, 0x33261A)
+        case (.honey, .border): (0xEADBC2, 0x3E2F21)
+        case (.honey, .borderStrong): (0xD9C2A0, 0x57432F)
+        case (.honey, .track): (0xF2E3C9, 0x33261A)
+        case (.honey, .accent): (0xE9B262, 0xE9B262)
+        case (.honey, .onAccent): (0x281D12, 0x281D12)
+        case (.honey, .accentText): (0x924716, 0xF0B47A)
+        case (.honey, .accentSymbol): (0xB45E28, 0xE08850)
+        case (.honey, .selection): (0xF7E5C4, 0x3D2A15)
+        case (.honey, .ink): (0x281D12, 0xFBF3E4)
+        case (.honey, .muted): (0x6E5E4C, 0xC2B29C)
         case (.ember, .canvas): (0xFAF7F6, 0x000000)
         case (.ember, .sidebar): (0xF3ECEA, 0x0E0B0B)
         case (.ember, .sidebarSelection): (0xF2D5D1, 0x3A100C)
@@ -42,7 +57,7 @@ public enum ComfyTheme: String, CaseIterable, Identifiable, Sendable {
         case (.ember, .selection): (0xFBE3DF, 0x3A100C)
         case (.ember, .ink): (0x1A1110, 0xF5EEED)
         case (.ember, .muted): (0x6B5B58, 0xB8A9A6)
-        case (.ember, .destructive): (0x7A160E, 0xFF8A7A)
+        case (.ember, .destructive): (0x3D0A06, 0xFF8A7A)
         case (.ember, .onDestructive): (0xFFFFFF, 0x000000)
         case (.terracotta, .destructive): (0xA12D2A, 0xF57A96)
         case (.terracotta, .canvas): (0xF7F1E8, 0x241E1C)
