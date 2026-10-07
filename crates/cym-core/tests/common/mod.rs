@@ -76,7 +76,13 @@ impl StubRunner {
     }
 }
 impl CommandRunner for StubRunner {
-    fn run(&self, executable: &str, args: &[String], _: Duration, _: &ScanControl) -> Result<Output> {
+    fn run(
+        &self,
+        executable: &str,
+        args: &[String],
+        _: Duration,
+        _: &ScanControl,
+    ) -> Result<Output> {
         let mut call = vec![executable.to_owned()];
         call.extend(args.iter().cloned());
         self.calls.lock().unwrap().push(call);
@@ -90,7 +96,11 @@ impl CommandRunner for StubRunner {
 pub fn output(text: &str, status: i32) -> Output {
     Output {
         data: text.as_bytes().to_vec(),
-        error: if status == 0 { String::new() } else { "fixture failure".into() },
+        error: if status == 0 {
+            String::new()
+        } else {
+            "fixture failure".into()
+        },
         status,
     }
 }
@@ -114,10 +124,20 @@ pub struct FakeProcesses {
 }
 impl ProcessInspector for FakeProcesses {
     fn pids(&self) -> Vec<i32> {
-        self.rows.lock().unwrap().iter().map(|p| p.identity.pid).collect()
+        self.rows
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|p| p.identity.pid)
+            .collect()
     }
     fn inspect(&self, pid: i32) -> Option<Snapshot> {
-        self.rows.lock().unwrap().iter().find(|p| p.identity.pid == pid).cloned()
+        self.rows
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|p| p.identity.pid == pid)
+            .cloned()
     }
     fn signal(&self, pid: i32, force: bool) -> Result<()> {
         self.signals.lock().unwrap().push((pid, force));
@@ -141,7 +161,11 @@ pub fn process(path: &str, parent: i32, uid: u32) -> Snapshot {
             executable: path.into(),
         },
         parent,
-        name: Path::new(path).file_name().unwrap().to_string_lossy().into(),
+        name: Path::new(path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into(),
         command: "fixture".into(),
         cwd: None,
         cpu_nanos: Some(0),

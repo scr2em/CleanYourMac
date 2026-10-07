@@ -41,6 +41,8 @@ pub struct Entry {
     pub symlink: bool,
     pub bytes: u64,
     pub allocated: u64,
+    /// Hard-link count; items with one link cannot be shared with another path.
+    pub links: u64,
 }
 impl Entry {
     /// Builds an entry from `lstat` metadata; adapters backed by other libraries can reuse it.
@@ -59,6 +61,7 @@ impl Entry {
             symlink: m.file_type().is_symlink(),
             bytes: m.size(),
             allocated: m.blocks().saturating_mul(512),
+            links: m.nlink(),
         }
     }
     pub fn path(&self) -> &str {
@@ -121,10 +124,11 @@ pub trait Sizer: Send + Sync {
     fn size(&self, path: &str, control: &ScanControl) -> Result<FileSize>;
 }
 
-/// Content digest used for duplicate detection. Identity checks around it are done by the caller.
+/// Content digest used for duplicate detection. Identity checks around it are done by the
+/// caller. `limit` hashes only the first bytes, for cheap candidate filtering.
 pub trait Hasher: Send + Sync {
     fn algorithm(&self) -> &'static str;
-    fn hash(&self, path: &str, control: &ScanControl) -> Result<String>;
+    fn hash(&self, path: &str, limit: Option<u64>, control: &ScanControl) -> Result<String>;
 }
 
 #[derive(Debug, Default)]

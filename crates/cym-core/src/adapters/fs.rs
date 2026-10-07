@@ -1,7 +1,16 @@
 //! Standard-library filesystem adapters.
 use crate::{model::*, policy, ports::*};
+use rayon::prelude::*;
 use sha2::{Digest, Sha256};
-use std::{collections::HashSet, fs, io::Read, sync::Arc};
+use std::{
+    collections::HashSet,
+    fs,
+    io::Read,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 pub struct StdFileSystem;
 impl FileSystem for StdFileSystem {
@@ -89,7 +98,7 @@ impl Walker for StackWalker {
 }
 
 /// Logical and allocated size with hard links counted once, plus an order-independent
-/// metadata fingerprint of every descendant.
+/// metadata fingerprint of every descendant. Subdirectories are sized in parallel.
 pub struct MetadataSizer {
     pub fs: Arc<dyn FileSystem>,
     pub limit: u64,
@@ -97,6 +106,109 @@ pub struct MetadataSizer {
 impl MetadataSizer {
     pub fn new(fs: Arc<dyn FileSystem>) -> Self {
         Self { fs, limit: 500_000 }
+    }
+}
+#[derive(Default)]
+struct Tally {
+    logical: u64,
+    allocated: u64,
+    files: u64,
+    complete: bool,
+    digest: [u8; 32],
+    /// Multiply-linked files, deduplicated after all branches merge.
+    shared: Vec<(u64, u64, u64)>,
+}
+impl Tally {
+    fn merge(mut self, other: Tally) -> Tally {
+        self.logical = self.logical.saturating_add(other.logical);
+        self.allocated = self.allocated.saturating_add(other.allocated);
+        self.files += other.files;
+        self.complete &= other.complete;
+        for (a, b) in self.digest.iter_mut().zip(other.digest) {
+            *a ^= b;
+        }
+        self.shared.extend(other.shared);
+        self
+    }
+}
+struct Walk<'a> {
+    fs: &'a dyn FileSystem,
+    root: &'a str,
+    control: &'a ScanControl,
+    count: AtomicU64,
+    limit: u64,
+}
+impl Walk<'_> {
+    fn directory(&self, path: &str) -> Tally {
+        let mut tally = Tally {
+            complete: true,
+            ..Default::default()
+        };
+        if self.control.is_cancelled() {
+            tally.complete = false;
+            return tally;
+        }
+        let Ok(children) = self.fs.children(path) else {
+            tally.complete = false;
+            return tally;
+        };
+        let mut folders = vec![];
+        for child in children {
+            let Ok(e) = child else {
+                tally.complete = false;
+                continue;
+            };
+            if self.count.fetch_add(1, Ordering::Relaxed) >= self.limit {
+                tally.complete = false;
+                break;
+            }
+            let relative = e.path().strip_prefix(self.root).unwrap_or(e.path());
+            let metadata = format!(
+                "{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
+                relative,
+                e.identity.device,
+                e.identity.inode,
+                e.identity.modified_seconds,
+                e.identity.modified_nanos,
+                e.bytes,
+                e.directory,
+                e.symlink
+            );
+            for (a, b) in tally
+                .digest
+                .iter_mut()
+                .zip(Sha256::digest(metadata.as_bytes()))
+            {
+                *a ^= b;
+            }
+            if e.regular || e.symlink {
+                tally.files += 1;
+                tally.logical = tally.logical.saturating_add(e.bytes);
+                if e.links > 1 {
+                    tally
+                        .shared
+                        .push((e.identity.device, e.identity.inode, e.allocated));
+                } else {
+                    tally.allocated = tally.allocated.saturating_add(e.allocated);
+                }
+            }
+            if e.directory && !e.symlink {
+                folders.push(e.identity.path);
+            }
+        }
+        folders
+            .par_iter()
+            .map(|folder| self.directory(folder))
+            .reduce(Tally::default_complete, Tally::merge)
+            .merge(tally)
+    }
+}
+impl Tally {
+    fn default_complete() -> Tally {
+        Tally {
+            complete: true,
+            ..Default::default()
+        }
     }
 }
 impl Sizer for MetadataSizer {
@@ -111,80 +223,72 @@ impl Sizer for MetadataSizer {
                 signature: None,
             });
         }
-        let mut output = FileSize {
-            complete: true,
-            ..Default::default()
+        let walk = Walk {
+            fs: self.fs.as_ref(),
+            root: root.path(),
+            control,
+            count: AtomicU64::new(0),
+            limit: self.limit,
         };
-        let mut stack = vec![root.identity.path.clone()];
-        let mut count = 0u64;
+        let mut tally = walk.directory(root.path());
+        control.check()?;
         let mut physical = HashSet::new();
-        let mut digest = [0u8; 32];
-        'outer: while let Some(directory) = stack.pop() {
-            control.check()?;
-            let Ok(children) = self.fs.children(&directory) else {
-                output.complete = false;
-                continue;
-            };
-            for child in children {
-                control.check()?;
-                if count >= self.limit {
-                    output.complete = false;
-                    break 'outer;
-                }
-                let Ok(e) = child else {
-                    output.complete = false;
-                    continue;
-                };
-                count += 1;
-                let relative = e.path().strip_prefix(root.path()).unwrap_or(e.path());
-                let metadata = format!(
-                    "{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
-                    relative,
-                    e.identity.device,
-                    e.identity.inode,
-                    e.identity.modified_seconds,
-                    e.identity.modified_nanos,
-                    e.bytes,
-                    e.directory,
-                    e.symlink
-                );
-                for (i, byte) in Sha256::digest(metadata.as_bytes()).iter().enumerate() {
-                    digest[i] ^= byte;
-                }
-                if e.regular || e.symlink {
-                    output.files += 1;
-                    output.logical = output.logical.saturating_add(e.bytes);
-                    if physical.insert((e.identity.device, e.identity.inode)) {
-                        output.allocated = output.allocated.saturating_add(e.allocated);
-                    }
-                }
-                if e.directory && !e.symlink {
-                    stack.push(e.identity.path);
-                }
+        for (device, inode, allocated) in std::mem::take(&mut tally.shared) {
+            if physical.insert((device, inode)) {
+                tally.allocated = tally.allocated.saturating_add(allocated);
             }
         }
-        output.signature = Some(format!("{count}:{}", hex(&digest)));
-        Ok(output)
+        let count = walk.count.load(Ordering::Relaxed).min(self.limit);
+        Ok(FileSize {
+            logical: tally.logical,
+            allocated: tally.allocated,
+            files: tally.files,
+            complete: tally.complete,
+            signature: Some(format!("{count}:{}", hex(&tally.digest))),
+        })
     }
 }
 
+fn read_digest(
+    path: &str,
+    limit: Option<u64>,
+    control: &ScanControl,
+    mut update: impl FnMut(&[u8]),
+) -> Result<()> {
+    let file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut reader = file.take(limit.unwrap_or(u64::MAX));
+    let mut buffer = vec![0; 1_048_576];
+    loop {
+        control.check()?;
+        let count = reader.read(&mut buffer).map_err(|e| e.to_string())?;
+        if count == 0 {
+            return Ok(());
+        }
+        update(&buffer[..count]);
+    }
+}
+/// BLAKE3: the default, several times faster than SHA-256 on large files.
+pub struct Blake3Hasher;
+impl Hasher for Blake3Hasher {
+    fn algorithm(&self) -> &'static str {
+        "BLAKE3"
+    }
+    fn hash(&self, path: &str, limit: Option<u64>, control: &ScanControl) -> Result<String> {
+        let mut digest = blake3::Hasher::new();
+        read_digest(path, limit, control, |bytes| {
+            digest.update(bytes);
+        })?;
+        Ok(digest.finalize().to_hex().to_string())
+    }
+}
 pub struct Sha256Hasher;
 impl Hasher for Sha256Hasher {
     fn algorithm(&self) -> &'static str {
         "SHA256"
     }
-    fn hash(&self, path: &str, control: &ScanControl) -> Result<String> {
-        let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
+    fn hash(&self, path: &str, limit: Option<u64>, control: &ScanControl) -> Result<String> {
         let mut digest = Sha256::new();
-        let mut buffer = vec![0; 1_048_576];
-        loop {
-            control.check()?;
-            let count = file.read(&mut buffer).map_err(|e| e.to_string())?;
-            if count == 0 {
-                break;
-            }
-            digest.update(&buffer[..count]);
-        }
+        read_digest(path, limit, control, |bytes| digest.update(bytes))?;
         Ok(hex(&digest.finalize()))
     }
 }

@@ -45,7 +45,7 @@ impl Services {
             walker: Arc::new(fs::StackWalker(files.clone())),
             sizer: Arc::new(fs::MetadataSizer::new(files.clone())),
             fs: files,
-            hasher: Arc::new(fs::Sha256Hasher),
+            hasher: Arc::new(fs::Blake3Hasher),
             commands: Arc::new(command::SystemRunner),
             processes: Arc::new(native::LibprocInspector),
             apps: Arc::new(native::NativeApplications),
@@ -175,7 +175,7 @@ impl Services {
         if !before.regular {
             return Err("Only regular files can be hashed".into());
         }
-        let hash = self.hasher.hash(path, control)?;
+        let hash = self.hasher.hash(path, None, control)?;
         if self.entry(path)?.identity != before.identity {
             return Err("File changed during duplicate verification".into());
         }

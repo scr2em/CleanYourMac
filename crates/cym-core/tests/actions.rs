@@ -80,7 +80,10 @@ fn restoring_a_changed_trash_folder_is_rejected() {
     let e = engine(&f);
     let folder = f.dir("personal");
     f.write("personal/deep/file", "fixture");
-    let identity = e.services.snapshot(&folder, &ScanControl::default()).unwrap();
+    let identity = e
+        .services
+        .snapshot(&folder, &ScanControl::default())
+        .unwrap();
     let finding = file_finding("folder", "large", identity);
     let result = e
         .execute(
@@ -140,10 +143,11 @@ fn overlapping_selections_are_normalized_and_process_instances_stay_distinct() {
     let parent = file("parent", "/projects/node_modules");
     let child = file("child", "/projects/node_modules/package/file");
     let peer = file("peer", "/projects/node_modules-other");
-    let ids: Vec<_> = cym_core::policy::normalized_selection(&[parent.clone(), parent, child, peer])
-        .into_iter()
-        .map(|f| f.id)
-        .collect();
+    let ids: Vec<_> =
+        cym_core::policy::normalized_selection(&[parent.clone(), parent, child, peer])
+            .into_iter()
+            .map(|f| f.id)
+            .collect();
     assert_eq!(ids, ["parent", "peer"]);
     let process = |id: &str, micro: u64| {
         Finding::new(
@@ -218,5 +222,12 @@ fn analytics_count_each_path_once_and_keep_memory_separate() {
     assert_eq!(a.reclaimable_bytes, 650);
     assert_eq!(a.process_count, 1);
     assert_eq!(a.process_memory_bytes, 500);
-    assert_eq!(a.modules.iter().find(|m| m.module_id == "node").unwrap().bytes, 600);
+    assert_eq!(
+        a.modules
+            .iter()
+            .find(|m| m.module_id == "node")
+            .unwrap()
+            .bytes,
+        600
+    );
 }

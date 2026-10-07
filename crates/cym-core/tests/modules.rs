@@ -21,14 +21,21 @@ fn node_finder_groups_nested_dependencies_and_requires_an_owner() {
     let f = Fixture::new();
     f.write("app/package.json", "{}");
     f.write("app/pnpm-lock.yaml", "lockfileVersion: 9");
-    f.write("app/node_modules/dependency/node_modules/nested/index.js", "x");
+    f.write(
+        "app/node_modules/dependency/node_modules/nested/index.js",
+        "x",
+    );
     f.write("unknown/node_modules/index.js", "x");
     let report = scan(&f, "node");
     assert_eq!(report.findings.len(), 2, "{:?}", report.warnings);
     let app = report.findings.iter().find(|f| f.title == "app").unwrap();
     assert_eq!(app.actions, vec![ActionKind::Trash]);
     assert_eq!(app.value("Package manager"), Some("pnpm"));
-    let unknown = report.findings.iter().find(|f| f.title == "unknown").unwrap();
+    let unknown = report
+        .findings
+        .iter()
+        .find(|f| f.title == "unknown")
+        .unwrap();
     assert!(unknown.actions.is_empty());
     assert!(unknown.blocked_reason.is_some());
 }
@@ -56,8 +63,19 @@ fn duplicates_preserve_an_original_skip_dependency_stores_and_revalidate() {
     f.write("build/d.txt", &body);
     let report = scan(&f, "duplicates");
     assert_eq!(report.findings.len(), 2, "{:?}", report.findings);
-    assert_eq!(report.findings.iter().filter(|f| f.actions.is_empty()).count(), 1);
-    let candidate = report.findings.iter().find(|f| !f.actions.is_empty()).unwrap();
+    assert_eq!(
+        report
+            .findings
+            .iter()
+            .filter(|f| f.actions.is_empty())
+            .count(),
+        1
+    );
+    let candidate = report
+        .findings
+        .iter()
+        .find(|f| !f.actions.is_empty())
+        .unwrap();
     let original = candidate.value("Preserved original").unwrap();
     fs::write(original, "changed").unwrap();
     let engine = Engine::new(services(&f), modules::builtin());
@@ -93,7 +111,13 @@ impl ScanModule for ExampleModule {
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor::new("node", "Replacement", "Developer", "folder", "", true)
     }
-    fn scan(&self, _: &Services, _: &ScanContext, _: &ScanControl, sink: &mut dyn Sink) -> Result<()> {
+    fn scan(
+        &self,
+        _: &Services,
+        _: &ScanContext,
+        _: &ScanControl,
+        sink: &mut dyn Sink,
+    ) -> Result<()> {
         sink.warning("replacement ran".into());
         Err("fixture unavailable".into())
     }
@@ -121,7 +145,9 @@ fn modules_can_be_replaced_and_failures_become_warnings() {
             "Replacement: fixture unavailable"
         ]
     );
-    assert!(modules::Registry::new(vec![Arc::new(ExampleModule), Arc::new(ExampleModule)]).is_err());
+    assert!(
+        modules::Registry::new(vec![Arc::new(ExampleModule), Arc::new(ExampleModule)]).is_err()
+    );
 }
 
 #[test]
@@ -132,7 +158,11 @@ fn storage_lists_immediate_children_as_inventory() {
     let report = scan(&f, "storage");
     assert_eq!(report.findings.len(), 2);
     assert!(report.findings.iter().all(|f| f.actions.is_empty()));
-    let folder = report.findings.iter().find(|f| f.title == "folder").unwrap();
+    let folder = report
+        .findings
+        .iter()
+        .find(|f| f.title == "folder")
+        .unwrap();
     assert_eq!(folder.bytes, Some(3));
 }
 
@@ -145,4 +175,21 @@ fn large_files_respect_the_threshold() {
     let report = scan(&f, "large");
     assert_eq!(report.findings.len(), 1);
     assert_eq!(report.findings[0].title, "big.bin");
+}
+
+#[test]
+fn duplicate_stages_separate_files_that_share_only_a_prefix() {
+    let f = Fixture::new();
+    let prefix = "p".repeat(70_000);
+    f.write("same-1", &format!("{prefix}tail"));
+    f.write("same-2", &format!("{prefix}tail"));
+    f.write("prefix-only", &format!("{prefix}diff"));
+    fs::hard_link(f.at("same-1"), f.at("same-1-link")).unwrap();
+    let report = scan(&f, "duplicates");
+    let mut titles: Vec<_> = report.findings.iter().map(|f| f.title.as_str()).collect();
+    titles.sort();
+    // Hard links to the preserved inode are one copy; the prefix-only file is unique.
+    assert_eq!(titles.len(), 2, "{titles:?}");
+    assert!(!titles.contains(&"prefix-only"));
+    assert!(report.findings.iter().all(|f| f.value("BLAKE3").is_some()));
 }

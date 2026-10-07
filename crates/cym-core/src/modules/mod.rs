@@ -1,6 +1,7 @@
 //! Registered finders. A module owns its discovery rules, the known locations its actions may
 //! touch, and its own pre-action checks; the shared executor applies the common safety rules.
 use crate::{model::*, ports::*, services::Services};
+use rayon::prelude::*;
 use std::{collections::HashSet, sync::Arc};
 
 pub mod applications;
@@ -140,25 +141,88 @@ pub(crate) fn flush(sink: &mut dyn Sink, warnings: &mut Vec<String>) {
         sink.warning(warning);
     }
 }
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn add_file(
+/// One item to size and report.
+pub(crate) struct Candidate {
+    pub entry: Entry,
+    pub title: Option<String>,
+    pub reason: String,
+    pub actions: Vec<ActionKind>,
+    pub risk: Risk,
+    pub details: Vec<Detail>,
+    /// Overrides the generic blocked reason; callers pass no actions when set.
+    pub blocked: Option<String>,
+}
+impl Candidate {
+    pub fn new(entry: Entry, reason: &str, actions: Vec<ActionKind>, risk: Risk) -> Self {
+        Self {
+            entry,
+            title: None,
+            reason: reason.into(),
+            actions,
+            risk,
+            details: vec![],
+            blocked: None,
+        }
+    }
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+    pub fn details(mut self, details: Vec<Detail>) -> Self {
+        self.details = details;
+        self
+    }
+    pub fn blocked(mut self, reason: Option<&str>) -> Self {
+        if let Some(reason) = reason {
+            self.blocked = Some(reason.into());
+            self.actions.clear();
+        }
+        self
+    }
+}
+/// Sizes candidates in parallel and reports them in their original order.
+pub(crate) fn add_files(
     services: &Services,
     sink: &mut dyn Sink,
-    entry: &Entry,
     module: &str,
-    title: Option<&str>,
-    reason: &str,
-    actions: Vec<ActionKind>,
-    risk: Risk,
+    candidates: Vec<Candidate>,
     control: &ScanControl,
 ) -> Result<()> {
     control.check()?;
-    sink.progress(format!("Sizing {}", entry.name()));
-    match services.file_finding(entry, module, title, reason, actions, risk, control) {
-        Ok(f) => sink.finding(f),
-        Err(e) => {
-            control.check()?;
-            sink.warning(format!("Cannot size {}: {e}", entry.path()))
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    sink.progress(format!(
+        "Sizing {} item{}",
+        candidates.len(),
+        if candidates.len() == 1 { "" } else { "s" }
+    ));
+    let rows: Vec<_> = candidates
+        .into_par_iter()
+        .map(|c| {
+            let row = services.file_finding(
+                &c.entry,
+                module,
+                c.title.as_deref(),
+                &c.reason,
+                c.actions,
+                c.risk,
+                control,
+            );
+            (c.entry.identity.path, c.details, c.blocked, row)
+        })
+        .collect();
+    control.check()?;
+    for (path, details, blocked, row) in rows {
+        match row {
+            Ok(mut f) => {
+                f.details.extend(details);
+                if blocked.is_some() {
+                    f.blocked_reason = blocked;
+                }
+                sink.finding(f);
+            }
+            Err(e) => sink.warning(format!("Cannot size {path}: {e}")),
         }
     }
     Ok(())

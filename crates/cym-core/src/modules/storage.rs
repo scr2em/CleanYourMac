@@ -1,5 +1,6 @@
-use super::{add_file, descriptor, flush, ScanModule};
+use super::{add_files, descriptor, flush, Candidate, ScanModule};
 use crate::{model::*, policy, ports::*, services::Services};
+use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 pub struct StorageModule;
@@ -22,29 +23,27 @@ impl ScanModule for StorageModule {
         sink: &mut dyn Sink,
     ) -> Result<()> {
         let mut warnings = vec![];
+        let mut candidates = vec![];
         for root in s.roots(&c.roots) {
             if c.excludes(&root) || policy::system_excluded(&root) {
                 continue;
             }
-            for e in s.children(&root, &mut warnings) {
-                if !c.allows(e.path()) || policy::system_excluded(e.path()) {
-                    continue;
-                }
-                add_file(
-                    s,
-                    sink,
-                    &e,
-                    "storage",
-                    None,
-                    "Storage inventory, not a cleanup recommendation. Inspect this item in Finder.",
-                    vec![],
-                    Risk::Review,
-                    k,
-                )?;
-            }
+            candidates.extend(
+                s.children(&root, &mut warnings)
+                    .into_iter()
+                    .filter(|e| c.allows(e.path()) && !policy::system_excluded(e.path()))
+                    .map(|e| {
+                        Candidate::new(
+                            e,
+                            "Storage inventory, not a cleanup recommendation. Inspect this item in Finder.",
+                            vec![],
+                            Risk::Review,
+                        )
+                    }),
+            );
         }
         flush(sink, &mut warnings);
-        Ok(())
+        add_files(s, sink, "storage", candidates, k)
     }
 }
 
@@ -103,14 +102,59 @@ impl ScanModule for LargeFilesModule {
     }
 }
 
+/// Exact duplicates found in stages: equal size, then an equal digest of the first
+/// `prefix_bytes`, then an equal full digest. Each stage hashes in parallel, so most
+/// non-duplicates are rejected after reading only their beginning.
 pub struct DuplicatesModule {
     pub minimum_bytes: u64,
+    pub prefix_bytes: u64,
 }
 impl Default for DuplicatesModule {
     fn default() -> Self {
         Self {
             minimum_bytes: 4_096,
+            prefix_bytes: 65_536,
         }
+    }
+}
+/// Groups entries by key and keeps only groups that still contain more than one file.
+fn regroup<K: std::hash::Hash + Eq>(rows: Vec<(K, Entry)>) -> Vec<(K, Vec<Entry>)> {
+    let mut groups: HashMap<K, Vec<Entry>> = HashMap::new();
+    for (key, entry) in rows {
+        groups.entry(key).or_default().push(entry);
+    }
+    groups.into_iter().filter(|(_, g)| g.len() > 1).collect()
+}
+impl DuplicatesModule {
+    /// Hashes every candidate in parallel; failures become warnings and drop the file.
+    fn stage(
+        sink: &mut dyn Sink,
+        k: &ScanControl,
+        groups: Vec<Vec<Entry>>,
+        hash: impl Fn(&Entry) -> Result<String> + Sync,
+    ) -> Result<Vec<(String, Vec<Entry>)>> {
+        let rows: Vec<_> = groups
+            .into_iter()
+            .enumerate()
+            .flat_map(|(group, entries)| entries.into_iter().map(move |e| (group, e)))
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .map(|(group, e)| (group, hash(&e), e))
+            .collect();
+        k.check()?;
+        let mut keyed = vec![];
+        for (group, digest, e) in rows {
+            match digest {
+                Ok(digest) => keyed.push(((group, digest), e)),
+                Err(error) => {
+                    sink.warning(format!("Skipped duplicate candidate {}: {error}", e.path()))
+                }
+            }
+        }
+        Ok(regroup(keyed)
+            .into_iter()
+            .map(|((_, digest), entries)| (digest, entries))
+            .collect())
     }
 }
 impl ScanModule for DuplicatesModule {
@@ -132,7 +176,7 @@ impl ScanModule for DuplicatesModule {
         sink: &mut dyn Sink,
     ) -> Result<()> {
         let mut warnings = vec![];
-        let mut sizes: HashMap<u64, Vec<Entry>> = HashMap::new();
+        let mut sizes = vec![];
         let mut context = c.clone();
         context.roots.retain(|r| !policy::duplicate_excluded(r));
         let walked = s.walk(&context, k, &mut warnings, &mut |e| {
@@ -140,70 +184,78 @@ impl ScanModule for DuplicatesModule {
                 return Ok(!policy::duplicate_excluded(e.path()));
             }
             if e.regular && e.bytes >= self.minimum_bytes {
-                sizes.entry(e.bytes).or_default().push(e.clone());
+                sizes.push((e.bytes, e.clone()));
             }
             Ok(true)
         });
         flush(sink, &mut warnings);
         walked?;
-        let mut groups: Vec<_> = sizes.into_values().filter(|v| v.len() > 1).collect();
-        groups.sort_by(|a, b| a[0].path().cmp(b[0].path()));
-        for entries in groups {
-            let mut hashes: HashMap<String, Vec<Entry>> = HashMap::new();
-            let mut inodes = HashSet::new();
-            for e in entries {
-                k.check()?;
-                if !inodes.insert((e.identity.device, e.identity.inode)) {
-                    continue;
-                }
-                sink.progress(format!("Verifying {}", e.name()));
-                match s.verified_hash(e.path(), k) {
-                    Ok(hash) => hashes.entry(hash).or_default().push(e),
-                    Err(error) => {
-                        k.check()?;
-                        sink.warning(format!("Skipped duplicate candidate {}: {error}", e.path()))
-                    }
-                }
+        // Hard links to one inode are the same data, not duplicates.
+        let groups: Vec<Vec<Entry>> = regroup(sizes)
+            .into_iter()
+            .map(|(_, g)| {
+                let mut inodes = HashSet::new();
+                g.into_iter()
+                    .filter(|e| inodes.insert((e.identity.device, e.identity.inode)))
+                    .collect::<Vec<_>>()
+            })
+            .filter(|g| g.len() > 1)
+            .collect();
+        let count: usize = groups.iter().map(Vec::len).sum();
+        sink.progress(format!("Comparing {count} candidates"));
+        let prefix = self.prefix_bytes;
+        let groups = Self::stage(sink, k, groups, |e| {
+            if e.bytes > prefix {
+                s.hasher.hash(e.path(), Some(prefix), k)
+            } else {
+                Ok(String::new())
             }
-            for (hash, mut group) in hashes.into_iter().filter(|(_, v)| v.len() > 1) {
-                group.sort_by(|a, b| a.path().cmp(b.path()));
-                let original = group[0].path().to_owned();
-                let count = group.len();
-                for e in group {
-                    let preserved = e.path() == original;
-                    let Ok(fresh) = s.entry(e.path()) else {
-                        continue;
-                    };
-                    let mut f = Finding::new(
-                        "duplicates",
-                        e.path(),
-                        e.name(),
-                        Resource::File {
-                            file: fresh.identity,
-                        },
-                        if preserved {
-                            "This verified original is preserved; other copies can be reviewed."
-                        } else {
-                            "Contents match the preserved original. Both files are verified again before removal."
-                        },
-                    );
-                    f.bytes = Some(e.bytes);
-                    f.allocated_bytes = Some(e.allocated);
-                    f.modified_at = Some(e.modified());
-                    f.details = vec![
-                        detail("Preserved original", original.clone()),
-                        detail("Group files", count.to_string()),
-                        detail(s.hasher.algorithm(), hash.clone()),
-                    ];
+        })?;
+        let groups: Vec<_> = groups.into_iter().map(|(_, g)| g).collect();
+        let count: usize = groups.iter().map(Vec::len).sum();
+        sink.progress(format!("Verifying {count} files"));
+        let mut groups = Self::stage(sink, k, groups, |e| s.verified_hash(e.path(), k))?;
+        for (_, group) in &mut groups {
+            group.sort_by(|a, b| a.path().cmp(b.path()));
+        }
+        groups.sort_by(|a, b| a.1[0].path().cmp(b.1[0].path()));
+        for (hash, group) in groups {
+            let original = group[0].path().to_owned();
+            let count = group.len();
+            for e in group {
+                let preserved = e.path() == original;
+                let Ok(fresh) = s.entry(e.path()) else {
+                    continue;
+                };
+                let mut f = Finding::new(
+                    "duplicates",
+                    e.path(),
+                    e.name(),
+                    Resource::File {
+                        file: fresh.identity,
+                    },
                     if preserved {
-                        f.blocked_reason = Some("One original is preserved in each group.".into());
-                        f.badge = Some("Original".into());
+                        "This verified original is preserved; other copies can be reviewed."
                     } else {
-                        f.actions.push(ActionKind::Trash);
-                        f.badge = Some("Duplicate".into());
-                    }
-                    sink.finding(f);
+                        "Contents match the preserved original. Both files are verified again before removal."
+                    },
+                );
+                f.bytes = Some(e.bytes);
+                f.allocated_bytes = Some(e.allocated);
+                f.modified_at = Some(e.modified());
+                f.details = vec![
+                    detail("Preserved original", original.clone()),
+                    detail("Group files", count.to_string()),
+                    detail(s.hasher.algorithm(), hash.clone()),
+                ];
+                if preserved {
+                    f.blocked_reason = Some("One original is preserved in each group.".into());
+                    f.badge = Some("Original".into());
+                } else {
+                    f.actions.push(ActionKind::Trash);
+                    f.badge = Some("Duplicate".into());
                 }
+                sink.finding(f);
             }
         }
         Ok(())
@@ -213,10 +265,11 @@ impl ScanModule for DuplicatesModule {
         let path = f.resource.path().ok_or_else(changed)?;
         let original = f.value("Preserved original").ok_or_else(changed)?;
         let expected = f.value(s.hasher.algorithm()).ok_or_else(changed)?;
-        if original == path
-            || s.verified_hash(original, k).ok().as_deref() != Some(expected)
-            || s.verified_hash(path, k).ok().as_deref() != Some(expected)
-        {
+        if original == path || expected.is_empty() {
+            return Err(changed());
+        }
+        let (a, b) = rayon::join(|| s.verified_hash(original, k), || s.verified_hash(path, k));
+        if a.ok().as_deref() != Some(expected) || b.ok().as_deref() != Some(expected) {
             return Err(changed());
         }
         Ok(())
@@ -287,23 +340,13 @@ impl ScanModule for FolderModule {
             return Ok(());
         }
         let mut warnings = vec![];
-        for e in s.children(&folder, &mut warnings) {
-            if !c.allows(e.path()) {
-                continue;
-            }
-            add_file(
-                s,
-                sink,
-                &e,
-                &self.descriptor.id,
-                None,
-                self.reason,
-                vec![self.action],
-                self.risk,
-                k,
-            )?;
-        }
+        let candidates = s
+            .children(&folder, &mut warnings)
+            .into_iter()
+            .filter(|e| c.allows(e.path()))
+            .map(|e| Candidate::new(e, self.reason, vec![self.action], self.risk))
+            .collect();
         flush(sink, &mut warnings);
-        Ok(())
+        add_files(s, sink, &self.descriptor.id, candidates, k)
     }
 }

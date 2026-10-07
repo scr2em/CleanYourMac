@@ -39,7 +39,10 @@ fn c_abi_round_trips_requests_scans_and_errors() {
         assert_eq!(unknown["ok"], false);
         let invalid = call(engine, json!({"method": "pathContains", "params": {}}));
         assert_eq!(invalid["ok"], false);
-        assert_eq!(call(engine, json!({"method": "history"}))["result"], json!([]));
+        assert_eq!(
+            call(engine, json!({"method": "history"}))["result"],
+            json!([])
+        );
 
         let (sender, receiver) = mpsc::channel::<Value>();
         let request = CString::new(
@@ -73,7 +76,13 @@ fn c_abi_round_trips_requests_scans_and_errors() {
         assert!(receiver.recv_timeout(Duration::from_millis(200)).is_err());
 
         let bad = CString::new("not json").unwrap();
-        assert!(cym_scan_start(std::ptr::null(), bad.as_ptr(), collect, std::ptr::null_mut()).is_null());
+        assert!(cym_scan_start(
+            std::ptr::null(),
+            bad.as_ptr(),
+            collect,
+            std::ptr::null_mut()
+        )
+        .is_null());
         let invalid_config = CString::new("{").unwrap();
         assert!(cym_engine_new(invalid_config.as_ptr()).is_null());
     }

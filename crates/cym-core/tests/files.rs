@@ -10,8 +10,14 @@ use std::{
 #[test]
 fn path_boundaries_and_sensitive_items() {
     assert!(policy::contains("/Projects/app/file", "/Projects/app"));
-    assert!(!policy::contains("/Projects/application/file", "/Projects/app"));
-    assert!(!policy::contains("/Projects/app/../../secret", "/Projects/app"));
+    assert!(!policy::contains(
+        "/Projects/application/file",
+        "/Projects/app"
+    ));
+    assert!(!policy::contains(
+        "/Projects/app/../../secret",
+        "/Projects/app"
+    ));
     assert!(policy::protected("/Projects/app/.git/config"));
     assert!(policy::protected("/Projects/app/.env.local"));
     assert!(policy::protected(&(policy::home() + "/.ssh/id_ed25519")));
@@ -165,9 +171,12 @@ fn walk_limit_reports_partial_coverage() {
         ..services(&f)
     };
     let mut warnings = vec![];
-    s.walk(&f.context(), &ScanControl::default(), &mut warnings, &mut |_| {
-        Ok(true)
-    })
+    s.walk(
+        &f.context(),
+        &ScanControl::default(),
+        &mut warnings,
+        &mut |_| Ok(true),
+    )
     .unwrap();
     assert!(warnings.iter().any(|w| w.contains("limit")));
 }
@@ -179,5 +188,7 @@ fn cancelled_walk_stops() {
     let s = services(&f);
     let k = ScanControl::default();
     k.cancel();
-    assert!(s.walk(&f.context(), &k, &mut vec![], &mut |_| Ok(true)).is_err());
+    assert!(s
+        .walk(&f.context(), &k, &mut vec![], &mut |_| Ok(true))
+        .is_err());
 }

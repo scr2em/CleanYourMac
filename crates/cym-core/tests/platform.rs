@@ -80,15 +80,28 @@ fn real_git_worktree_rejects_late_changes_and_removes_only_an_eligible_tree() {
         ],
         &repository,
     );
-    command(&["update-ref", "refs/remotes/origin/main", "HEAD"], &repository);
+    command(
+        &["update-ref", "refs/remotes/origin/main", "HEAD"],
+        &repository,
+    );
     command(&["config", "remote.origin.url", &repository], &repository);
     command(
-        &["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"],
+        &[
+            "config",
+            "remote.origin.fetch",
+            "+refs/heads/*:refs/remotes/origin/*",
+        ],
         &repository,
     );
     let linked = f.at("linked");
-    command(&["worktree", "add", "-b", "fixture-feature", &linked, "main"], &repository);
-    command(&["branch", "--set-upstream-to=origin/main", "fixture-feature"], &repository);
+    command(
+        &["worktree", "add", "-b", "fixture-feature", &linked, "main"],
+        &repository,
+    );
+    command(
+        &["branch", "--set-upstream-to=origin/main", "fixture-feature"],
+        &repository,
+    );
     let record = git
         .worktrees(&repository, &k)
         .unwrap()
@@ -103,10 +116,17 @@ fn real_git_worktree_rejects_late_changes_and_removes_only_an_eligible_tree() {
         &f.context(),
         &k,
     );
-    let linked_row = report.findings.iter().find(|r| r.subtitle == linked).unwrap();
+    let linked_row = report
+        .findings
+        .iter()
+        .find(|r| r.subtitle == linked)
+        .unwrap();
     assert_eq!(linked_row.actions, vec![ActionKind::RemoveWorktree]);
     assert_eq!(linked_row.badge.as_deref(), Some("Linked"));
-    assert!(report.findings.iter().any(|r| r.badge.as_deref() == Some("Main") && r.actions.is_empty()));
+    assert!(report
+        .findings
+        .iter()
+        .any(|r| r.badge.as_deref() == Some("Main") && r.actions.is_empty()));
 
     let identity = s.snapshot(&linked, &k).unwrap();
     f.write("linked/late-untracked.txt", "late");
@@ -117,7 +137,10 @@ fn real_git_worktree_rejects_late_changes_and_removes_only_an_eligible_tree() {
     git::remove(&s, &identity, &repository, &record.head, &f.context(), &k).unwrap();
     assert!(fs::metadata(&linked).is_err());
     assert!(fs::metadata(&repository).is_ok());
-    command(&["show-ref", "--verify", "refs/heads/fixture-feature"], &repository);
+    command(
+        &["show-ref", "--verify", "refs/heads/fixture-feature"],
+        &repository,
+    );
 }
 
 #[test]
@@ -134,14 +157,30 @@ fn missing_worktree_folder_is_badged_orphaned_and_inspection_only() {
     for args in [
         vec!["init", "-b", "main"],
         vec!["add", "readme.txt"],
-        vec!["-c", "user.name=F", "-c", "user.email=f@example.invalid", "-c", "commit.gpgsign=false", "commit", "-m", "f"],
+        vec![
+            "-c",
+            "user.name=F",
+            "-c",
+            "user.email=f@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "f",
+        ],
     ] {
         assert_eq!(git.run(&repository, &args, &k).unwrap().status, 0);
     }
     let linked = f.at("gone");
-    assert_eq!(git.run(&repository, &["worktree", "add", &linked], &k).unwrap().status, 0);
+    assert_eq!(
+        git.run(&repository, &["worktree", "add", &linked], &k)
+            .unwrap()
+            .status,
+        0
+    );
     fs::remove_dir_all(&linked).unwrap();
-    let report = Engine::new(s, modules::builtin()).scan_report(&["worktrees".into()], &f.context(), &k);
+    let report =
+        Engine::new(s, modules::builtin()).scan_report(&["worktrees".into()], &f.context(), &k);
     let row = report.findings.iter().find(|r| r.title == "gone").unwrap();
     assert_eq!(row.badge.as_deref(), Some("Orphaned"));
     assert!(row.actions.is_empty());
@@ -152,11 +191,21 @@ fn missing_worktree_folder_is_badged_orphaned_and_inspection_only() {
 fn command_runner_rejects_arbitrary_executables_and_honors_cancellation() {
     let k = ScanControl::default();
     assert!(SystemRunner
-        .run("/bin/sh", &["-c".into(), "true".into()], Duration::from_secs(1), &k)
+        .run(
+            "/bin/sh",
+            &["-c".into(), "true".into()],
+            Duration::from_secs(1),
+            &k
+        )
         .is_err());
     k.cancel();
     assert!(SystemRunner
-        .run("/usr/bin/git", &["--version".into()], Duration::from_secs(2), &k)
+        .run(
+            "/usr/bin/git",
+            &["--version".into()],
+            Duration::from_secs(2),
+            &k
+        )
         .is_err());
 }
 
@@ -250,18 +299,35 @@ fn orphan_classification_excludes_services_apps_and_other_users() {
     )
     .is_some());
     assert!(reason(
-        process("/Applications/Editor.app/Contents/service.xpc/worker", 1, 501),
+        process(
+            "/Applications/Editor.app/Contents/service.xpc/worker",
+            1,
+            501
+        ),
         &[],
         vec![],
         &[]
     )
     .is_some());
-    assert!(reason(process("/opt/homebrew/bin/ssh-agent", 1, 501), &[], vec![], &["ssh-agent"]).is_some());
+    assert!(reason(
+        process("/opt/homebrew/bin/ssh-agent", 1, 501),
+        &[],
+        vec![],
+        &["ssh-agent"]
+    )
+    .is_some());
 }
 
-fn orphan_services(f: &Fixture, launchctl: Vec<Output>) -> (Services, Arc<FakeProcesses>, Arc<StubRunner>) {
+fn orphan_services(
+    f: &Fixture,
+    launchctl: Vec<Output>,
+) -> (Services, Arc<FakeProcesses>, Arc<StubRunner>) {
     let processes = Arc::new(FakeProcesses::default());
-    processes.rows.lock().unwrap().push(process("/opt/homebrew/bin/node", 1, 501));
+    processes
+        .rows
+        .lock()
+        .unwrap()
+        .push(process("/opt/homebrew/bin/node", 1, 501));
     let runner = StubRunner::new(launchctl);
     (
         Services {
@@ -298,7 +364,10 @@ fn orphan_module_and_termination_use_the_exact_instance() {
     let report = engine.scan_report(&["orphans".into()], &ScanContext::default(), &k);
     assert_eq!(report.findings.len(), 1, "{:?}", report.warnings);
     let row = report.findings[0].clone();
-    assert_eq!(row.actions, vec![ActionKind::Terminate, ActionKind::ForceQuit]);
+    assert_eq!(
+        row.actions,
+        vec![ActionKind::Terminate, ActionKind::ForceQuit]
+    );
 
     // A different instance now holds the PID: refuse.
     let mut stale = row.clone();
@@ -324,7 +393,12 @@ fn orphan_module_and_termination_use_the_exact_instance() {
         },
         &k,
     );
-    assert_eq!(applied[0].outcome, Outcome::Applied, "{}", applied[0].message);
+    assert_eq!(
+        applied[0].outcome,
+        Outcome::Applied,
+        "{}",
+        applied[0].message
+    );
     assert_eq!(*processes.signals.lock().unwrap(), vec![(42, false)]);
     assert!(!format!("{:?}", engine.history()).contains("fixture"));
 }

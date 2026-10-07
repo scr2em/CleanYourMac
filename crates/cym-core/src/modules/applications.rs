@@ -1,6 +1,6 @@
-use super::{descriptor, flush, ScanModule};
+use super::{add_files, descriptor, flush, Candidate, ScanModule};
 use crate::{model::*, policy, ports::*, services::Services};
-use std::path::Path;
+use rayon::prelude::*;
 
 fn install_roots() -> Vec<String> {
     vec!["/Applications".into(), policy::home() + "/Applications"]
@@ -73,9 +73,16 @@ impl ScanModule for ApplicationsModule {
         let mut warnings = vec![];
         let apps = installed_apps(s, k, &mut warnings)?;
         flush(sink, &mut warnings);
-        for app in apps {
+        let apps: Vec<(Entry, BundleInfo)> = apps
+            .into_par_iter()
+            .map(|app| {
+                let info = s.apps.bundle_info(app.path());
+                (app, info)
+            })
+            .collect();
+        let mut candidates = vec![];
+        for (app, info) in apps {
             k.check()?;
-            let info = s.apps.bundle_info(app.path());
             let id = info.identifier;
             let apple = id.starts_with("com.apple.");
             let running = active
@@ -90,72 +97,64 @@ impl ScanModule for ApplicationsModule {
             } else {
                 None
             };
-            if c.allows(app.path()) {
-                sink.progress(format!("Sizing {}", app.name()));
-                let mut f = s.file_finding(
-                    &app,
-                    "applications",
-                    None,
-                    "Moving an application to Trash does not remove all its data. Related files are separate selections.",
-                    if blocked.is_some() { vec![] } else { vec![ActionKind::Trash] },
-                    Risk::Review,
-                    k,
-                )?;
-                if let Some(reason) = blocked {
-                    f.blocked_reason = Some(reason.into());
+            let app_path = app.path().to_owned();
+            if !id.is_empty() && !apple {
+                let h = policy::home();
+                for path in [
+                    format!("{h}/Library/Caches/{id}"),
+                    format!("{h}/Library/Preferences/{id}.plist"),
+                    format!("{h}/Library/Saved Application State/{id}.savedState"),
+                    format!("{h}/Library/Application Support/{id}"),
+                ] {
+                    if !c.allows(&path) {
+                        continue;
+                    }
+                    let Ok(e) = s.entry(&path) else {
+                        continue;
+                    };
+                    let title = format!("{} · {}", app.name(), e.name());
+                    candidates.push(
+                        Candidate::new(
+                            e,
+                            "Precisely named related data. May contain preferences or user documents; review it separately.",
+                            vec![ActionKind::Trash],
+                            Risk::Review,
+                        )
+                        .title(title)
+                        .details(vec![
+                            detail("Application path", app_path.clone()),
+                            detail("Bundle identifier", id.clone()),
+                        ])
+                        .blocked(running.then_some("Quit the owning application first.")),
+                    );
                 }
-                f.details.extend([
-                    detail("Bundle identifier", id.clone()),
-                    detail(
-                        "Version",
-                        if info.version.is_empty() {
-                            "Unknown".into()
-                        } else {
-                            info.version
-                        },
-                    ),
-                    detail("State", if running { "Running" } else { "Not running" }),
-                    detail("Application path", app.path()),
-                ]);
-                sink.finding(f);
             }
-            if id.is_empty() || apple {
-                continue;
-            }
-            let h = policy::home();
-            for path in [
-                format!("{h}/Library/Caches/{id}"),
-                format!("{h}/Library/Preferences/{id}.plist"),
-                format!("{h}/Library/Saved Application State/{id}.savedState"),
-                format!("{h}/Library/Application Support/{id}"),
-            ] {
-                if !c.allows(&path) || !s.exists(&path) {
-                    continue;
-                }
-                let Ok(e) = s.entry(&path) else {
-                    continue;
-                };
-                let title = format!("{} · {}", app.name(), e.name());
-                let mut f = s.file_finding(
-                    &e,
-                    "applications",
-                    Some(&title),
-                    "Precisely named related data. May contain preferences or user documents; review it separately.",
-                    if running { vec![] } else { vec![ActionKind::Trash] },
-                    Risk::Review,
-                    k,
-                )?;
-                f.details.extend([
-                    detail("Application path", app.path()),
-                    detail("Bundle identifier", id.clone()),
-                ]);
-                if running {
-                    f.blocked_reason = Some("Quit the owning application first.".into());
-                }
-                sink.finding(f);
+            if c.allows(&app_path) {
+                candidates.push(
+                    Candidate::new(
+                        app,
+                        "Moving an application to Trash does not remove all its data. Related files are separate selections.",
+                        vec![ActionKind::Trash],
+                        Risk::Review,
+                    )
+                    .details(vec![
+                        detail("Bundle identifier", id),
+                        detail(
+                            "Version",
+                            if info.version.is_empty() {
+                                "Unknown".into()
+                            } else {
+                                info.version
+                            },
+                        ),
+                        detail("State", if running { "Running" } else { "Not running" }),
+                        detail("Application path", app_path),
+                    ])
+                    .blocked(blocked),
+                );
             }
         }
-        Ok(())
+        add_files(s, sink, "applications", candidates, k)
     }
     fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
         owner_not_running(s, f)
@@ -202,18 +201,18 @@ impl ScanModule for LeftoversModule {
     ) -> Result<()> {
         let mut warnings = vec![];
         let installed: std::collections::HashSet<String> = installed_apps(s, k, &mut warnings)?
-            .iter()
+            .par_iter()
             .map(|app| s.apps.bundle_info(app.path()).identifier)
             .filter(|id| !id.is_empty())
             .collect();
         let active = s.apps.running()?;
+        let mut candidates = vec![];
         for directory in ["Caches", "Preferences", "Saved Application State"] {
             let root = format!("{}/Library/{directory}", policy::home());
-            if !Path::new(&root).is_dir() || c.excludes(&root) {
+            if !s.is_dir(&root) || c.excludes(&root) {
                 continue;
             }
             for e in s.children(&root, &mut warnings) {
-                k.check()?;
                 let Some(id) = leftover_id(e.name()) else {
                     continue;
                 };
@@ -221,31 +220,24 @@ impl ScanModule for LeftoversModule {
                     continue;
                 }
                 let running = active.iter().any(|a| a.bundle_id == id);
-                let mut f = s.file_finding(
-                    &e,
-                    "leftovers",
-                    None,
-                    "No matching app was found in /Applications or ~/Applications. An app elsewhere may still use this file. Preferences may contain settings or license information; inspect before removal.",
-                    if running { vec![] } else { vec![ActionKind::Trash] },
-                    Risk::Review,
-                    k,
-                )?;
-                f.details.extend([
-                    detail("Bundle identifier", id),
-                    detail("Location type", directory),
-                    detail(
-                        "Classification",
-                        "Possible leftover; ownership is uncertain",
-                    ),
-                ]);
-                if running {
-                    f.blocked_reason = Some("The owning application is running.".into());
-                }
-                sink.finding(f);
+                candidates.push(
+                    Candidate::new(
+                        e,
+                        "No matching app was found in /Applications or ~/Applications. An app elsewhere may still use this file. Preferences may contain settings or license information; inspect before removal.",
+                        vec![ActionKind::Trash],
+                        Risk::Review,
+                    )
+                    .details(vec![
+                        detail("Bundle identifier", id),
+                        detail("Location type", directory),
+                        detail("Classification", "Possible leftover; ownership is uncertain"),
+                    ])
+                    .blocked(running.then_some("The owning application is running.")),
+                );
             }
         }
         flush(sink, &mut warnings);
-        Ok(())
+        add_files(s, sink, "leftovers", candidates, k)
     }
     fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
         owner_not_running(s, f)

@@ -21,6 +21,8 @@ sha2 = "0.10"
 libc = "0.2"
 uuid = { version = "1", features = ["v4", "serde"] }
 plist = "1"
+rayon = "1"
+blake3 = "1"
 
 [build-dependencies]
 cc = "1"

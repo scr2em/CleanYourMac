@@ -1,4 +1,4 @@
-use super::{add_file, descriptor, flush, ScanModule};
+use super::{add_files, descriptor, flush, Candidate, ScanModule};
 use crate::{git::Git, model::*, orphans, policy, ports::*, services::Services};
 use std::path::Path;
 
@@ -102,45 +102,35 @@ impl ScanModule for NodeModule {
         });
         flush(sink, &mut warnings);
         walked?;
-        for e in candidates {
-            let project = parent(e.path());
-            let manifest = s.is_file(&format!("{project}/package.json"));
-            let manager = self
-                .lockfiles
-                .iter()
-                .find(|(_, lock)| s.is_file(&format!("{project}/{lock}")))
-                .map(|(n, _)| *n)
-                .unwrap_or("Unknown");
-            k.check()?;
-            sink.progress(format!("Sizing {project}"));
-            let mut f = match s.file_finding(
-                &e,
-                "node",
-                Some(name(&project)),
-                "Project dependencies can be reinstalled, but local patches or edits may be lost. Manifests and lockfiles are preserved.",
-                if manifest { vec![ActionKind::Trash] } else { vec![] },
-                Risk::Rebuild,
-                k,
-            ) {
-                Ok(f) => f,
-                Err(error) => {
-                    k.check()?;
-                    sink.warning(format!("Cannot size {}: {error}", e.path()));
-                    continue;
-                }
-            };
-            f.details.extend([
-                detail("Project", project),
-                detail("Package manager", manager),
-                detail("Artifact", "node_modules"),
-            ]);
-            if !manifest {
-                f.blocked_reason =
-                    Some("No owning package.json. This directory needs manual inspection.".into());
-            }
-            sink.finding(f);
-        }
-        Ok(())
+        let candidates = candidates
+            .into_iter()
+            .map(|e| {
+                let project = parent(e.path());
+                let manifest = s.is_file(&format!("{project}/package.json"));
+                let manager = self
+                    .lockfiles
+                    .iter()
+                    .find(|(_, lock)| s.is_file(&format!("{project}/{lock}")))
+                    .map(|(n, _)| *n)
+                    .unwrap_or("Unknown");
+                Candidate::new(
+                    e,
+                    "Project dependencies can be reinstalled, but local patches or edits may be lost. Manifests and lockfiles are preserved.",
+                    vec![ActionKind::Trash],
+                    Risk::Rebuild,
+                )
+                .title(name(&project))
+                .details(vec![
+                    detail("Project", project.clone()),
+                    detail("Package manager", manager),
+                    detail("Artifact", "node_modules"),
+                ])
+                .blocked((!manifest).then_some(
+                    "No owning package.json. This directory needs manual inspection.",
+                ))
+            })
+            .collect();
+        add_files(s, sink, "node", candidates, k)
     }
     fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, k: &ScanControl) -> Result<()> {
         let path = f.resource.path().ok_or("Missing path")?;
@@ -242,20 +232,18 @@ impl ScanModule for ArtifactsModule {
         });
         flush(sink, &mut warnings);
         walked?;
-        for (e, rule) in candidates {
-            add_file(
-                s,
-                sink,
-                &e,
-                "artifacts",
-                None,
-                &format!("{rule}. Rebuilding requires the project's tools and dependencies."),
-                vec![ActionKind::Trash],
-                Risk::Rebuild,
-                k,
-            )?;
-        }
-        Ok(())
+        let candidates = candidates
+            .into_iter()
+            .map(|(e, rule)| {
+                Candidate::new(
+                    e,
+                    &format!("{rule}. Rebuilding requires the project's tools and dependencies."),
+                    vec![ActionKind::Trash],
+                    Risk::Rebuild,
+                )
+            })
+            .collect();
+        add_files(s, sink, "artifacts", candidates, k)
     }
     fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, k: &ScanControl) -> Result<()> {
         let path = f.resource.path().ok_or("Missing path")?;
@@ -295,6 +283,7 @@ impl ScanModule for XcodeModule {
         sink: &mut dyn Sink,
     ) -> Result<()> {
         let mut warnings = vec![];
+        let mut candidates = vec![];
         for root in Self::roots() {
             if !s.is_dir(&root) || c.excludes(&root) {
                 continue;
@@ -304,29 +293,25 @@ impl ScanModule for XcodeModule {
                 if !c.allows(e.path()) {
                     continue;
                 }
-                add_file(
-                    s,
-                    sink,
-                    &e,
-                    "xcode",
-                    None,
-                    if archive {
-                        "Archives may contain irreplaceable release builds and dSYMs."
-                    } else {
-                        "Xcode regenerates this build or device-support data when needed."
-                    },
-                    if archive {
-                        vec![]
-                    } else {
-                        vec![ActionKind::Trash]
-                    },
-                    if archive { Risk::Review } else { Risk::Rebuild },
-                    k,
-                )?;
+                candidates.push(if archive {
+                    Candidate::new(
+                        e,
+                        "Archives may contain irreplaceable release builds and dSYMs.",
+                        vec![],
+                        Risk::Review,
+                    )
+                } else {
+                    Candidate::new(
+                        e,
+                        "Xcode regenerates this build or device-support data when needed.",
+                        vec![ActionKind::Trash],
+                        Risk::Rebuild,
+                    )
+                });
             }
         }
         flush(sink, &mut warnings);
-        Ok(())
+        add_files(s, sink, "xcode", candidates, k)
     }
     fn preflight(&self, s: &Services, _: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
         let running = s
@@ -400,23 +385,22 @@ impl ScanModule for CachesModule {
         k: &ScanControl,
         sink: &mut dyn Sink,
     ) -> Result<()> {
+        let mut candidates = vec![];
         for (title, relative) in &self.locations {
             let path = format!("{}/{relative}", policy::home());
             if !s.exists(&path) || !c.allows(&path) {
                 continue;
             }
             match s.entry(&path) {
-                Ok(e) => add_file(
-                    s,
-                    sink,
-                    &e,
-                    "caches",
-                    Some(title),
-                    "Cached downloads may be needed for offline installs. Close the owning tools before moving this cache to Trash.",
-                    vec![ActionKind::Trash],
-                    Risk::Rebuild,
-                    k,
-                )?,
+                Ok(e) => candidates.push(
+                    Candidate::new(
+                        e,
+                        "Cached downloads may be needed for offline installs. Close the owning tools before moving this cache to Trash.",
+                        vec![ActionKind::Trash],
+                        Risk::Rebuild,
+                    )
+                    .title(*title),
+                ),
                 Err(e) => sink.warning(e),
             }
         }
@@ -425,22 +409,21 @@ impl ScanModule for CachesModule {
             let mut warnings = vec![];
             for e in s.children(&logs, &mut warnings) {
                 if c.allows(e.path()) {
-                    add_file(
-                        s,
-                        sink,
-                        &e,
-                        "caches",
-                        Some(&format!("Logs · {}", e.name())),
-                        "Logs can help diagnose problems. Review before removal.",
-                        vec![ActionKind::Trash],
-                        Risk::Review,
-                        k,
-                    )?;
+                    let title = format!("Logs · {}", e.name());
+                    candidates.push(
+                        Candidate::new(
+                            e,
+                            "Logs can help diagnose problems. Review before removal.",
+                            vec![ActionKind::Trash],
+                            Risk::Review,
+                        )
+                        .title(title),
+                    );
                 }
             }
             flush(sink, &mut warnings);
         }
-        Ok(())
+        add_files(s, sink, "caches", candidates, k)
     }
     fn preflight(&self, s: &Services, _: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
         let active = orphans::active_tools(s, None);
