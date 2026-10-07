@@ -44,6 +44,7 @@ Keep storage units, date formatting, path shortening, and pluralization in share
 | ActionButton | Native button behavior with a semantic role | Primary, secondary, destructive; enabled, disabled, pressed, focused, busy |
 | SearchField and FilterBar | Search and approved size/age/type filters | Empty, filled, active filters, disabled |
 | MetricTile and StorageBar | Storage summaries with clear labels | Known, estimated, unavailable; text equivalents |
+| ScanOrb | The overview's scan control: an orb in an orbiting particle field that is the Scan button at rest, shows a progress ring while scanning and shrinks to a compact Scan again button beside the findings | Idle, scanning (progress or indeterminate), compact, disabled; frozen with Reduce Motion |
 | ResultTable and FindingRow | Shared results, sorting, item selection, cleanup checkboxes; Command-click toggles a row, Shift-click selects the eligible rows from the last clicked one | Unselected, selected, checked, protected, ineligible, stale, loading |
 | PathLabel and SizeLabel | Path/size formatting, full-path copy/reveal | Long path, uncertain size, unavailable data |
 | StatusBadge and RiskBadge | Human-readable status and action consequences | Complete, partial, active, unknown; review needed, rebuild required, permanent |

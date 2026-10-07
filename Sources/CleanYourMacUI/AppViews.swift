@@ -74,59 +74,110 @@ private struct SidebarView: View {
 
 private struct OverviewView: View {
     @Bindable var store: AppStore
+    @Namespace private var orb
+    /// While scanning, and before there is anything to show, the orb is the page; afterwards
+    /// the findings are.
+    private var hero: Bool { store.isScanning || (store.lastScanAt == nil && store.overview.findings == 0) }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xl) {
-                PageHeader("Your Mac, with room to work", subtitle: "Scan, review the recommended fixes, done. Nothing is removed until you review it.")
-                ScanPanel(store: store)
-                WarningView(store: store)
-                RecommendationsView(store: store)
-                AllToolsView(store: store)
-            }.padding(Space.xl)
+                if hero {
+                    ScanHero(store: store, orb: orb)
+                        .transition(.opacity)
+                } else {
+                    PageHeader("Your Mac, with room to work", subtitle: "Review the recommended fixes. Nothing is removed until you review it.")
+                    ScanSummary(store: store, orb: orb)
+                    WarningView(store: store)
+                    RecommendationsView(store: store)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    AllToolsView(store: store)
+                }
+            }
+            .padding(Space.xl)
+            .animation(.spring(duration: 0.7, bounce: 0.2), value: hero)
         }
         .task(id: store.storeVersion) {
-            try? await Task.sleep(for: .milliseconds(250))
+            // Short enough to keep "found so far" moving while results stream in.
+            try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }
             await store.refreshOverview()
         }
     }
 }
 
-/// Where to scan, and the one button that scans everything enabled there.
-private struct ScanPanel: View {
+/// Where to scan: the whole Mac or chosen folders.
+private struct ScanPlacePicker: View {
     @Bindable var store: AppStore
     var body: some View {
-        Panel {
-            VStack(alignment: .leading, spacing: Space.lg) {
-                HStack(spacing: Space.md) {
-                    Picker("Scan", selection: $store.scanPlace) {
-                        ForEach(AppStore.ScanPlace.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented).labelsHidden().fixedSize()
-                    .disabled(store.isScanning)
-                    Text(placeDescription).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    if store.scanPlace == .folders { ActionButton("Choose folders", disabled: store.isScanning) { store.addRoot() } }
-                }
-                HStack(spacing: Space.md) {
-                    if store.isScanning {
-                        ProgressView().controlSize(.small)
-                        Text(store.progress).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1)
-                        Spacer()
-                        ActionButton("Cancel") { store.cancelScan() }
-                    } else {
-                        ActionButton(store.lastScanAt == nil ? "Scan" : "Scan again", kind: .primary, disabled: store.isApplying || store.demo) { store.scan() }
-                        Text(lastScanned).font(TypeStyle.caption).foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                }
+        HStack(spacing: Space.md) {
+            Picker("Scan", selection: $store.scanPlace) {
+                ForEach(AppStore.ScanPlace.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+            .disabled(store.isScanning)
+            if store.scanPlace == .folders { ActionButton("Choose folders", disabled: store.isScanning) { store.addRoot() } }
         }
     }
-    private var placeDescription: String {
-        switch store.scanPlace {
-        case .wholeMac: "Your home folder. System files and other drives are never scanned."
-        case .folders: store.roots.isEmpty ? "No folders chosen yet" : store.roots.map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: " · ")
+}
+@MainActor private func placeDescription(_ store: AppStore) -> String {
+    switch store.scanPlace {
+    case .wholeMac: "Your home folder. System files and other drives are never scanned."
+    case .folders: store.roots.isEmpty ? "No folders chosen yet" : store.roots.map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: " · ")
+    }
+}
+
+/// The big orb, with the place to scan before and live progress during a scan.
+private struct ScanHero: View {
+    @Bindable var store: AppStore
+    let orb: Namespace.ID
+    var body: some View {
+        VStack(spacing: Space.lg) {
+            Text(store.isScanning ? "Looking around your Mac…" : "Your Mac, with room to work").font(TypeStyle.pageTitle)
+            Text(store.isScanning ? "You can keep working; nothing is changed while scanning." : "One scan finds what developers and everyday use leave behind. You choose what to remove.")
+                .font(TypeStyle.secondary).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            ScanOrb("Scan", subtitle: store.scanPlace.rawValue, phase: store.isScanning ? .scanning(progress: store.scanFraction) : .idle) { store.scan() }
+                .matchedGeometryEffect(id: "orb", in: orb)
+                .disabled(store.isApplying || store.demo)
+            if store.isScanning {
+                VStack(spacing: Space.sm) {
+                    Text(store.progress).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    HStack(spacing: Space.sm) {
+                        StatChip("Found so far", value: Display.bytes(store.overview.diskBytes))
+                        StatChip("Items", value: store.overview.findings.formatted())
+                        if store.scanTotal > 1 { StatChip("Tools done", value: "\(store.scanFinished) of \(store.scanTotal)") }
+                    }
+                    ActionButton("Cancel") { store.cancelScan() }
+                }
+                .transition(.opacity)
+            } else {
+                ScanPlacePicker(store: store)
+                Text(placeDescription(store)).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            }
+            WarningView(store: store)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Space.xl)
+    }
+}
+
+/// After a scan: the orb as a small "Scan again" button beside what was found.
+private struct ScanSummary: View {
+    @Bindable var store: AppStore
+    let orb: Namespace.ID
+    var body: some View {
+        Panel {
+            HStack(spacing: Space.lg) {
+                ScanOrb("Scan again", phase: .idle, diameter: Layout.scanOrbCompact) { store.scan() }
+                    .matchedGeometryEffect(id: "orb", in: orb)
+                    .disabled(store.isApplying || store.demo)
+                VStack(alignment: .leading, spacing: Space.xs) {
+                    Text("Found \(Display.bytes(store.overview.diskBytes)) in \(Display.items(store.overview.findings))").font(TypeStyle.headline)
+                    Text(lastScanned).font(TypeStyle.caption).foregroundStyle(.secondary)
+                    Text(placeDescription(store)).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
+                Spacer()
+                ScanPlacePicker(store: store)
+            }
         }
     }
     private var lastScanned: String {

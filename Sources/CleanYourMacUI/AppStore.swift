@@ -105,6 +105,11 @@ public final class AppStore {
     private var scanStatuses: [String: String] = [:]
     private var moduleWarnings: [String: [String]] = [:]
     private var scanningModules: [String] = []
+    /// Modules the running scan covers, and how many have finished.
+    public private(set) var scanTotal = 0
+    public private(set) var scanFinished = 0
+    /// The running scan's completed share, when it covers more than one module.
+    public var scanFraction: Double? { scanTotal > 1 ? min(1, Double(scanFinished) / Double(scanTotal)) : nil }
     public let demo: Bool
     private var scanTask: Task<Void, Never>?
     private var scanID: UUID?
@@ -343,6 +348,7 @@ public final class AppStore {
         // The overview scans every enabled module except those the user must run explicitly.
         let ids = selected == "overview" ? enabledModules.filter(\.inOverview).map(\.id) : [selected]
         scanningModules = Array(Set(ids + [selected]))
+        scanTotal = ids.count; scanFinished = 0
         let stream = core.scan(moduleIDs: ids, context: context, store: true)
         scanTask = Task { [weak self] in
             guard let self else { return }
@@ -356,7 +362,8 @@ public final class AppStore {
                     case .warning(let message):
                         self.scanHadWarnings = true
                         if self.warnings.count < 200 { self.warnings.append(message) }
-                    case .finding, .moduleFinished: break
+                    case .moduleFinished: self.scanFinished += 1
+                    case .finding: break
                     }
                 }
                 if self.scanID == id {

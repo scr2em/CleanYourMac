@@ -10,6 +10,7 @@ public enum Layout {
     public static let reviewWidth: CGFloat = 640, reviewHeight: CGFloat = 540, rowMinimum: CGFloat = 52, panelRadius: CGFloat = 16, controlRadius: CGFloat = 10, smallRadius: CGFloat = 5
     public static let iconSmall: CGFloat = 12, iconMedium: CGFloat = 16, iconLarge: CGFloat = 32, rowIcon: CGFloat = 24, checkbox: CGFloat = 18
     public static let sidebarRow: CGFloat = 36, controlHeight: CGFloat = 40
+    public static let scanOrb: CGFloat = 200, scanOrbCompact: CGFloat = 64
 }
 /// System font (SF Pro) on a compact macOS scale.
 public enum TypeStyle {
@@ -413,6 +414,11 @@ public struct ComponentGallery: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xl) {
                 PageHeader("Component Gallery", subtitle: "The shared vocabulary used by every module. Fixture data only.")
+                HStack(spacing: Space.xl) {
+                    ScanOrb("Scan", subtitle: "Whole Mac", phase: .idle) {}
+                    ScanOrb("Scan", phase: .scanning(progress: 0.42)) {}
+                    ScanOrb("Scan again", phase: .idle, diameter: Layout.scanOrbCompact) {}
+                }
                 HStack {
                     MetricTile("Logical size", value: "12.4 GB", detail: "Allocated size may differ")
                     MetricTile("Processes", value: "3", detail: "Current-user orphan candidates")
