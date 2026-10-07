@@ -33,6 +33,10 @@ public struct WorkspaceView: View {
             Button("OK") { store.error = nil }
         } message: { Text(store.error ?? "") }
         .task { if !store.demo { await store.loadHistory() }; await store.refreshOverview() }
+        // Things listed may have been deleted while the app was in the background.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await store.refreshOnReturn() }
+        }
         .task(id: store.selectedModuleID) {
             if store.selectedModuleID == "orphans" {
                 while !Task.isCancelled {

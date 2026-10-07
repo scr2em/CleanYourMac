@@ -150,6 +150,13 @@ impl Engine {
         });
         report.into_inner().unwrap_or_default()
     }
+    /// Drops stored results whose files were deleted outside the app; returns their IDs.
+    pub fn prune_missing(&self) -> Vec<String> {
+        let services = &self.services;
+        services
+            .io
+            .install(|| self.results.remove_missing(&|path| services.exists(path)))
+    }
     pub fn execute(&self, request: &ActionRequest, control: &ScanControl) -> Vec<ActionResult> {
         self.services
             .io

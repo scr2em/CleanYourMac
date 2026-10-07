@@ -56,6 +56,8 @@ public final class CoreEngine: @unchecked Sendable {
     public func execute(_ request: ActionRequest) async throws -> [ActionResult] {
         try await detached { try self.value("execute", ["request": request], as: [ActionResult].self) }
     }
+    /// Drops stored results whose files were deleted outside the app; returns their IDs.
+    public func pruneMissing() async -> [String] { (try? await detached { try self.value("pruneMissing", Empty(), as: [String].self) }) ?? [] }
     /// One-click fixes for the stored results, largest first.
     public func recommendations() async -> [Recommendation] { (try? await detached { try self.value("recommendations", Empty(), as: [Recommendation].self) }) ?? [] }
     public func history() async -> [ActionResult] { (try? await detached { try self.value("history", Empty(), as: [ActionResult].self) }) ?? [] }

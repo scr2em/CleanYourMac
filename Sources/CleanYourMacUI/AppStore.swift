@@ -228,6 +228,18 @@ public final class AppStore {
         recommendations = await core.recommendations()
         diskSpace = DiskSpace.current()
     }
+    /// When the app becomes active again: forget results deleted elsewhere in the meantime
+    /// (in Finder, a terminal or another app) and refresh totals, fixes and disk space.
+    public func refreshOnReturn() async {
+        guard !demo, !isScanning, !isApplying else { return }
+        let removed = Set(await core.pruneMissing())
+        if !removed.isEmpty {
+            selectedIDs.subtract(removed)
+            if let id = inspectedID, removed.contains(id) { inspectedID = nil }
+            resultsChanged()
+        }
+        await refreshOverview()
+    }
     /// Bytes the recommended Move to Trash fixes free together.
     public var recommendedBytes: UInt64 { recommendations.filter { $0.action == .trash }.reduce(0) { $0 + $1.bytes } }
     /// Opens the review for one recommended fix, with its items selected.

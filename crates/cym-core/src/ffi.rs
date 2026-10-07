@@ -108,6 +108,7 @@ fn dispatch(engine: &Engine, method: &str, p: &Value) -> Result<Value> {
                 .ok_or("This result view expired; query again.")?;
             value(snapshot.page(param(p, "offset")?, param::<usize>(p, "limit")?.min(5_000)))
         }
+        "pruneMissing" => value(engine.prune_missing()),
         "recommendations" => value(
             engine.results.recommendations(
                 std::time::SystemTime::now()

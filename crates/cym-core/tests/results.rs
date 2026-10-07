@@ -581,3 +581,36 @@ fn last_used_filter_falls_back_to_modification_time() {
     assert_eq!(older_than(1.0), expect(&[0, 1, 2]));
     assert_eq!(older_than(365.0), expect(&[2]));
 }
+
+#[test]
+fn returning_to_the_app_drops_results_deleted_elsewhere() {
+    let f = Fixture::new();
+    f.write("keep.bin", "x");
+    f.write("gone.bin", "x");
+    let engine = Engine::new(services(&f), modules::builtin());
+    let file = |name: &str| {
+        let path = f.at(name);
+        let identity = engine.services.entry(&path).unwrap().identity;
+        file_finding(&format!("large:{path}"), "large", identity)
+    };
+    let mut process = file("keep.bin");
+    process.id = "orphans:1".into();
+    process.module_id = "orphans".into();
+    process.resource = Resource::Process {
+        process: ProcessIdentity {
+            pid: 1,
+            uid: 501,
+            started_seconds: 0,
+            started_microseconds: 0,
+            executable: "/gone/tool".into(),
+        },
+    };
+    engine
+        .results
+        .insert(vec![file("keep.bin"), file("gone.bin"), process]);
+    fs::remove_file(f.at("gone.bin")).unwrap();
+    let removed = engine.prune_missing();
+    assert_eq!(removed, [format!("large:{}", f.at("gone.bin"))]);
+    assert_eq!(engine.results.len(), 2);
+    assert!(engine.prune_missing().is_empty());
+}

@@ -372,6 +372,30 @@ impl ResultStore {
         }
         removed
     }
+    /// Removes rows whose file or folder no longer exists (deleted outside the app) and
+    /// returns their IDs. Other resources (processes, simulators) are left alone.
+    pub fn remove_missing(&self, exists: &(dyn Fn(&str) -> bool + Sync)) -> Vec<String> {
+        let missing: Vec<String> = match self.buckets.read() {
+            Ok(buckets) => buckets
+                .values()
+                .flat_map(|b| b.rows.iter())
+                .collect::<Vec<_>>()
+                .into_par_iter()
+                .filter(|f| match &f.resource {
+                    Resource::File { file } | Resource::Worktree { file, .. } => {
+                        !exists(&file.path)
+                    }
+                    _ => false,
+                })
+                .map(|f| f.id.clone())
+                .collect(),
+            Err(_) => return vec![],
+        };
+        if !missing.is_empty() {
+            self.remove(&missing);
+        }
+        missing
+    }
     pub fn get(&self, id: &str) -> Option<Arc<Finding>> {
         let buckets = self.buckets.read().ok()?;
         lookup(&buckets, id)
