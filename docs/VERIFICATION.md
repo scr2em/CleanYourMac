@@ -35,6 +35,12 @@ Not yet re-run after the migration:
 - the native tests (`scripts/test-native.sh`), which cover a real Trash round trip, generated orphan processes and a disposable simulator;
 - a manual review of the packaged app with the new palettes.
 
+Written on Linux and only type-checked for `aarch64-apple-darwin`, so first verified on a Mac:
+
+- the `getattrlistbulk` listing (`cargo test --test files bulk_listing`, which compares it with `lstat` for files, folders, hard links, symbolic links, a FIFO, Unicode names and a 3,000-entry folder);
+- the Spotlight last-used lookup and the CoreServices link in `Package.swift`;
+- the Swift result table, last-used column and Toolchains scope text.
+
 ## Before the migration
 
 The Swift prototype passed 27 tests on macOS 26.5.1 with Swift 6.3.3. Native fixture checks covered a disposable Trash round trip, generated orphan processes and a newly created simulator. Existing user resources were not used for mutation tests. The packaged app was built for Apple silicon and Intel, ad hoc signed, and inspected in an isolated demo bundle.

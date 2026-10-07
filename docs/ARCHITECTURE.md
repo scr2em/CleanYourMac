@@ -37,7 +37,7 @@ let engine = Engine::new(services, modules::builtin());
 
 | Port | Default adapter | Notes |
 | --- | --- | --- |
-| `FileSystem` | `StdFileSystem` | `lstat` metadata, children, resolve, remove, rename |
+| `FileSystem` | `BulkFileSystem` | On macOS, folders are listed with `getattrlistbulk`, one call for many entries' names and metadata; links and special files, other platforms and volumes without support use `StdFileSystem` (`lstat`). Also inspect, resolve, read, remove, rename |
 | `Walker` | `PrefetchWalker` | Depth-first, with the next folders listed ahead of time on the I/O pool; `StackWalker` is the sequential equivalent. Scope, exclusions, packages and limits are enforced by `Services::walk` |
 | `Sizer` | `MetadataSizer` | Parallel (rayon), hard links counted once, order-independent folder fingerprint |
 | `Hasher` | `Blake3Hasher` | `Sha256Hasher` is also provided; prefix hashing for staged duplicate detection |

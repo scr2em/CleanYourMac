@@ -5,7 +5,7 @@
 //! let services = Services { walker: Arc::new(MyWalker), ..Services::native() };
 //! ```
 use crate::{
-    adapters::{command, fs, journal, native},
+    adapters::{bulk, command, fs, journal, native},
     model::*,
     policy,
     ports::*,
@@ -63,7 +63,7 @@ impl Services {
         )))
     }
     pub fn with_journal(journal: Arc<dyn Journal>) -> Self {
-        let files: Arc<dyn FileSystem> = Arc::new(fs::StdFileSystem);
+        let files: Arc<dyn FileSystem> = Arc::new(bulk::BulkFileSystem);
         let io = Arc::new(io_pool());
         Self {
             walker: Arc::new(fs::PrefetchWalker::new(files.clone(), Some(io.clone()))),

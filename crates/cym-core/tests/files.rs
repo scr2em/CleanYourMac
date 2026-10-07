@@ -255,3 +255,45 @@ fn prefetching_walker_visits_in_stack_order_and_honors_skip_and_stop() {
     assert!(!seen.iter().any(|p| p.contains("/skip/")));
     assert_eq!(walk(&prefetch, 7), expected[..7]);
 }
+
+#[test]
+fn bulk_listing_matches_lstat_for_every_kind_of_entry() {
+    use cym_core::adapters::{bulk::BulkFileSystem, fs::StdFileSystem};
+    let f = Fixture::new();
+    f.write("plain.txt", "hello");
+    f.write("empty", "");
+    f.write("é ü 名前.txt", "unicode");
+    f.write("nested/inner.txt", "x");
+    fs::hard_link(f.at("plain.txt"), f.at("linked.txt")).unwrap();
+    symlink(f.at("plain.txt"), f.at("link")).unwrap();
+    symlink(f.at("missing"), f.at("dangling")).unwrap();
+    let fifo = std::ffi::CString::new(f.at("pipe")).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+    for i in 0..3000 {
+        f.write(&format!("many/{i:04}-{}", "n".repeat(i % 200)), "x");
+    }
+    for folder in [f.path(), f.at("many"), format!("{}/", f.path())] {
+        let list = |fs: &dyn FileSystem| {
+            let mut entries: Vec<_> = fs
+                .children(&folder)
+                .unwrap()
+                .into_iter()
+                .map(|e| e.unwrap())
+                .map(|e| {
+                    let file = e.regular || e.symlink;
+                    (
+                        e.identity.path.clone(),
+                        (e.identity.device, e.identity.inode),
+                        (e.identity.modified_seconds, e.identity.modified_nanos),
+                        (e.directory, e.regular, e.symlink, e.dataless),
+                        file.then_some((e.bytes, e.links)),
+                    )
+                })
+                .collect();
+            entries.sort();
+            entries
+        };
+        assert_eq!(list(&BulkFileSystem), list(&StdFileSystem), "{folder}");
+    }
+    assert!(BulkFileSystem.children(&f.at("absent")).is_err());
+}
