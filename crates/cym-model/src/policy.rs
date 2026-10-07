@@ -269,23 +269,53 @@ pub fn duplicate_ignored_name(name: &str) -> bool {
                     && name[name.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
             }))
 }
+/// Drops repeated IDs and files inside another selected file or folder, keeping order.
 pub fn normalized_selection(rows: &[Finding]) -> Vec<Finding> {
+    outermost(rows.iter()).into_iter().cloned().collect()
+}
+/// `normalized_selection` over borrowed rows. Each file's parent folders are looked up in a
+/// set of the selected paths, so the cost grows with the selection times the path depth
+/// rather than with the square of the selection.
+pub fn outermost<'a, I>(rows: I) -> Vec<&'a Finding>
+where
+    I: Iterator<Item = &'a Finding> + Clone,
+{
+    let selected: std::collections::HashSet<std::borrow::Cow<str>> = rows
+        .clone()
+        .filter_map(|f| match &f.resource {
+            Resource::File { file } => Some(canonical_cow(&file.path)),
+            _ => None,
+        })
+        .collect();
     let mut seen = std::collections::HashSet::new();
-    rows.iter()
-        .filter(|f| seen.insert(f.id.clone()))
+    rows.filter(|f| seen.insert(f.id.as_str()))
         .filter(|f| {
             let Resource::File { file } = &f.resource else {
                 return true;
             };
-            !rows.iter().any(|other| match &other.resource {
-                Resource::File { file: parent } => {
-                    parent.path != file.path && contains(&file.path, &parent.path)
-                }
-                _ => false,
-            })
+            let path = canonical_cow(&file.path);
+            let inside_another = ancestors(&path).any(|a| selected.contains(a));
+            !inside_another
         })
-        .cloned()
         .collect()
+}
+/// The path itself when it is already canonical, as stored findings are.
+fn canonical_cow(path: &str) -> std::borrow::Cow<'_, str> {
+    if is_canonical(path) {
+        std::borrow::Cow::Borrowed(path)
+    } else {
+        std::borrow::Cow::Owned(canonical(path))
+    }
+}
+/// The proper ancestors of a canonical path, nearest first, ending with `/`.
+fn ancestors(path: &str) -> impl Iterator<Item = &str> {
+    let mut end = Some(path.len());
+    std::iter::from_fn(move || {
+        let cut = path[..end?].rfind('/')?;
+        let parent = if cut == 0 { "/" } else { &path[..cut] };
+        end = (cut > 0).then_some(cut);
+        (parent != path).then_some(parent)
+    })
 }
 /// macOS packages are listed as single items; traversal does not enter them.
 pub const PACKAGE_EXTENSIONS: &[&str] = &[

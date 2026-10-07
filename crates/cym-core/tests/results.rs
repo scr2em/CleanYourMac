@@ -253,3 +253,185 @@ fn node_findings_report_project_activity_as_last_used() {
         Some("Newest change to project files")
     );
 }
+
+/// The comparator the store sorted with before keys were precomputed, as the reference.
+fn reference_order(a: &Finding, b: &Finding, sort: SortKey, ascending: bool) -> Ordering {
+    if sort == SortKey::LastUsed {
+        let order = match (a.last_used_at, b.last_used_at) {
+            (Some(x), Some(y)) => {
+                let order = x.total_cmp(&y);
+                if ascending {
+                    order
+                } else {
+                    order.reverse()
+                }
+            }
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        };
+        return order.then_with(|| a.id.cmp(&b.id));
+    }
+    let order = match sort {
+        SortKey::LastUsed => Ordering::Equal,
+        SortKey::Size => a
+            .bytes
+            .or(a.memory_bytes)
+            .unwrap_or(0)
+            .cmp(&b.bytes.or(b.memory_bytes).unwrap_or(0)),
+        SortKey::Cpu => a
+            .cpu_percent
+            .unwrap_or(0.)
+            .total_cmp(&b.cpu_percent.unwrap_or(0.)),
+        SortKey::Name => natural(&a.title, &b.title),
+    }
+    .then_with(|| a.id.cmp(&b.id));
+    if ascending {
+        order
+    } else {
+        order.reverse()
+    }
+}
+
+#[test]
+fn keyed_sorting_matches_the_reference_comparator() {
+    let mut rows = synthetic(20_000);
+    for (i, f) in rows.iter_mut().enumerate() {
+        // Ties, missing values, processes, negative zero and numbered names.
+        f.bytes = (i % 7 != 0).then_some((i % 50) as u64 * 1_000);
+        f.memory_bytes = (i % 7 == 0 && i % 2 == 0).then_some((i % 30) as u64);
+        f.cpu_percent = (i % 3 == 0).then_some(if i % 9 == 0 {
+            -0.0
+        } else {
+            (i % 40) as f64 / 3.0
+        });
+        f.last_used_at = (i % 4 != 0).then_some((i % 25) as f64 * 1e6);
+        f.title = format!("item {}", i % 300);
+    }
+    let store = ResultStore::default();
+    store.insert(rows.clone());
+    for sort in [
+        SortKey::Size,
+        SortKey::Name,
+        SortKey::Cpu,
+        SortKey::LastUsed,
+    ] {
+        for ascending in [true, false] {
+            let snapshot = store.query(&Query {
+                sort,
+                ascending,
+                ..Default::default()
+            });
+            let got: Vec<String> = snapshot
+                .page(0, rows.len())
+                .into_iter()
+                .map(|r| r.id)
+                .collect();
+            let mut expected = rows.clone();
+            expected.sort_by(|a, b| reference_order(a, b, sort, ascending));
+            let expected: Vec<String> = expected.into_iter().map(|f| f.id).collect();
+            assert_eq!(got, expected, "{sort:?} ascending={ascending}");
+        }
+    }
+}
+
+#[test]
+fn fast_analytics_matches_the_reference_totals() {
+    use cym_core::analytics::{analytics_of, analytics_reference};
+    let mut seed = 0xDEAD_BEEF_CAFE_F00Du64;
+    let mut next = move |n: u64| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed % n
+    };
+    let modules = [
+        "large",
+        "node",
+        "artifacts",
+        "duplicates",
+        "simulators",
+        "orphans",
+        "worktrees",
+    ];
+    let names = ["a", "b", "node_modules", "x y", "é", "target", "deep"];
+    let mut rows = vec![];
+    for i in 0..30_000u64 {
+        let mut path = String::new();
+        for _ in 0..1 + next(5) {
+            path.push('/');
+            path.push_str(names[next(names.len() as u64) as usize]);
+        }
+        if next(50) == 0 {
+            path = "/".into();
+        }
+        let module = modules[next(modules.len() as u64) as usize];
+        let file = FileIdentity {
+            path: path.clone(),
+            device: 1,
+            inode: i,
+            modified_seconds: 0,
+            modified_nanos: 0,
+            tree_signature: None,
+        };
+        let resource = match module {
+            "orphans" => Resource::Process {
+                process: ProcessIdentity {
+                    pid: i as i32,
+                    uid: 501,
+                    started_seconds: 0,
+                    started_microseconds: 0,
+                    executable: path.clone(),
+                },
+            },
+            "worktrees" => Resource::Worktree {
+                file,
+                repository: "/repo".into(),
+                head: "abc".into(),
+            },
+            "simulators" => Resource::Simulator {
+                id: format!("{i}"),
+                state: "Shutdown".into(),
+            },
+            _ => Resource::File { file },
+        };
+        let mut f = Finding::new(module, &format!("{i}"), "row", resource, "test");
+        f.bytes = (next(10) != 0).then(|| next(1_000_000));
+        f.allocated_bytes = (next(3) == 0).then(|| next(1_000_000));
+        f.memory_bytes = (module == "orphans").then(|| next(1_000));
+        if next(3) != 0 {
+            f.actions = vec![ActionKind::Trash];
+        }
+        if next(7) == 0 {
+            f.blocked_reason = Some("blocked".into());
+        }
+        if module == "simulators" && next(2) == 0 {
+            f.details = vec![Detail {
+                label: "Data path".into(),
+                value: path,
+            }];
+        }
+        rows.push(f);
+    }
+    // Rows at `/` contain everything else, so also compare a set without them.
+    let without_root: Vec<Finding> = rows
+        .iter()
+        .filter(|f| f.resource.path() != Some("/"))
+        .cloned()
+        .collect();
+    for (rows, per_module) in [
+        (&rows, true),
+        (&rows, false),
+        (&without_root, true),
+        (&without_root, false),
+    ] {
+        let fast = analytics_of(rows.iter(), per_module);
+        let reference = analytics_reference(rows.iter(), per_module);
+        assert_eq!(
+            serde_json::to_value(&fast).unwrap(),
+            serde_json::to_value(&reference).unwrap(),
+            "per_module={per_module}"
+        );
+        assert!(fast.disk_bytes > 0 && fast.reclaimable_bytes > 0 && fast.process_count > 0);
+    }
+}

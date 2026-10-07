@@ -26,8 +26,21 @@ fn node_finder_groups_nested_dependencies_and_requires_an_owner() {
         "x",
     );
     f.write("unknown/node_modules/index.js", "x");
+    // pnpm's global virtual store: one node_modules per package, owned by pnpm.
+    f.write("pnpm/global/5/package.json", "{}");
+    f.write("pnpm/global/5/node_modules/tool/index.js", "x");
+    f.write(
+        "pnpm/global/5/.pnpm/refractor@5.0.0/node_modules/refractor/index.js",
+        "x",
+    );
+    f.write(
+        "pnpm/global/5/.pnpm/marked@13.0.3/node_modules/marked/index.js",
+        "x",
+    );
     let report = scan(&f, "node");
-    assert_eq!(report.findings.len(), 2, "{:?}", report.warnings);
+    let mut titles: Vec<_> = report.findings.iter().map(|f| f.title.as_str()).collect();
+    titles.sort();
+    assert_eq!(titles, ["5", "app", "unknown"], "{:?}", report.warnings);
     let app = report.findings.iter().find(|f| f.title == "app").unwrap();
     assert_eq!(app.actions, vec![ActionKind::Trash]);
     assert_eq!(app.value("Package manager"), Some("pnpm"));

@@ -231,3 +231,78 @@ fn analytics_count_each_path_once_and_keep_memory_separate() {
         600
     );
 }
+
+#[test]
+fn outermost_selection_matches_the_pairwise_reference() {
+    use cym_core::policy;
+    // The previous implementation compared every pair of selected rows.
+    fn reference(rows: &[Finding]) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        rows.iter()
+            .filter(|f| seen.insert(f.id.clone()))
+            .filter(|f| {
+                let Resource::File { file } = &f.resource else {
+                    return true;
+                };
+                !rows.iter().any(|other| match &other.resource {
+                    Resource::File { file: parent } => {
+                        parent.path != file.path && policy::contains(&file.path, &parent.path)
+                    }
+                    _ => false,
+                })
+            })
+            .map(|f| f.id.clone())
+            .collect()
+    }
+    let mut seed = 0x1234_5678_9ABC_DEF1u64;
+    let mut next = move |n: u64| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed % n
+    };
+    let names = ["a", "b", "ab", "a b", "é", "node_modules"];
+    let mut rows = vec![];
+    for i in 0..2_000 {
+        let mut path = String::new();
+        for _ in 0..1 + next(4) {
+            path.push('/');
+            path.push_str(names[next(names.len() as u64) as usize]);
+        }
+        let identity = FileIdentity {
+            path: path.clone(),
+            device: 1,
+            inode: i,
+            modified_seconds: 0,
+            modified_nanos: 0,
+            tree_signature: None,
+        };
+        // Repeated IDs, repeated paths under different IDs, and processes.
+        let id = if next(10) == 0 {
+            "repeat".to_owned()
+        } else {
+            format!("f{i}")
+        };
+        rows.push(if next(15) == 0 {
+            let mut p = file_finding(&format!("p{i}"), "orphans", identity);
+            p.resource = Resource::Process {
+                process: ProcessIdentity {
+                    pid: i as i32,
+                    uid: 501,
+                    started_seconds: 0,
+                    started_microseconds: 0,
+                    executable: path,
+                },
+            };
+            p
+        } else {
+            file_finding(&id, "large", identity)
+        });
+    }
+    let got: Vec<String> = policy::normalized_selection(&rows)
+        .into_iter()
+        .map(|f| f.id)
+        .collect();
+    assert_eq!(got, reference(&rows));
+    assert!(got.len() > 10 && got.len() < rows.len());
+}

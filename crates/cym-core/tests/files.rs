@@ -249,6 +249,8 @@ fn prefetching_walker_visits_in_stack_order_and_honors_skip_and_stop() {
     };
     let mut prefetch = PrefetchWalker::new(files.clone(), Some(pool));
     prefetch.window = 3;
+    // Always read ahead, so the prefetching path is the one compared.
+    prefetch.slow_listing = std::time::Duration::ZERO;
     let expected = walk(&StackWalker(files.clone()), usize::MAX);
     let seen = walk(&prefetch, usize::MAX);
     assert_eq!(seen, expected);

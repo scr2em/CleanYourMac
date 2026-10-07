@@ -117,7 +117,7 @@ impl From<&Finding> for Row {
 pub struct Snapshot {
     pub id: u64,
     pub generation: u64,
-    rows: Vec<Arc<Finding>>,
+    rows: Ordered,
     pub summary: Analytics,
     pub largest: Vec<Row>,
     pub max_cpu: Option<f64>,
@@ -201,11 +201,81 @@ pub struct ResultStore {
     next_query: AtomicU64,
     snapshots: Mutex<VecDeque<Arc<Snapshot>>>,
     /// Totals depend on the filter, not the order, so re-sorting reuses them.
-    summaries: Mutex<VecDeque<(SummaryKey, Analytics)>>,
+    summaries: Mutex<VecDeque<(SummaryKey, Derived)>>,
     /// Fully sorted rows per (module, order), so filtering never re-sorts.
     orders: Mutex<VecDeque<(OrderKey, Ordered)>>,
 }
 type Ordered = Arc<Vec<Arc<Finding>>>;
+/// What a query reports besides its rows; it depends only on which rows match.
+#[derive(Clone)]
+struct Derived {
+    summary: Analytics,
+    largest: Vec<Row>,
+    max_cpu: Option<f64>,
+    eligible: usize,
+}
+impl Derived {
+    fn of(rows: &[Arc<Finding>], modules: bool) -> Self {
+        // Largest first, then by ID, as the "largest items" list shows them.
+        let rank = |a: &&Arc<Finding>, b: &&Arc<Finding>| {
+            b.bytes.cmp(&a.bytes).then_with(|| a.id.cmp(&b.id))
+        };
+        struct Pass<'a> {
+            eligible: usize,
+            max_cpu: Option<f64>,
+            largest: Vec<&'a Arc<Finding>>,
+        }
+        let empty = || Pass {
+            eligible: 0,
+            max_cpu: None,
+            largest: Vec::with_capacity(6),
+        };
+        let keep = |largest: &mut Vec<&Arc<Finding>>| {
+            largest.sort_by(rank);
+            largest.truncate(5);
+        };
+        // One pass for everything but the totals, so the rows are read once.
+        let pass = rows
+            .par_iter()
+            .fold(empty, |mut p, f| {
+                p.eligible += usize::from(eligible(f));
+                if let Some(cpu) = f.cpu_percent {
+                    p.max_cpu = Some(p.max_cpu.map_or(cpu, |m| {
+                        if cpu.total_cmp(&m).is_gt() {
+                            cpu
+                        } else {
+                            m
+                        }
+                    }));
+                }
+                if f.bytes.is_some() && (p.largest.len() < 5 || rank(&f, &p.largest[4]).is_lt()) {
+                    p.largest.push(f);
+                    keep(&mut p.largest);
+                }
+                p
+            })
+            .reduce(empty, |mut a, b| {
+                a.eligible += b.eligible;
+                a.max_cpu = match (a.max_cpu, b.max_cpu) {
+                    (Some(x), Some(y)) => Some(if y.total_cmp(&x).is_gt() { y } else { x }),
+                    (x, y) => x.or(y),
+                };
+                a.largest.extend(b.largest);
+                keep(&mut a.largest);
+                a
+            });
+        Self {
+            summary: analytics::analytics_of(rows.iter().map(|f| f.as_ref()), modules),
+            largest: pass
+                .largest
+                .into_iter()
+                .map(|f| Row::from(f.as_ref()))
+                .collect(),
+            max_cpu: pass.max_cpu,
+            eligible: pass.eligible,
+        }
+    }
+}
 #[derive(PartialEq)]
 struct OrderKey {
     generation: u64,
@@ -256,13 +326,25 @@ impl ResultStore {
             return;
         }
         if let Ok(mut buckets) = self.buckets.write() {
+            // Size each module's rows and index once instead of growing them repeatedly.
+            let mut incoming: HashMap<&str, usize> = HashMap::new();
+            for f in &rows {
+                *incoming.entry(f.module_id.as_str()).or_default() += 1;
+            }
+            for (module, count) in incoming {
+                let bucket = buckets.entry(module.to_owned()).or_default();
+                bucket.rows.reserve(count);
+                bucket.index.reserve(count);
+            }
+            // Moving each row into shared storage is the bulk of the work; do it in parallel.
+            let rows: Vec<Arc<Finding>> = rows.into_par_iter().map(Arc::new).collect();
             for f in rows {
                 // Look up by borrowed name; allocate a key only for a module's first row.
                 let bucket = match buckets.get_mut(&f.module_id) {
                     Some(bucket) => bucket,
                     None => buckets.entry(f.module_id.clone()).or_default(),
                 };
-                bucket.insert(Arc::new(f));
+                bucket.insert(f);
             }
         }
         self.changed();
@@ -284,20 +366,20 @@ impl ResultStore {
     }
     pub fn get(&self, id: &str) -> Option<Arc<Finding>> {
         let buckets = self.buckets.read().ok()?;
-        buckets
-            .values()
-            .find_map(|b| b.index.get(id).map(|&i| b.rows[i].clone()))
+        lookup(&buckets, id)
     }
     pub fn findings(&self, ids: &[String]) -> Vec<Finding> {
+        self.rows(ids).iter().map(|f| f.as_ref().clone()).collect()
+    }
+    /// The stored rows for `ids`, once each, in the order given.
+    fn rows(&self, ids: &[String]) -> Vec<Arc<Finding>> {
         let Ok(buckets) = self.buckets.read() else {
             return vec![];
         };
+        let mut seen = HashSet::with_capacity(ids.len());
         ids.iter()
-            .filter_map(|id| {
-                buckets
-                    .values()
-                    .find_map(|b| b.index.get(id).map(|&i| b.rows[i].as_ref().clone()))
-            })
+            .filter(|id| seen.insert(id.as_str()))
+            .filter_map(|id| lookup(&buckets, id))
             .collect()
     }
 
@@ -310,19 +392,22 @@ impl ResultStore {
         let needle = Needle::new(&q.search);
         let unfiltered =
             q.min_bytes == 0 && q.modified_before.is_none() && needle.unicode.is_empty();
-        let rows: Vec<Arc<Finding>> = if unfiltered {
-            ordered.as_ref().clone()
-        } else {
+        // With no filter the snapshot shares the cached order instead of copying it.
+        let rows: Ordered = if unfiltered {
             ordered
-                .par_iter()
-                .filter(|f| {
-                    (q.min_bytes == 0 || f.bytes.unwrap_or(0) >= q.min_bytes)
-                        && q.modified_before
-                            .is_none_or(|t| f.modified_at.is_some_and(|m| m < t))
-                        && needle.matches(f)
-                })
-                .cloned()
-                .collect()
+        } else {
+            Arc::new(
+                ordered
+                    .par_iter()
+                    .filter(|f| {
+                        (q.min_bytes == 0 || f.bytes.unwrap_or(0) >= q.min_bytes)
+                            && q.modified_before
+                                .is_none_or(|t| f.modified_at.is_some_and(|m| m < t))
+                            && needle.matches(f)
+                    })
+                    .cloned()
+                    .collect(),
+            )
         };
         let key = SummaryKey {
             generation,
@@ -331,39 +416,31 @@ impl ResultStore {
             min_bytes: q.min_bytes,
             modified_before: q.modified_before.map(f64::to_bits),
         };
+        // Totals, largest items, busiest process and eligible count depend on which rows
+        // match, not on their order, so a re-sort or repeat query reuses them.
         let cached = self
             .summaries
             .lock()
             .ok()
-            .and_then(|c| c.iter().find(|(k, _)| *k == key).map(|(_, a)| a.clone()));
-        let summary = cached.unwrap_or_else(|| {
-            let summary =
-                analytics::analytics_of(rows.iter().map(|f| f.as_ref()), q.module.is_none());
+            .and_then(|c| c.iter().find(|(k, _)| *k == key).map(|(_, d)| d.clone()));
+        let derived = cached.unwrap_or_else(|| {
+            let derived = Derived::of(&rows, q.module.is_none());
             if let Ok(mut cache) = self.summaries.lock() {
-                cache.push_back((key, summary.clone()));
+                cache.retain(|(k, _)| k.generation == generation);
+                cache.push_back((key, derived.clone()));
                 while cache.len() > 8 {
                     cache.pop_front();
                 }
             }
-            summary
+            derived
         });
-        let mut largest: Vec<&Arc<Finding>> = rows.iter().filter(|f| f.bytes.is_some()).collect();
-        let top = largest.len().min(5);
-        if top > 0 {
-            largest.select_nth_unstable_by(top - 1, |a, b| b.bytes.cmp(&a.bytes));
-            largest.truncate(top);
-            largest.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.id.cmp(&b.id)));
-        }
         let snapshot = Arc::new(Snapshot {
             id: self.next_query.fetch_add(1, Atomic::Relaxed) + 1,
             generation,
-            largest: largest.into_iter().map(|f| Row::from(f.as_ref())).collect(),
-            max_cpu: rows
-                .par_iter()
-                .filter_map(|f| f.cpu_percent)
-                .max_by(|a, b| a.total_cmp(b)),
-            eligible: rows.par_iter().filter(|f| eligible(f)).count(),
-            summary,
+            largest: derived.largest,
+            max_cpu: derived.max_cpu,
+            eligible: derived.eligible,
+            summary: derived.summary,
             rows,
         });
         if let Ok(mut snapshots) = self.snapshots.lock() {
@@ -391,7 +468,7 @@ impl ResultStore {
         {
             return hit;
         }
-        let mut rows: Vec<Arc<Finding>> = match self.buckets.read() {
+        let rows: Vec<Arc<Finding>> = match self.buckets.read() {
             Ok(buckets) => match &q.module {
                 Some(m) => buckets.get(m).map(|b| b.rows.clone()).unwrap_or_default(),
                 None => buckets
@@ -401,44 +478,7 @@ impl ResultStore {
             },
             Err(_) => vec![],
         };
-        let compare = |a: &Arc<Finding>, b: &Arc<Finding>| {
-            if q.sort == SortKey::LastUsed {
-                let order = match (a.last_used_at, b.last_used_at) {
-                    (Some(x), Some(y)) => {
-                        let order = x.total_cmp(&y);
-                        if q.ascending {
-                            order
-                        } else {
-                            order.reverse()
-                        }
-                    }
-                    (Some(_), None) => Ordering::Less,
-                    (None, Some(_)) => Ordering::Greater,
-                    (None, None) => Ordering::Equal,
-                };
-                return order.then_with(|| a.id.cmp(&b.id));
-            }
-            let order = match q.sort {
-                SortKey::LastUsed => Ordering::Equal,
-                SortKey::Size => a
-                    .bytes
-                    .or(a.memory_bytes)
-                    .unwrap_or(0)
-                    .cmp(&b.bytes.or(b.memory_bytes).unwrap_or(0)),
-                SortKey::Cpu => a
-                    .cpu_percent
-                    .unwrap_or(0.)
-                    .total_cmp(&b.cpu_percent.unwrap_or(0.)),
-                SortKey::Name => natural(&a.title, &b.title),
-            }
-            .then_with(|| a.id.cmp(&b.id));
-            if q.ascending {
-                order
-            } else {
-                order.reverse()
-            }
-        };
-        rows.par_sort_unstable_by(compare);
+        let rows = sorted(rows, q.sort, q.ascending);
         let rows = Arc::new(rows);
         if let Ok(mut cache) = self.orders.lock() {
             cache.retain(|(k, _)| k.generation == generation);
@@ -459,25 +499,21 @@ impl ResultStore {
     }
 
     pub fn selection(&self, ids: &[String], preview: usize) -> Selection {
-        let unique: Vec<String> = {
-            let mut seen = HashSet::new();
-            ids.iter().filter(|id| seen.insert(*id)).cloned().collect()
-        };
-        let rows = self.findings(&unique);
-        let normalized = crate::policy::normalized_selection(&rows);
+        let rows = self.rows(ids);
+        let normalized = crate::policy::outermost(rows.iter().map(|f| f.as_ref()));
         let mut actions: Option<Vec<ActionKind>> = None;
         for f in &rows {
-            let eligible: Vec<ActionKind> = if f.blocked_reason.is_some() {
-                vec![]
+            let eligible: &[ActionKind] = if f.blocked_reason.is_some() {
+                &[]
             } else {
-                f.actions.clone()
+                &f.actions
             };
             actions = Some(match actions {
-                None => eligible,
-                Some(current) => current
-                    .into_iter()
-                    .filter(|a| eligible.contains(a))
-                    .collect(),
+                None => eligible.to_vec(),
+                Some(mut current) => {
+                    current.retain(|a| eligible.contains(a));
+                    current
+                }
             });
         }
         Selection {
@@ -487,9 +523,88 @@ impl ResultStore {
             includes_processes: rows
                 .iter()
                 .any(|f| matches!(f.resource, Resource::Process { .. })),
-            preview: rows.into_iter().take(preview).collect(),
+            preview: rows
+                .iter()
+                .take(preview)
+                .map(|f| f.as_ref().clone())
+                .collect(),
         }
     }
+}
+
+/// Rows in the requested order. Numeric orders sort compact `(key, index)` pairs instead of
+/// following two heap pointers per comparison; IDs break ties exactly as before (reversed
+/// with a descending order, except for last used, whose undated rows always come last).
+fn sorted(rows: Vec<Arc<Finding>>, sort: SortKey, ascending: bool) -> Vec<Arc<Finding>> {
+    if sort == SortKey::Name {
+        let mut keyed: Vec<(&str, &str, u32)> = rows
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (f.title.as_str(), f.id.as_str(), i as u32))
+            .collect();
+        keyed.par_sort_unstable_by(|a, b| {
+            let order = natural(a.0, b.0).then_with(|| a.1.cmp(b.1));
+            if ascending {
+                order
+            } else {
+                order.reverse()
+            }
+        });
+        return keyed
+            .iter()
+            .map(|&(_, _, i)| rows[i as usize].clone())
+            .collect();
+    }
+    // An order-preserving u64 for a float, so keys compare as integers.
+    fn float(value: f64) -> u64 {
+        let bits = value.to_bits();
+        if bits >> 63 == 1 {
+            !bits
+        } else {
+            bits | (1 << 63)
+        }
+    }
+    let flip = |value: u64| if ascending { value } else { !value };
+    let mut keyed: Vec<(u128, u32)> = rows
+        .par_iter()
+        .enumerate()
+        .map(|(i, f)| {
+            let key = match sort {
+                SortKey::Size => u128::from(flip(f.bytes.or(f.memory_bytes).unwrap_or(0))),
+                SortKey::Cpu => u128::from(flip(float(f.cpu_percent.unwrap_or(0.)))),
+                SortKey::LastUsed => match f.last_used_at {
+                    Some(t) => u128::from(flip(float(t))),
+                    None => 1 << 64,
+                },
+                SortKey::Name => unreachable!(),
+            };
+            (key, i as u32)
+        })
+        .collect();
+    let ids_reversed = !ascending && sort != SortKey::LastUsed;
+    keyed.par_sort_unstable_by(|a, b| {
+        a.0.cmp(&b.0).then_with(|| {
+            let order = rows[a.1 as usize].id.cmp(&rows[b.1 as usize].id);
+            if ids_reversed {
+                order.reverse()
+            } else {
+                order
+            }
+        })
+    });
+    keyed
+        .iter()
+        .map(|&(_, i)| rows[i as usize].clone())
+        .collect()
+}
+
+/// A row by ID. IDs are `module:key`, so the module's bucket is tried first.
+fn lookup(buckets: &HashMap<String, Bucket>, id: &str) -> Option<Arc<Finding>> {
+    let find = |b: &Bucket| b.index.get(id).map(|&i| b.rows[i].clone());
+    id.split_once(':')
+        .and_then(|(module, _)| buckets.get(module))
+        .and_then(find)
+        .or_else(|| buckets.values().find_map(find))
 }
 
 /// Case-insensitive substring search over title and subtitle without allocating per row

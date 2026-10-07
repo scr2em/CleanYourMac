@@ -131,14 +131,21 @@ enum Pending {
 }
 
 /// Depth-first traversal in exactly `StackWalker`'s order, with the folders nearest the top
-/// of the stack listed ahead of time on a thread pool. The visitor still runs on the calling
-/// thread, one entry at a time. Whoever claims a listing first reads it, so the walk never
-/// waits on a job that has not started, even when it runs on the same pool.
+/// of the stack listed ahead of time on a thread pool while listings are slow. The visitor
+/// still runs on the calling thread, one entry at a time. Whoever claims a listing first reads
+/// it, so the walk never waits on a job that has not started, even when it runs on the same
+/// pool.
+///
+/// Reading ahead only pays when a listing waits on the disk: from the cache a folder lists in
+/// microseconds, less than handing it to another thread costs. So the walker times its
+/// listings and prefetches only while their recent average exceeds `slow_listing`.
 pub struct PrefetchWalker {
     pub fs: Arc<dyn FileSystem>,
     pub pool: Option<Arc<rayon::ThreadPool>>,
     /// How many folders at the top of the stack are read ahead.
     pub window: usize,
+    /// The average listing time above which folders are read ahead.
+    pub slow_listing: std::time::Duration,
 }
 impl PrefetchWalker {
     pub fn new(fs: Arc<dyn FileSystem>, pool: Option<Arc<rayon::ThreadPool>>) -> Self {
@@ -146,6 +153,7 @@ impl PrefetchWalker {
             fs,
             pool,
             window: 32,
+            slow_listing: std::time::Duration::from_micros(50),
         }
     }
     fn start(&self, path: String) -> Pending {
@@ -204,9 +212,15 @@ impl Walker for PrefetchWalker {
         visit: &mut dyn FnMut(&Entry) -> Result<Visit>,
     ) -> Result<()> {
         let mut stack = Abandon(vec![Pending::Queued(root.to_owned())]);
+        // Exponential moving average of listing time, in nanoseconds.
+        let mut average = 0u128;
+        let slow = self.slow_listing.as_nanos();
         while let Some(pending) = stack.0.pop() {
             control.check()?;
-            let children = match self.list(pending) {
+            let started = std::time::Instant::now();
+            let listing = self.list(pending);
+            average = (average * 7 + started.elapsed().as_nanos()) / 8;
+            let children = match listing {
                 Ok(children) => children,
                 Err(e) => {
                     problem(e);
@@ -229,6 +243,9 @@ impl Walker for PrefetchWalker {
                     }
                     _ => {}
                 }
+            }
+            if average < slow {
+                continue;
             }
             // The next folders popped are the newest pushes; start reading them now.
             let floor = stack.0.len().saturating_sub(self.window);

@@ -100,7 +100,9 @@ impl ScanModule for NodeModule {
                 candidates.push(e.clone());
                 return Ok(false);
             }
-            Ok(true)
+            // pnpm's virtual store holds one node_modules per package version with no owning
+            // project; they belong to pnpm (Caches & Logs offers `pnpm store prune`).
+            Ok(!(e.directory && e.name() == ".pnpm"))
         });
         flush(sink, &mut warnings);
         walked?;
