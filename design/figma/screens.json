@@ -1,0 +1,237 @@
+{
+  "name": "CleanYourMac",
+  "description": "A little room to breathe.",
+  "navigation": [
+    {"name": "Overview", "symbol": "square.grid.2x2"},
+    {"name": "Storage explorer", "symbol": "internaldrive"},
+    {"name": "Large files", "symbol": "doc"},
+    {"name": "Exact duplicates", "symbol": "square.on.square"},
+    {"name": "Node dependencies", "symbol": "shippingbox"},
+    {"name": "Build artifacts", "symbol": "hammer"},
+    {"name": "Git worktrees", "symbol": "arrow.triangle.branch"},
+    {"name": "iOS simulators", "symbol": "iphone"},
+    {"name": "Xcode data", "symbol": "wrench.and.screwdriver"},
+    {"name": "Package caches", "symbol": "archivebox"},
+    {"name": "Applications", "symbol": "app"},
+    {"name": "Downloads", "symbol": "arrow.down.circle"},
+    {"name": "Trash", "symbol": "trash"},
+    {"name": "Orphan processes", "symbol": "waveform.path"},
+    {"name": "Activity", "symbol": "clock"}
+  ],
+  "screens": [
+    {
+      "name": "Overview",
+      "kind": "overview",
+      "title": "A little room to breathe.",
+      "subtitle": "Know what is taking up space. Choose what happens next.",
+      "metrics": [
+        {"label": "Space to review", "value": "76.8 GB", "detail": "Unique file resources", "tone": "mint"},
+        {"label": "Items found", "value": "142", "detail": "Across 5 scan groups", "tone": "lavender"},
+        {"label": "Last scan", "value": "Just now", "detail": "3 folders need access", "tone": "amber"}
+      ],
+      "categories": [
+        {"name": "Node dependencies", "value": "23.8 GB", "fraction": 0.31, "tone": "mint"},
+        {"name": "iOS simulators", "value": "21.6 GB", "fraction": 0.281, "tone": "lavender"},
+        {"name": "Xcode data", "value": "18.4 GB", "fraction": 0.24, "tone": "coral"},
+        {"name": "Exact duplicates", "value": "8.2 GB", "fraction": 0.107, "tone": "amber"},
+        {"name": "Other findings", "value": "4.8 GB", "fraction": 0.062, "tone": "muted"}
+      ]
+    },
+    {
+      "name": "Node dependencies",
+      "kind": "finder",
+      "title": "Node dependencies",
+      "subtitle": "Find project dependencies. Reinstall them when you need them.",
+      "included": ["~/projects", "~/private"],
+      "excluded": ["~/projects/client-archive"],
+      "query": "atlas",
+      "sort": "Size · largest first",
+      "summary": [
+        {"label": "Matching folders", "value": "3", "detail": "Name contains atlas"},
+        {"label": "Matched size", "value": "23.8 GB", "detail": "Nested folders counted once"},
+        {"label": "Selected", "value": "20.2 GB", "detail": "2 folders to review"}
+      ],
+      "rows": [
+        {"title": "atlas-web · node_modules", "path": "~/projects/atlas-web/node_modules", "value": "12.8 GB", "badge": "Rebuildable", "tone": "mint", "checked": true},
+        {"title": "atlas-api · node_modules", "path": "~/projects/atlas-api/node_modules", "value": "7.4 GB", "badge": "Rebuildable", "tone": "mint", "checked": true},
+        {"title": "atlas-ui · node_modules", "path": "~/private/atlas-ui/node_modules", "value": "3.6 GB", "badge": "Build running", "tone": "amber", "blocked": true}
+      ],
+      "note": "Each node_modules is one result. Discovery stops at its boundary.",
+      "inspector": {"title": "atlas-web", "badge": "Rebuildable", "facts": [["Owner", "package.json"], ["Package manager", "pnpm · lockfile found"], ["Scope", "~/projects/atlas-web"], ["Recovery", "Run pnpm install"]], "consequence": "Dependencies move to Trash. Your source and lockfile stay in place."},
+      "selection": "2 folders selected · 20.2 GB",
+      "action": "Review selection"
+    },
+    {
+      "name": "Git worktrees",
+      "kind": "finder",
+      "title": "Git worktrees",
+      "subtitle": "See linked checkouts and orphaned registrations together.",
+      "included": ["~/projects"],
+      "excluded": ["~/projects/private-client"],
+      "query": "",
+      "sort": "Size · largest first",
+      "summary": [
+        {"label": "Worktrees", "value": "6", "detail": "Across 2 repositories"},
+        {"label": "Matched size", "value": "14.8 GB", "detail": "5 available paths"},
+        {"label": "Orphaned", "value": "1", "detail": "Directory is missing"}
+      ],
+      "rows": [
+        {"title": "atlas · main", "path": "~/projects/atlas", "value": "6.2 GB", "badge": "Main checkout", "tone": "lavender", "blocked": true},
+        {"title": "atlas · feature-redesign", "path": "~/projects/worktrees/redesign", "value": "4.1 GB", "badge": "Review", "tone": "mint"},
+        {"title": "atlas · fix-export", "path": "~/projects/worktrees/fix-export", "value": "2.3 GB", "badge": "Uncommitted files", "tone": "amber", "blocked": true},
+        {"title": "docs · preview", "path": "~/projects/docs-preview", "value": "1.8 GB", "badge": "Review", "tone": "mint"},
+        {"title": "docs · translation", "path": "~/projects/docs-translation", "value": "400 MB", "badge": "Review", "tone": "mint"},
+        {"title": "atlas · old-redesign", "path": "~/projects/worktrees/old-redesign", "value": "Unavailable", "badge": "Orphaned", "tone": "coral", "blocked": true}
+      ],
+      "note": "Orphaned means Git still registers the worktree, but its directory is missing.",
+      "inspector": {"title": "old-redesign", "badge": "Orphaned", "facts": [["Repository", "~/projects/atlas"], ["Registration", "Prunable"], ["Path", "Directory missing"], ["Disk size", "Unavailable"]], "consequence": "This badge describes a stale registration. Existing files are never inferred safe from this status."},
+      "selection": "No worktrees selected",
+      "action": "Review selection"
+    },
+    {
+      "name": "Exact duplicates",
+      "kind": "finder",
+      "title": "Exact duplicates",
+      "subtitle": "Identical file contents, with one original kept in every group.",
+      "included": ["~/Documents", "~/Downloads"],
+      "excluded": ["System directories", "Build and package directories"],
+      "query": "holiday",
+      "sort": "Size · largest first",
+      "summary": [
+        {"label": "Duplicate files", "value": "3", "detail": "1 exact-content group"},
+        {"label": "Matched size", "value": "7.2 GB", "detail": "Includes the kept original"},
+        {"label": "Reviewable copies", "value": "4.8 GB", "detail": "2 copies · original kept"}
+      ],
+      "rows": [
+        {"title": "holiday-film.mov", "path": "~/Documents/Films/holiday-film.mov", "value": "2.4 GB", "badge": "Keep original", "tone": "lavender", "blocked": true},
+        {"title": "holiday-film-copy.mov", "path": "~/Downloads/holiday-film-copy.mov", "value": "2.4 GB", "badge": "Exact copy", "tone": "mint", "checked": true},
+        {"title": "holiday-film-backup.mov", "path": "~/Downloads/holiday-film-backup.mov", "value": "2.4 GB", "badge": "Exact copy", "tone": "mint", "checked": true}
+      ],
+      "note": "Build outputs, dependencies, package directories, and system locations are excluded.",
+      "inspector": {"title": "holiday-film-copy.mov", "badge": "Exact copy", "facts": [["Match", "SHA-256 contents verified"], ["Original", "~/Documents/Films/holiday-film.mov"], ["Copies", "2 additional files"], ["Before action", "Both files checked again"]], "consequence": "Only selected copies move to Trash. One original stays in place."},
+      "selection": "2 copies selected · 4.8 GB",
+      "action": "Review selection"
+    },
+    {
+      "name": "iOS simulators",
+      "kind": "finder",
+      "title": "iOS simulators",
+      "subtitle": "Review simulator data by device. Running devices stay protected.",
+      "included": ["~/Library/Developer/CoreSimulator"],
+      "excluded": ["…/Devices/D159…729A"],
+      "query": "",
+      "sort": "Size · largest first",
+      "summary": [
+        {"label": "Devices", "value": "3", "detail": "2 shut down · 1 running"},
+        {"label": "Matched data", "value": "21.6 GB", "detail": "Device data only"},
+        {"label": "Selected", "value": "8.4 GB", "detail": "1 shut-down device"}
+      ],
+      "rows": [
+        {"title": "iPhone 17 Pro", "path": "iOS 26.0 · A917…42F0", "value": "9.6 GB", "badge": "Running", "tone": "amber", "blocked": true},
+        {"title": "iPhone 16", "path": "iOS 18.5 · B517…9CC0", "value": "8.4 GB", "badge": "Shut down", "tone": "mint", "checked": true},
+        {"title": "iPad Air", "path": "iPadOS 26.0 · C841…6110", "value": "3.6 GB", "badge": "Shut down", "tone": "mint"}
+      ],
+      "note": "Reset erases a device's apps and settings. Delete also removes the device.",
+      "inspector": {"title": "iPhone 16", "badge": "Shut down", "facts": [["Runtime", "iOS 18.5"], ["State", "Shut down"], ["Data", "8.4 GB"], ["Target", "This device UUID only"]], "consequence": "Resetting this simulator permanently erases its installed apps, settings, and data."},
+      "selection": "1 simulator selected · 8.4 GB",
+      "action": "Review reset"
+    },
+    {
+      "name": "Orphan processes",
+      "kind": "finder",
+      "title": "Orphan processes",
+      "subtitle": "Review detached processes belonging to your user.",
+      "included": ["Your user"],
+      "excluded": ["ssh-agent", "gpg-agent", "Managed jobs"],
+      "query": "",
+      "sort": "CPU · highest first",
+      "summary": [
+        {"label": "Candidates", "value": "3", "detail": "Parent PID 1 · unmanaged"},
+        {"label": "CPU", "value": "128%", "detail": "100% equals one core"},
+        {"label": "Memory", "value": "1.7 GB", "detail": "Current footprint"}
+      ],
+      "rows": [
+        {"title": "node", "path": "~/projects/atlas-web · PID 4318", "value": "96% CPU", "badge": "842 MB", "tone": "amber", "checked": true},
+        {"title": "swift-frontend", "path": "~/projects/toolkit · PID 5022", "value": "28% CPU", "badge": "611 MB", "tone": "lavender"},
+        {"title": "python3", "path": "~/projects/reports · PID 8921", "value": "4% CPU", "badge": "247 MB", "tone": "mint"}
+      ],
+      "note": "Managed jobs, app helpers, and system processes are excluded.",
+      "inspector": {"title": "node", "badge": "Orphan candidate", "facts": [["PID", "4318 · start time verified"], ["Parent", "PID 1"], ["Launch manager", "Not registered"], ["Working directory", "~/projects/atlas-web"]], "consequence": "Terminate asks this process to exit. Force Quit appears only after the grace period."},
+      "selection": "1 process selected · 842 MB",
+      "action": "Review termination"
+    },
+    {
+      "name": "Storage explorer",
+      "kind": "finder",
+      "title": "Storage explorer",
+      "subtitle": "Follow the space from folder to folder.",
+      "included": ["~/projects"],
+      "excluded": ["~/projects/client-archive"],
+      "query": "",
+      "sort": "Size · largest first",
+      "summary": [
+        {"label": "Items in folder", "value": "4", "detail": "~/projects"},
+        {"label": "Logical size", "value": "42.6 GB", "detail": "Completed folder estimates"},
+        {"label": "Largest item", "value": "atlas-web", "detail": "18.4 GB"}
+      ],
+      "rows": [
+        {"title": "atlas-web", "path": "~/projects/atlas-web", "value": "18.4 GB", "badge": "Folder", "tone": "mint"},
+        {"title": "toolkit", "path": "~/projects/toolkit", "value": "12.8 GB", "badge": "Folder", "tone": "lavender"},
+        {"title": "atlas-api", "path": "~/projects/atlas-api", "value": "7.4 GB", "badge": "Folder", "tone": "coral"},
+        {"title": "reports", "path": "~/projects/reports", "value": "4.0 GB", "badge": "Folder", "tone": "amber"}
+      ],
+      "note": "Open a folder to explore its contents. Folder totals can overlap other scanners.",
+      "inspector": {"title": "atlas-web", "badge": "Folder", "facts": [["Path", "~/projects/atlas-web"], ["Logical size", "18.4 GB"], ["Allocated size", "17.2 GB"], ["Next step", "Inspect folder"]], "consequence": "Exploration does not select a folder for cleanup."},
+      "selection": "Explore the selected folder",
+      "action": "Inspect folder"
+    },
+    {
+      "name": "Review selection",
+      "kind": "review",
+      "title": "Move 2 folders to Trash?",
+      "subtitle": "Review the exact paths and what happens next.",
+      "rows": [
+        {"title": "atlas-web · node_modules", "path": "~/projects/atlas-web/node_modules", "value": "12.8 GB", "badge": "Rebuildable", "tone": "mint"},
+        {"title": "atlas-api · node_modules", "path": "~/projects/atlas-api/node_modules", "value": "7.4 GB", "badge": "Rebuildable", "tone": "mint"}
+      ],
+      "consequence": "Your source files and lockfiles stay in place. Dependencies can be installed again. Restore is available while these items remain unchanged in Trash.",
+      "total": "20.2 GB",
+      "action": "Move to Trash"
+    },
+    {
+      "name": "Settings",
+      "kind": "settings",
+      "title": "Make it yours.",
+      "subtitle": "Each finder remembers its own paths and filters.",
+      "sections": [
+        {"title": "Search scope", "rows": [["Node dependencies", "~/projects, ~/private"], ["Exact duplicates", "~/Documents, ~/Downloads"], ["Git worktrees", "~/projects"]]},
+        {"title": "Excluded everywhere", "rows": [["Protected folders", "~/projects/client-archive"], ["System directories", "Always excluded from file discovery"], ["Sensitive files", "Credentials and repository metadata protected"]]},
+        {"title": "Appearance and modules", "rows": [["Appearance", "Follow system"], ["Menu bar", "Orphan process count"], ["Available modules", "13 composable features"]]}
+      ]
+    },
+    {
+      "name": "Activity",
+      "kind": "finder",
+      "title": "Activity",
+      "subtitle": "Every reviewed action has an outcome.",
+      "included": ["Local action history"],
+      "excluded": [],
+      "query": "",
+      "sort": "Newest first",
+      "summary": [
+        {"label": "Actions today", "value": "4", "detail": "Reviewed by you"},
+        {"label": "Moved to Trash", "value": "20.2 GB", "detail": "2 folders"},
+        {"label": "Restore available", "value": "2", "detail": "Unchanged Trash items"}
+      ],
+      "rows": [
+        {"title": "atlas-web · node_modules", "path": "Move to Trash · today at 11:42", "value": "12.8 GB", "badge": "Restore available", "tone": "mint"},
+        {"title": "atlas-api · node_modules", "path": "Move to Trash · today at 11:42", "value": "7.4 GB", "badge": "Restore available", "tone": "mint"},
+        {"title": "node · PID 4318", "path": "Terminate · today at 11:35", "value": "Exited", "badge": "Completed", "tone": "mint"}
+      ],
+      "note": "History is stored on your Mac.",
+      "inspector": {"title": "atlas-web", "badge": "Restore available", "facts": [["Action", "Move to Trash"], ["Outcome", "Completed"], ["Original path", "~/projects/atlas-web/node_modules"], ["Restore check", "Trash identity still matches"]], "consequence": "Restore moves this folder back if its original path is still available."},
+      "selection": "Select an outcome to inspect",
+      "action": "Restore item"
+    }
+  ]
+}

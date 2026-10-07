@@ -1,2 +1,10 @@
+pub mod applications;
+pub mod command;
+pub mod files;
+pub mod git;
 pub mod model;
+pub mod modules;
+pub mod native;
 pub mod policy;
+pub mod process;
+pub mod simulator;

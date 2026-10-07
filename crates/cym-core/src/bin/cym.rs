@@ -1,1 +1,3 @@
-fn main() { println!("CleanYourMac Rust core"); }
+fn main() {
+    println!("CleanYourMac Rust core");
+}

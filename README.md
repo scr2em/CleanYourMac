@@ -12,6 +12,10 @@ A comfy, modular, open-source macOS cleaner for people who build things. Find bu
 
 The [Comfy design system](docs/brand/README.md) includes original branding and shared light/dark tokens. The app and Figma screens are being updated to use it.
 
+![Overview design concept with warm cream surfaces and mint analytics](docs/design-concepts/overview.png)
+
+*Design concept for the upcoming interface; the current prototype has not been restyled yet.* [Design boards and Figma builder](design/figma) · [Migration handoff](docs/HANDOFF.md)
+
 ## Run the app
 
 ~~~sh

@@ -4,7 +4,7 @@ The Swift prototype passed 27 tests on macOS 26.5.1 with Swift 6.3.3 before the 
 
 The packaged Swift app was built for Apple silicon and Intel, ad hoc signed, and inspected in an isolated demo bundle. Demo mode disables cleanup actions.
 
-The Rust migration is in progress. Rust-specific test and package results will be recorded here when its integration is complete. Figma publication currently requires connector reauthentication.
+The Rust migration is in progress. `cargo check --offline` and `cargo build --offline` pass with Rust 1.89.0 after porting the scanners and native adapters. Rust behavioral tests, SwiftUI bridge integration and packaged parity checks remain pending. Figma publication currently requires connector reauthentication.
 
 Run the repeatable checks with:
 
