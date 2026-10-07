@@ -274,11 +274,18 @@ fn reference_order(a: &Finding, b: &Finding, sort: SortKey, ascending: bool) -> 
     }
     let order = match sort {
         SortKey::LastUsed => Ordering::Equal,
+        // Size on disk, falling back to logical size, then memory for processes.
         SortKey::Size => a
-            .bytes
+            .allocated_bytes
+            .or(a.bytes)
             .or(a.memory_bytes)
             .unwrap_or(0)
-            .cmp(&b.bytes.or(b.memory_bytes).unwrap_or(0)),
+            .cmp(
+                &b.allocated_bytes
+                    .or(b.bytes)
+                    .or(b.memory_bytes)
+                    .unwrap_or(0),
+            ),
         SortKey::Cpu => a
             .cpu_percent
             .unwrap_or(0.)
@@ -299,6 +306,8 @@ fn keyed_sorting_matches_the_reference_comparator() {
     for (i, f) in rows.iter_mut().enumerate() {
         // Ties, missing values, processes, negative zero and numbered names.
         f.bytes = (i % 7 != 0).then_some((i % 50) as u64 * 1_000);
+        // Sparse items are smaller on disk; some rows know only their logical size.
+        f.allocated_bytes = (i % 5 != 0).then_some((i % 37) as u64 * 900);
         f.memory_bytes = (i % 7 == 0 && i % 2 == 0).then_some((i % 30) as u64);
         f.cpu_percent = (i % 3 == 0).then_some(if i % 9 == 0 {
             -0.0

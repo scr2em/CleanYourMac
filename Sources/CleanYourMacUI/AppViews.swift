@@ -363,9 +363,9 @@ private struct FinderView: View {
                 if store.selectedModuleID == "storage", !store.largest.isEmpty {
                     Panel {
                         VStack(alignment: .leading, spacing: Space.md) {
-                            Text("Largest items · logical size in this folder").font(TypeStyle.caption).foregroundStyle(.secondary)
+                            Text("Largest items · size on disk in this folder").font(TypeStyle.caption).foregroundStyle(.secondary)
                             ForEach(store.largest) { row in
-                                StorageBar(row.title, value: Display.bytes(row.bytes), fraction: store.summary.diskBytes > 0 ? Double(row.bytes ?? 0) / Double(store.summary.diskBytes) : 0)
+                                StorageBar(row.title, value: Display.bytes(row.diskBytes), fraction: store.summary.diskBytes > 0 ? min(1, Double(row.diskBytes ?? 0) / Double(store.summary.diskBytes)) : 0)
                             }
                         }
                     }
@@ -410,7 +410,7 @@ private struct SearchSummary: View {
                     } else {
                         StatChip("Total size", value: Display.bytes(summary.diskBytes))
                         StatChip("Ready to review", value: Display.bytes(summary.reclaimableBytes), emphasized: summary.reclaimableBytes > 0)
-                        if let largest = store.largest.first, let bytes = largest.bytes, bytes > 0 {
+                        if let largest = store.largest.first, let bytes = largest.diskBytes, bytes > 0 {
                             StatChip("Largest · " + largest.title, value: Display.bytes(bytes))
                         }
                     }
@@ -514,7 +514,7 @@ private struct SelectionFooter: View {
     private var summary: String {
         if store.selection.includesProcesses { return "Process actions do not delete files or reclaim disk space." }
         if store.selectedIDs.isEmpty { return "Select items to review an action." }
-        return Display.bytes(store.selection.bytes) + " logical size · review consequences before applying"
+        return Display.bytes(store.selection.bytes) + " on disk · review consequences before applying"
     }
 }
 
@@ -534,8 +534,11 @@ private struct InspectorView: View {
                     }
                     Text(finding.reason).font(TypeStyle.secondary)
                     if let blocked = finding.blockedReason { Label(blocked, systemImage: "lock").font(TypeStyle.secondary).foregroundStyle(Palette.warning) }
-                    if let bytes = finding.bytes { KeyValueRow("Logical size", Display.bytes(bytes)) }
-                    if let allocated = finding.allocatedBytes { KeyValueRow("Allocated size estimate", Display.bytes(allocated)) }
+                    if let allocated = finding.allocatedBytes { KeyValueRow("Size on disk", Display.bytes(allocated)) }
+                    if let bytes = finding.bytes, bytes != finding.allocatedBytes {
+                        // Sparse files (virtual disks, Docker) and APFS clones can be far larger logically.
+                        KeyValueRow("Logical size", Display.bytes(bytes))
+                    }
                     if let modified = finding.modifiedAt { KeyValueRow("Last modified", modified.formatted()) }
                     if let used = finding.lastUsedAt { KeyValueRow("Last used", used.formatted() + " · " + used.formatted(.relative(presentation: .named))) }
                     if let memory = finding.memoryBytes { KeyValueRow("Memory footprint", Display.bytes(memory)) }

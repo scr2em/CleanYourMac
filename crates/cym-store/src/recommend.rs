@@ -16,7 +16,7 @@ pub struct Recommendation {
     pub risk: Risk,
     /// Rows the fix applies to.
     pub count: usize,
-    /// Logical bytes freed, with folders inside another selected folder counted once.
+    /// Bytes freed on disk, with folders inside another selected folder counted once.
     pub bytes: u64,
     /// The most common ecosystem logo among the rows, for the card's icon.
     pub brand: Option<String>,

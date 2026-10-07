@@ -221,7 +221,9 @@ impl Derived {
     fn of(rows: &[Arc<Finding>], modules: bool) -> Self {
         // Largest first, then by ID, as the "largest items" list shows them.
         let rank = |a: &&Arc<Finding>, b: &&Arc<Finding>| {
-            b.bytes.cmp(&a.bytes).then_with(|| a.id.cmp(&b.id))
+            b.disk_bytes()
+                .cmp(&a.disk_bytes())
+                .then_with(|| a.id.cmp(&b.id))
         };
         struct Pass<'a> {
             eligible: usize,
@@ -251,7 +253,9 @@ impl Derived {
                         }
                     }));
                 }
-                if f.bytes.is_some() && (p.largest.len() < 5 || rank(&f, &p.largest[4]).is_lt()) {
+                if f.disk_bytes().is_some()
+                    && (p.largest.len() < 5 || rank(&f, &p.largest[4]).is_lt())
+                {
                     p.largest.push(f);
                     keep(&mut p.largest);
                 }
@@ -406,7 +410,7 @@ impl ResultStore {
                 ordered
                     .par_iter()
                     .filter(|f| {
-                        (q.min_bytes == 0 || f.bytes.unwrap_or(0) >= q.min_bytes)
+                        (q.min_bytes == 0 || f.disk_bytes().unwrap_or(0) >= q.min_bytes)
                             && q.modified_before
                                 .is_none_or(|t| f.modified_at.is_some_and(|m| m < t))
                             && q.last_used_before.is_none_or(|t| {
@@ -541,7 +545,7 @@ impl ResultStore {
         }
         Selection {
             count: rows.len(),
-            bytes: normalized.iter().filter_map(|f| f.bytes).sum(),
+            bytes: normalized.iter().filter_map(|f| f.disk_bytes()).sum(),
             actions: actions.unwrap_or_default(),
             includes_processes: rows
                 .iter()
@@ -593,7 +597,7 @@ fn sorted(rows: Vec<Arc<Finding>>, sort: SortKey, ascending: bool) -> Vec<Arc<Fi
         .enumerate()
         .map(|(i, f)| {
             let key = match sort {
-                SortKey::Size => u128::from(flip(f.bytes.or(f.memory_bytes).unwrap_or(0))),
+                SortKey::Size => u128::from(flip(f.disk_bytes().or(f.memory_bytes).unwrap_or(0))),
                 SortKey::Cpu => u128::from(flip(float(f.cpu_percent.unwrap_or(0.)))),
                 SortKey::LastUsed => match f.last_used_at {
                     Some(t) => u128::from(flip(float(t))),

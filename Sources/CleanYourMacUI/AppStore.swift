@@ -556,6 +556,6 @@ public enum Display {
             let cpu = row.cpuPercent.map { String(format: "%.1f%% CPU", $0) } ?? "Sampling CPU"
             return cpu + " · " + bytes(row.memoryBytes)
         }
-        return bytes(row.bytes)
+        return bytes(row.diskBytes)
     }
 }

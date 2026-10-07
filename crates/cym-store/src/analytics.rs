@@ -134,11 +134,12 @@ fn fast(rows: &[&Finding], modules: bool) -> Option<Analytics> {
             })
         })
     };
-    let size = |f: &Finding| f.bytes.unwrap_or(0);
+    // Size on disk: what removing the item frees, not its logical length.
+    let size = |f: &Finding| f.disk_bytes().unwrap_or(0);
     #[derive(Clone, Default)]
     struct Sum {
         disk: u64,
-        allocated: u64,
+        logical: u64,
         ready: u64,
         modules: Vec<(u64, u64)>,
     }
@@ -164,9 +165,7 @@ fn fast(rows: &[&Finding], modules: bool) -> Option<Analytics> {
                     |test: &dyn Fn(&Finding) -> bool| ancestors.iter().any(|&h| group(h).any(test));
                 if ancestors.is_empty() {
                     acc.disk = acc.disk.saturating_add(size(first));
-                    acc.allocated = acc
-                        .allocated
-                        .saturating_add(first.allocated_bytes.unwrap_or(size(first)));
+                    acc.logical = acc.logical.saturating_add(first.bytes.unwrap_or(0));
                 }
                 if let Some(f) = group(head).find(|f| actionable(f)) {
                     if ancestors.is_empty() || !covered(&|a| actionable(a)) {
@@ -205,7 +204,7 @@ fn fast(rows: &[&Finding], modules: bool) -> Option<Analytics> {
             },
             |mut a, b| {
                 a.disk = a.disk.saturating_add(b.disk);
-                a.allocated = a.allocated.saturating_add(b.allocated);
+                a.logical = a.logical.saturating_add(b.logical);
                 a.ready = a.ready.saturating_add(b.ready);
                 for (x, y) in a.modules.iter_mut().zip(b.modules) {
                     x.0 = x.0.saturating_add(y.0);
@@ -217,7 +216,8 @@ fn fast(rows: &[&Finding], modules: bool) -> Option<Analytics> {
     Some(Analytics {
         findings: rows.len(),
         disk_bytes: sum.disk,
-        allocated_bytes: sum.allocated,
+        allocated_bytes: sum.disk,
+        logical_bytes: sum.logical,
         reclaimable_bytes: sum.ready,
         blocked: counts.blocked,
         process_count: counts.processes,
@@ -264,13 +264,13 @@ pub fn analytics_reference<'a>(
     #[derive(Clone, Default)]
     struct Sum {
         disk: u64,
-        allocated: u64,
+        logical: u64,
         ready: u64,
         modules: Vec<(u64, u64)>,
     }
     let merge = |mut a: Sum, b: Sum| {
         a.disk = a.disk.saturating_add(b.disk);
-        a.allocated = a.allocated.saturating_add(b.allocated);
+        a.logical = a.logical.saturating_add(b.logical);
         a.ready = a.ready.saturating_add(b.ready);
         if a.modules.len() < b.modules.len() {
             a.modules.resize(b.modules.len(), (0, 0));
@@ -301,12 +301,11 @@ pub fn analytics_reference<'a>(
                 let covered = |test: &dyn Fn(&Finding) -> bool| {
                     ancestors.iter().any(|g| g.iter().any(|f| test(f)))
                 };
-                let size = |f: &Finding| f.bytes.unwrap_or(0);
+                // Size on disk: what removing the item frees, not its logical length.
+                let size = |f: &Finding| f.disk_bytes().unwrap_or(0);
                 if ancestors.is_empty() {
                     acc.disk = acc.disk.saturating_add(size(group[0]));
-                    acc.allocated = acc
-                        .allocated
-                        .saturating_add(group[0].allocated_bytes.unwrap_or(size(group[0])));
+                    acc.logical = acc.logical.saturating_add(group[0].bytes.unwrap_or(0));
                 }
                 if let Some(f) = group.iter().find(|f| actionable(f)) {
                     if !covered(&|a| actionable(a)) {
@@ -349,7 +348,8 @@ pub fn analytics_reference<'a>(
     Analytics {
         findings: rows.len(),
         disk_bytes: sum.disk,
-        allocated_bytes: sum.allocated,
+        allocated_bytes: sum.disk,
+        logical_bytes: sum.logical,
         reclaimable_bytes: sum.ready,
         blocked: rows.iter().filter(|f| f.blocked_reason.is_some()).count(),
         process_count: processes.len(),

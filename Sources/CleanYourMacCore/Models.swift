@@ -227,14 +227,17 @@ public struct ModuleTotal: Codable, Hashable, Sendable {
 /// memory is reported separately.
 public struct Analytics: Codable, Hashable, Sendable {
     public let findings: Int
+    /// Size on disk: what removing the items frees.
     public let diskBytes: UInt64
     public let allocatedBytes: UInt64
+    /// Logical length, which sparse files and clones can make larger than the disk.
+    public let logicalBytes: UInt64
     public let reclaimableBytes: UInt64
     public let blocked: Int
     public let processCount: Int
     public let processMemoryBytes: UInt64
     public let modules: [ModuleTotal]
-    public static let empty = Analytics(findings: 0, diskBytes: 0, allocatedBytes: 0, reclaimableBytes: 0, blocked: 0, processCount: 0, processMemoryBytes: 0, modules: [])
+    public static let empty = Analytics(findings: 0, diskBytes: 0, allocatedBytes: 0, logicalBytes: 0, reclaimableBytes: 0, blocked: 0, processCount: 0, processMemoryBytes: 0, modules: [])
 }
 
 public enum ScanEvent: Sendable {
@@ -248,6 +251,8 @@ public enum ScanEvent: Sendable {
 
 /// A lightweight list row projected from a stored finding.
 public struct ResultRow: Identifiable, Codable, Hashable, Sendable {
+    /// Size on disk, or the logical size when that is all that is known.
+    public var diskBytes: UInt64? { allocatedBytes ?? bytes }
     public let id: String
     public let moduleID: String
     public let title: String

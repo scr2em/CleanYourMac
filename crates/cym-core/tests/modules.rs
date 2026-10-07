@@ -238,3 +238,22 @@ fn overview_scan_leaves_out_explicit_only_modules() {
         .unwrap();
     assert_eq!(duplicates["inOverview"], false);
 }
+
+#[test]
+fn sparse_files_count_by_size_on_disk() {
+    let f = Fixture::new();
+    // A virtual disk image: 1 GB long, almost nothing written.
+    fs::create_dir_all(f.at("vm")).unwrap();
+    fs::File::create(f.at("vm/disk.img"))
+        .unwrap()
+        .set_len(1_000_000_000)
+        .unwrap();
+    let report = scan(&f, "storage");
+    let vm = report.findings.iter().find(|f| f.title == "vm").unwrap();
+    assert_eq!(vm.bytes, Some(1_000_000_000));
+    assert!(vm.allocated_bytes.unwrap() < 1_000_000);
+    let totals = cym_core::analytics::analytics(&report.findings);
+    assert_eq!(totals.logical_bytes, 1_000_000_000);
+    assert!(totals.disk_bytes < 1_000_000, "{}", totals.disk_bytes);
+    assert_eq!(totals.disk_bytes, vm.allocated_bytes.unwrap());
+}

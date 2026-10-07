@@ -120,6 +120,11 @@ pub struct Finding {
     pub brand: Option<String>,
 }
 impl Finding {
+    /// Size on disk (allocated blocks), or the logical size when that is all that is known.
+    /// Sparse files such as virtual disk images can be far larger logically than on disk.
+    pub fn disk_bytes(&self) -> Option<u64> {
+        self.allocated_bytes.or(self.bytes)
+    }
     pub fn new(module: &str, key: &str, title: &str, resource: Resource, reason: &str) -> Self {
         Self {
             id: format!("{module}:{key}"),
@@ -258,8 +263,13 @@ pub struct ModuleTotal {
 #[serde(rename_all = "camelCase")]
 pub struct Analytics {
     pub findings: usize,
+    /// Size on disk: allocated blocks, with hard links and nested items counted once.
     pub disk_bytes: u64,
+    /// The same as `disk_bytes`; kept for older clients.
     pub allocated_bytes: u64,
+    /// The items' logical length, which sparse files and clones can make exceed the disk.
+    #[serde(default)]
+    pub logical_bytes: u64,
     pub reclaimable_bytes: u64,
     pub blocked: usize,
     pub process_count: usize,
