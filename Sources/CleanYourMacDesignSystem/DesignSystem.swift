@@ -10,7 +10,7 @@ public enum Layout {
     public static let reviewWidth: CGFloat = 640, reviewHeight: CGFloat = 540, rowMinimum: CGFloat = 52, panelRadius: CGFloat = 16, controlRadius: CGFloat = 10, smallRadius: CGFloat = 5
     public static let iconSmall: CGFloat = 12, iconMedium: CGFloat = 16, iconLarge: CGFloat = 32, rowIcon: CGFloat = 24, checkbox: CGFloat = 18
     public static let sidebarRow: CGFloat = 36, controlHeight: CGFloat = 40
-    public static let scanOrb: CGFloat = 200, scanOrbCompact: CGFloat = 64
+    public static let scanOrb: CGFloat = 200, scanOrbCompact: CGFloat = 64, diskBar: CGFloat = 24
 }
 /// System font (SF Pro) on a compact macOS scale.
 public enum TypeStyle {
@@ -407,6 +407,67 @@ public struct StorageBar: View {
     }
 }
 
+/// A disk's capacity split into labelled segments, like Disk Utility's bar, with a legend.
+public struct DiskBar: View {
+    public enum Style: Sendable { case ready, found, used, purgeable, free }
+    public struct Segment: Identifiable, Equatable, Sendable {
+        public let id: String
+        public let label: String
+        public let bytes: UInt64
+        public let style: Style
+        public init(_ label: String, bytes: UInt64, style: Style) { id = label; self.label = label; self.bytes = bytes; self.style = style }
+    }
+    private let segments: [Segment]
+    private let format: (UInt64) -> String
+    public init(_ segments: [Segment], format: @escaping (UInt64) -> String) { self.segments = segments; self.format = format }
+
+    private var total: Double { Double(segments.reduce(0) { $0 + $1.bytes }) }
+    private var shown: [Segment] { segments.filter { $0.bytes > 0 || $0.style == .free } }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: Space.md) {
+            GeometryReader { geometry in
+                HStack(spacing: 0) {
+                    ForEach(shown) { segment in
+                        Rectangle()
+                            .fill(fill(segment.style))
+                            .frame(width: total > 0 ? geometry.size.width * Double(segment.bytes) / total : 0)
+                    }
+                }
+            }
+            .frame(height: Layout.diskBar)
+            .background(Palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: Layout.smallRadius))
+            .overlay(RoundedRectangle(cornerRadius: Layout.smallRadius).strokeBorder(Palette.borderStrong, lineWidth: Stroke.hairline))
+            HStack(alignment: .top, spacing: Space.lg) {
+                ForEach(shown) { segment in
+                    HStack(alignment: .firstTextBaseline, spacing: Space.sm) {
+                        RoundedRectangle(cornerRadius: Layout.smallRadius / 2)
+                            .fill(fill(segment.style))
+                            .overlay(RoundedRectangle(cornerRadius: Layout.smallRadius / 2).strokeBorder(Palette.borderStrong, lineWidth: segment.style == .free ? Stroke.hairline : 0))
+                            .frame(width: Layout.iconSmall, height: Layout.iconSmall)
+                        VStack(alignment: .leading, spacing: Space.xxs) {
+                            Text(segment.label).font(TypeStyle.sectionTitle)
+                            Text(format(segment.bytes)).font(TypeStyle.secondary).foregroundStyle(.secondary).monospacedDigit()
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
+    }
+    private func fill(_ style: Style) -> Color {
+        switch style {
+        case .ready: Palette.accent
+        case .found: Palette.accentSymbol.opacity(0.55)
+        case .used: Palette.borderStrong
+        case .purgeable: Palette.track
+        case .free: Palette.surface
+        }
+    }
+}
+
 public struct ComponentGallery: View {
     @State private var checked = false
     public init() {}
@@ -414,6 +475,15 @@ public struct ComponentGallery: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xl) {
                 PageHeader("Component Gallery", subtitle: "The shared vocabulary used by every module. Fixture data only.")
+                Panel {
+                    DiskBar([
+                        .init("Ready to free", bytes: 42_000_000_000, style: .ready),
+                        .init("Other found", bytes: 61_000_000_000, style: .found),
+                        .init("Purgeable", bytes: 12_000_000_000, style: .purgeable),
+                        .init("Other used", bytes: 620_000_000_000, style: .used),
+                        .init("Free", bytes: 260_000_000_000, style: .free),
+                    ]) { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) }
+                }
                 HStack(spacing: Space.xl) {
                     ScanOrb("Scan", subtitle: "Whole Mac", phase: .idle) {}
                     ScanOrb("Scan", phase: .scanning(progress: 0.42)) {}

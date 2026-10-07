@@ -1,5 +1,6 @@
 import CleanYourMacCore
 import CleanYourMacUI
+import CleanYourMacDesignSystem
 import Foundation
 import Testing
 
@@ -157,4 +158,15 @@ import Testing
     for _ in 0..<200 where store.review == nil { try await Task.sleep(for: .milliseconds(10)) }
     #expect(store.review?.kind == .trash)
     #expect(store.scanPlace == .wholeMac)
+}
+
+@Test func diskBreakdownSplitsUsedSpaceWithoutOvercounting() throws {
+    let disk = DiskSpace(total: 1_000, available: 200, availableForImportantUsage: 250)
+    #expect(disk.used == 800 && disk.purgeable == 50)
+    let parts = disk.breakdown(found: 300, ready: 120)
+    #expect(parts.map(\.bytes) == [120, 180, 50, 450, 200])
+    #expect(parts.dropLast().reduce(0) { $0 + $1.bytes } == disk.used)
+    // Findings larger than the disk (overlapping volumes, stale totals) are capped by what is used.
+    let capped = disk.breakdown(found: 5_000, ready: 900)
+    #expect(capped.map(\.bytes) == [800, 0, 0, 0, 200])
 }

@@ -26,6 +26,46 @@ public enum AgeFilter: String, CaseIterable {
     var cutoff: Date? { days.map { Date().addingTimeInterval(-$0 * 86_400) } }
 }
 
+/// Capacity of the volume holding the home folder, as Finder reports it.
+public struct DiskSpace: Equatable, Sendable {
+    public let total: UInt64
+    /// Free space right now.
+    public let available: UInt64
+    /// Free space including what macOS can purge on demand (caches, local snapshots).
+    public let availableForImportantUsage: UInt64
+    public init(total: UInt64, available: UInt64, availableForImportantUsage: UInt64) {
+        self.total = total; self.available = available; self.availableForImportantUsage = availableForImportantUsage
+    }
+    public var used: UInt64 { total - min(total, available) }
+    public var purgeable: UInt64 { availableForImportantUsage > available ? min(used, availableForImportantUsage - available) : 0 }
+
+    public static func current(at path: String = NSHomeDirectory()) -> DiskSpace? {
+        let keys: Set<URLResourceKey> = [.volumeTotalCapacityKey, .volumeAvailableCapacityKey, .volumeAvailableCapacityForImportantUsageKey]
+        guard let values = try? URL(fileURLWithPath: path).resourceValues(forKeys: keys),
+              let total = values.volumeTotalCapacity, let available = values.volumeAvailableCapacity else { return nil }
+        let important = values.volumeAvailableCapacityForImportantUsage.map { UInt64(max(0, $0)) } ?? UInt64(available)
+        return DiskSpace(total: UInt64(total), available: UInt64(available), availableForImportantUsage: important)
+    }
+
+    /// The disk split into what the last scan can free, the rest it found, purgeable space,
+    /// everything else in use, and free space. Segments never exceed what is used.
+    public func breakdown(found: UInt64, ready: UInt64) -> [DiskBar.Segment] {
+        let readyBytes = min(ready, used)
+        let foundBytes = min(found, used)
+        // "Found" includes what is ready to free; show the rest of it separately.
+        let otherFound = foundBytes - min(readyBytes, foundBytes)
+        let purgeableBytes = min(purgeable, used - readyBytes - otherFound)
+        let otherUsed = used - readyBytes - otherFound - purgeableBytes
+        return [
+            .init("Ready to free", bytes: readyBytes, style: .ready),
+            .init("Other found", bytes: otherFound, style: .found),
+            .init("Purgeable", bytes: purgeableBytes, style: .purgeable),
+            .init("Other used", bytes: otherUsed, style: .used),
+            .init("Free", bytes: available, style: .free),
+        ]
+    }
+}
+
 /// App state. Findings live in the core's result store; this store keeps only the current
 /// query's totals and a bounded cache of row pages, so result sets of millions stay smooth.
 @MainActor @Observable
@@ -58,6 +98,8 @@ public final class AppStore {
     public private(set) var lastScanAt: Date?
     /// One-click fixes for the current results, largest first.
     public private(set) var recommendations: [Recommendation] = []
+    /// The home volume's capacity, refreshed with the overview.
+    public private(set) var diskSpace = DiskSpace.current()
     public var roots: [String]
     public var exclusions: [String]
     public var ignoredNames: [String]
@@ -184,6 +226,7 @@ public final class AppStore {
     public func refreshOverview() async {
         if let info = try? await core.query(ResultQuery(module: nil)) { overview = info.summary }
         recommendations = await core.recommendations()
+        diskSpace = DiskSpace.current()
     }
     /// Bytes the recommended Move to Trash fixes free together.
     public var recommendedBytes: UInt64 { recommendations.filter { $0.action == .trash }.reduce(0) { $0 + $1.bytes } }

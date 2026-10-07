@@ -87,6 +87,7 @@ private struct OverviewView: View {
                 } else {
                     PageHeader("Your Mac, with room to work", subtitle: "Review the recommended fixes. Nothing is removed until you review it.")
                     ScanSummary(store: store, orb: orb)
+                    DiskSpaceView(store: store)
                     WarningView(store: store)
                     RecommendationsView(store: store)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -152,6 +153,7 @@ private struct ScanHero: View {
             } else {
                 ScanPlacePicker(store: store)
                 Text(placeDescription(store)).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                DiskSpaceView(store: store).padding(.top, Space.lg)
             }
             WarningView(store: store)
         }
@@ -189,6 +191,25 @@ private struct ScanSummary: View {
     private var lastScanned: String {
         guard let date = store.lastScanAt else { return "Not scanned yet" }
         return "Last scanned " + RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
+    }
+}
+
+/// The home volume's capacity, with what the scan found and can free drawn into it.
+private struct DiskSpaceView: View {
+    @Bindable var store: AppStore
+    var body: some View {
+        if let disk = store.diskSpace {
+            Panel {
+                VStack(alignment: .leading, spacing: Space.md) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Your disk").font(TypeStyle.sectionTitle)
+                        Spacer()
+                        Text("\(Display.bytes(disk.used)) of \(Display.bytes(disk.total)) used").font(TypeStyle.caption).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    DiskBar(disk.breakdown(found: store.overview.diskBytes, ready: store.recommendedBytes)) { Display.bytes($0) }
+                }
+            }
+        }
     }
 }
 
