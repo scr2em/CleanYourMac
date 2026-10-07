@@ -2,107 +2,87 @@
 
 <h1 align="center">CleanYourMac</h1>
 
-<p align="center">A little more room. A calmer Mac.</p>
+<p align="center"><strong>A little more room. A calmer Mac.</strong></p>
 
-<p align="center"><a href="LICENSE">MIT</a> · macOS 14+ · Rust core + SwiftUI · Independently built</p>
+<p align="center">Free & open source · Private by default · Made for macOS</p>
 
-A comfy, modular, open-source macOS cleaner for people who build things. Find bulky dependencies, forgotten worktrees, simulator data, duplicate files, and processes left behind by their parents. Inspect exact items, then review each cleanup action.
+Your Mac collects things you no longer need: oversized downloads, old project dependencies, forgotten worktrees, and simulator data. CleanYourMac helps you find them, understand what they are, and choose what goes.
 
-**Development preview:** scanning, safety policy, actions, history and analytics run in a Rust core (`crates/cym-core`) behind replaceable interfaces. A thin SwiftUI app talks to it over a versioned C ABI. A trusted, notarized binary release is not available yet. See [the architecture](docs/ARCHITECTURE.md).
+**You’re in control.** Nothing is selected automatically. Inspect an item, select it, and review the consequences before cleaning up. Your scans and files stay on your Mac.
 
-The [Comfy design system](docs/brand/README.md) has original branding and shared light and dark tokens. The default Paper & Walnut palette sets a #FCFCFB paper canvas against a warm brown ramp. Honey & Espresso, Ember, Terracotta & Navy, Cream & Mauve and Linen & Rose are available in Settings. The app and the [Figma library](docs/FIGMA.md) both use it.
+![CleanYourMac overview with storage totals and cleanup tools](docs/screenshots/overview.jpg)
 
-![Overview design concept with warm cream surfaces and mint analytics](docs/design-concepts/overview.png)
+*Real app screenshots using fictional demo data. Cleanup actions are disabled in the demo.*
 
-*Design concept for the upcoming interface; the current prototype has not been restyled yet.* [Design boards and Figma builder](design/figma) · [Migration handoff](docs/HANDOFF.md)
+## Make room for what’s next
 
-## Run the app
-
-Requires Xcode (Swift 6) and a Rust toolchain (`rustup target add aarch64-apple-darwin x86_64-apple-darwin` for universal builds).
-
-~~~sh
-bash scripts/build-app.sh
-open build/CleanYourMac.app
-~~~
-
-For a universal Apple silicon / Intel bundle:
-
-~~~sh
-bash scripts/build-app.sh --universal
-~~~
-
-The local bundle is ad hoc signed. Developer ID signing and notarization are required for a trusted downloadable release.
-
-To explore synthetic data with cleanup disabled:
-
-~~~sh
-open -n build/CleanYourMac.app --args --demo
-~~~
-
-Choose root folders, open a tool, and scan. Findings start unselected. Clicking a row opens its inspector; its checkbox selects it for review. Every removal uses a review sheet with the selected resources and consequences.
-
-## Included tools
-
-| Tool | Behavior |
+| Find the clutter | Decide what to keep |
 | --- | --- |
-| Storage Explorer | Folder sizes, storage bars, folder navigation, Finder reveal |
-| Large Files | Files at least 100 MB, size and modification-date filters |
-| Exact Duplicates | SHA-256 verification, one preserved original, fresh verification before removal; skips system, build, and dependency folders across languages |
-| Node Dependencies | Project-owned node_modules, package-manager evidence, nested dependency grouping, symlink-safe sizing |
-| Build Artifacts | JavaScript, SwiftPM, Cargo, Python and Gradle rules with project evidence |
-| Git Worktrees | Registered worktrees, orphaned-registration badges, branches, locks, changes, ignored files and upstream state; eligible linked-tree removal through Git |
-| Simulators | Device app-data sizes, state and runtimes; reviewed reset/delete of a specific shutdown device |
-| Xcode Data | DerivedData and device support; release archives remain inspectable and protected |
-| Caches & Logs | Known package caches and user logs, with rebuild/offline-use consequences |
-| Applications | Nested installed apps and separately selected, precisely named related data |
-| App Leftovers | Possible leftovers in caches, preferences and saved state; uncertain ownership is explicit |
-| Downloads | Manually reviewed downloaded files and installers |
-| Trash | Permanently remove specifically selected local Trash items |
-| Orphan Processes | Current-user suspected orphan processes, CPU/memory, reviewed SIGTERM and separately reviewed Force Quit |
+| **Big files & downloads** | Sort by size, search by name or path, and narrow results by size or age. |
+| **Exact duplicates** | Find verified identical files while keeping an original. System, build, and dependency folders are skipped. |
+| **Project dependencies & build outputs** | See which projects hold bulky node_modules and generated files. Node searches stop at each dependency folder. |
+| **Git worktrees** | Inspect branches, local changes, locks, and sizes. Badges highlight orphaned registrations. |
+| **Simulators & Xcode data** | Review simulator app data, DerivedData, and device support. Xcode archives stay protected. |
+| **Toolchains, SDKs & caches** | Find installed language versions, SDK components, virtual devices, package caches, and logs. |
+| **Apps & possible leftovers** | Review applications and their related files separately, with uncertain ownership clearly marked. |
+| **Orphan processes** | Inspect suspected abandoned processes, their CPU use and memory, before choosing to quit them. |
 
-Settings include roots, protected paths, ignored process names, module toggles, and an optional menu-bar monitor. Activity records local per-item outcomes and offers restore for unchanged items still in Trash.
+Choose folders to search and exclude paths you want to protect. Each tool keeps its own results, and the totals below the search box follow your current filters. The overview brings your findings together without counting overlapping storage twice.
 
-Protection, Cloud Cleanup, Email Cleanup, and CleanMyMac/MacPaw Performance features are excluded. This project does not use MacPaw code, CLI tools, binaries, artwork or services. Orphan-process inspection adapts the owner's MIT-licensed OrphanBar project; see [notices](THIRD_PARTY_NOTICES.md).
+## Install with Homebrew
 
-Docker/VM integrations, AI models, similar-image detection, app updates, backup management, and runtime removal are future integrations.
+Requires macOS 14 or newer. The preview supports Apple silicon and Intel Macs.
 
-## Read-only CLI
+```sh
+brew tap scr2em/cleanyourmac https://github.com/scr2em/CleanYourMac
+brew install --cask scr2em/cleanyourmac/cleanyourmac
+```
 
-~~~sh
-cargo build --release --bin cym
-./target/release/cym modules
-./target/release/cym scan node ~/Projects --json
-./target/release/cym scan worktrees ~/Projects
-./target/release/cym scan simulators --json
-~~~
+Open **CleanYourMac** from Applications. To update later:
 
-CLI scans never apply cleanup actions. JSON omits process commands and abbreviates the home directory. Exit codes: 0 complete, 1 failed, 2 invalid invocation, 3 partial coverage.
+```sh
+brew update
+brew upgrade --cask scr2em/cleanyourmac/cleanyourmac
+```
 
-## Development
+Prefer a direct download? Get the app from [GitHub Releases](https://github.com/scr2em/CleanYourMac/releases/tag/v0.1.0-preview.1), unzip it, and move it to Applications.
 
-~~~sh
-cargo fmt --all --check && cargo clippy --all-targets -- -D warnings
-cargo test
-python3 scripts/lint-design.py
-bash scripts/swift.sh test
-~~~
+**Early preview:** the app is still evolving and isn’t Apple notarized yet. macOS may require approval on the first launch.
 
-`scripts/swift.sh` builds the Rust static library (`scripts/build-core.sh`) and then runs SwiftPM, keeping compiler and package caches inside the workspace. To work in Xcode, run `bash scripts/build-core.sh` once and then open Package.swift.
+## Find it. Understand it. Review it.
 
-Optional live tests use only generated disposable resources and require an installed iOS simulator runtime:
+1. **Choose a tool and scan.** Pick your folders and exclusions, then look for the kind of clutter you want to review.
+2. **Explore the results.** Search by name or path, sort by size, and open an item to see its details.
+3. **Review before cleanup.** Select exact items and check what the action will do. Permanent actions are identified explicitly.
 
-~~~sh
-bash scripts/test-native.sh
-~~~
+Moving files to Trash leaves a recovery option; space is freed when Trash is emptied. Activity keeps a local record of cleanup outcomes and can restore unchanged items still in Trash.
 
-For UI review in a separate preview bundle with isolated preferences:
+### Search that keeps up with you
 
-~~~sh
-bash scripts/preview-app.sh --dark
-~~~
+Dependency search, matching totals, size sorting, and project details in one place.
 
-The Rust core reaches the platform only through traits: filesystem, directory walker, sizer, hasher, command runner, process inspector, app inventory, Trash and journal. Any implementation can be swapped, for example for a library-backed walker, without touching scanners or safety rules. Features are registered modules, not feature-specific code in views. The SwiftUI shell keeps native folder pickers, Finder integration and presentation.
+![Node dependency name search with aggregate totals and item details](docs/screenshots/node-dependencies.jpg)
 
-See [module authoring](docs/MODULES.md), [the design system](docs/DESIGN_SYSTEM.md), [the original product plan](docs/PLAN.md), and [verification](docs/VERIFICATION.md).
+### Know what’s inside a simulator
 
-Scans stay local. Size and allocated-space values are estimates, and moving to Trash does not free disk space until Trash is emptied. Protected paths, stale identities, partial folder coverage, active tools and changed process instances can block an action. Filesystem checks reduce accidental removal; they do not provide atomic isolation from another program changing a path during an operation.
+See the device, runtime, state, and app-data size before reviewing a reset or removal.
+
+![Simulator app-data results and device details](docs/screenshots/simulators.jpg)
+
+### Spot processes left behind
+
+CPU, memory, process identity, and working folder help you make an informed choice.
+
+![Orphan-process results with CPU and memory totals](docs/screenshots/orphan-processes.jpg)
+
+## A workspace that feels comfortable
+
+Paper & Walnut is the default palette: light paper surfaces and warm brown accents. Prefer another mood? Choose Honey & Espresso, Ember, Terracotta & Navy, Cream & Mauve, or Linen & Rose in Settings. Light and dark appearances share the same design system.
+
+## Free, independent, and open
+
+CleanYourMac is [MIT licensed](LICENSE). No subscription is required. It is independently built and uses no MacPaw software or services. Orphan-process inspection draws on the owner’s MIT-licensed OrphanBar project; see [acknowledgments](THIRD_PARTY_NOTICES.md).
+
+Have an idea or found something that needs fixing? [Open an issue](https://github.com/scr2em/CleanYourMac/issues).
+
+Want to contribute? Start with the [development guide](docs/DEVELOPMENT.md), [architecture](docs/ARCHITECTURE.md), and [module guide](docs/MODULES.md).

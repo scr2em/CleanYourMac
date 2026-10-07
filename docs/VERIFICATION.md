@@ -1,5 +1,19 @@
 # Verification
 
+## macOS preview verification — October 8, 2026
+
+Verified locally after the SVG resource update:
+
+- Rust formatting, Clippy with warnings denied, and the full Rust test suite pass.
+- The design-token lint and full Swift test suite pass (native mutation tests remain opt-in).
+- The packaged app builds for both arm64 and x86_64, contains its brand-icon resources, and passes strict ad hoc signature verification.
+- The universal app opens on Apple silicon. Intel and older macOS systems were cross-built, not run locally.
+- Four screenshots were captured from the actual app in its isolated, non-destructive demo mode. All displayed paths and processes are fictional.
+
+Build checks fix the Swift module-count expectation, the SVG raw-string delimiter, and machine-dependent random exclusion coverage. Demo inspection waits for the result store to finish loading, and the simulator fixture includes its data path so aggregate totals match normal scan results.
+
+The Homebrew cask pins the universal preview archive by SHA-256. This preview is not Developer ID signed or notarized.
+
 ## Current: Rust core with a SwiftUI client
 
 GitHub Actions on `macos-latest` passes every step for the migration commits on `main`:
