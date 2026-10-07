@@ -489,6 +489,19 @@ impl ResultStore {
         }
         rows
     }
+    /// One-click fixes for the current results; `now` is Unix seconds.
+    pub fn recommendations(&self, now: f64) -> Vec<crate::recommend::Recommendation> {
+        let Ok(buckets) = self.buckets.read() else {
+            return vec![];
+        };
+        let module_rows = |module: &str| {
+            buckets
+                .get(module)
+                .map(|b| b.rows.iter().map(|f| f.as_ref()).collect())
+                .unwrap_or_default()
+        };
+        crate::recommend::recommendations(&module_rows, crate::recommend::RULES, now, 1_000_000)
+    }
     pub fn snapshot(&self, id: u64) -> Option<Arc<Snapshot>> {
         self.snapshots
             .lock()

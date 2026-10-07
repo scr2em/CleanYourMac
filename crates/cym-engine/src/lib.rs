@@ -4,7 +4,7 @@ pub use cym_model::{brand, model, policy};
 pub use cym_modules::{git, modules, orphans, simulator};
 pub use cym_ports::ports;
 pub use cym_services::services;
-pub use cym_store::{analytics, results};
+pub use cym_store::{analytics, recommend, results};
 pub mod actions;
 pub mod engine;
 pub use engine::Engine;

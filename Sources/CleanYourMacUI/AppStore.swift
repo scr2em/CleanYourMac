@@ -43,6 +43,18 @@ public final class AppStore {
             }
         }
     }
+    /// Where a scan looks: the whole Mac (your home folder) or the folders you chose.
+    public enum ScanPlace: String, CaseIterable, Sendable {
+        case wholeMac = "Whole Mac", folders = "Chosen folders"
+    }
+    public var scanPlace: ScanPlace = .wholeMac { didSet { if scanPlace != oldValue { storageNavigation = []; persist() } } }
+    /// The folders a scan starts from. "Whole Mac" means your home folder: system locations
+    /// are never scanned, and other volumes are left alone.
+    public var scanRoots: [String] { scanPlace == .wholeMac && !demo ? [NSHomeDirectory()] : roots }
+    /// When the last full scan from the overview finished.
+    public private(set) var lastScanAt: Date?
+    /// One-click fixes for the current results, largest first.
+    public private(set) var recommendations: [Recommendation] = []
     public var roots: [String]
     public var exclusions: [String]
     public var ignoredNames: [String]
@@ -113,11 +125,13 @@ public final class AppStore {
         disabledModules = defaults.stringArray(forKey: "disabledModules") ?? []
         menuBarEnabled = !demo && defaults.bool(forKey: "menuBarEnabled")
         theme = defaults.string(forKey: "theme").flatMap(ComfyTheme.init(rawValue:)) ?? .walnut
+        scanPlace = defaults.string(forKey: "scanPlace").flatMap(ScanPlace.init(rawValue:)) ?? .wholeMac
+        lastScanAt = defaults.object(forKey: "lastScanAt") as? Date
         ComfyTheme.current = theme
         configureMonitor()
         if demo { roots = ["/Users/demo/Projects"]; exclusions = []; disabledModules = []; loadDemo(rows: demoRows) }
     }
-    public var context: ScanContext { ScanContext(roots: selectedModuleID == "storage" && !storageNavigation.isEmpty ? [storageNavigation.last!] : roots, exclusions: exclusions, ignoredProcessNames: ignoredNames) }
+    public var context: ScanContext { ScanContext(roots: selectedModuleID == "storage" && !storageNavigation.isEmpty ? [storageNavigation.last!] : scanRoots, exclusions: exclusions, ignoredProcessNames: ignoredNames) }
     public var enabledModules: [ModuleDescriptor] { modules.filter { !disabledModules.contains($0.id) } }
     public var currentModule: ModuleDescriptor? { modules.first { $0.id == selectedModuleID } }
     public func count(for module: String) -> Int { overview.modules.first { $0.moduleId == module }?.count ?? 0 }
@@ -151,6 +165,21 @@ public final class AppStore {
     }
     public func refreshOverview() async {
         if let info = try? await core.query(ResultQuery(module: nil)) { overview = info.summary }
+        recommendations = await core.recommendations()
+    }
+    /// Bytes the recommended Move to Trash fixes free together.
+    public var recommendedBytes: UInt64 { recommendations.filter { $0.action == .trash }.reduce(0) { $0 + $1.bytes } }
+    /// Opens the review for one recommended fix, with its items selected.
+    public func review(_ fix: Recommendation) {
+        guard !isApplying, !isScanning else { return }
+        selectedIDs = Set(fix.ids)
+        reviewSelection(fix.action)
+    }
+    /// Opens one review for every recommended Move to Trash fix.
+    public func reviewAllRecommendations() {
+        guard !isApplying, !isScanning else { return }
+        selectedIDs = Set(recommendations.filter { $0.action == .trash }.flatMap(\.ids))
+        if !selectedIDs.isEmpty { reviewSelection(.trash) }
     }
     /// The row at `index` if its page is cached. Call `prefetch` to load it.
     public func row(at index: Int) -> CleanYourMacCore.ResultRow? {
@@ -291,6 +320,7 @@ public final class AppStore {
         defaults.set(roots, forKey: "scanRoots"); defaults.set(exclusions, forKey: "excludedPaths")
         defaults.set(ignoredNames, forKey: "ignoredProcessNames"); defaults.set(disabledModules, forKey: "disabledModules")
         defaults.set(menuBarEnabled, forKey: "menuBarEnabled"); defaults.set(theme.rawValue, forKey: "theme")
+        defaults.set(scanPlace.rawValue, forKey: "scanPlace"); defaults.set(lastScanAt, forKey: "lastScanAt")
     }
     public func addRoot() {
         let panel = NSOpenPanel()
@@ -328,7 +358,10 @@ public final class AppStore {
                     case .finding, .moduleFinished: break
                     }
                 }
-                if self.scanID == id { self.finishScanStatus(self.scanHadWarnings ? "Partial scan · review warnings" : "Scan complete") }
+                if self.scanID == id {
+                    if selected == "overview" { self.lastScanAt = Date(); self.persist() }
+                    self.finishScanStatus(self.scanHadWarnings ? "Partial scan · review warnings" : "Scan complete")
+                }
             } catch {
                 if self.scanID == id { self.finishScanStatus(error is CancellationError ? "Scan cancelled · partial results" : "Scan failed"); if !(error is CancellationError) { self.error = error.localizedDescription } }
             }
@@ -345,7 +378,7 @@ public final class AppStore {
     }
     public func cancelScan() { scanTask?.cancel(); scanID = nil; finishScanStatus("Scan cancelled · partial results") }
     public func browse(_ path: String) {
-        guard !demo, roots.contains(where: { core.contains(path, in: $0) }), !exclusions.contains(where: { core.contains(path, in: $0) }) else { return }
+        guard !demo, scanRoots.contains(where: { core.contains(path, in: $0) }), !exclusions.contains(where: { core.contains(path, in: $0) }) else { return }
         storageNavigation.append(path); scan()
     }
     public func browseBack() {

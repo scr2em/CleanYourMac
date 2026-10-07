@@ -141,3 +141,20 @@ import Testing
     #expect(finding.id == "demo-node")
     #expect(finding.value("Package manager") == "pnpm")
 }
+
+@MainActor @Test func overviewOffersRecommendedFixesThatOpenAReview() async throws {
+    let defaults = try #require(UserDefaults(suiteName: "org.cleanyourmac.test." + UUID().uuidString))
+    let store = AppStore(demo: true, demoRows: 5_000, defaults: defaults, core: CoreEngine())
+    store.selectedModuleID = "overview"
+    await store.requery()
+    await store.refreshOverview()
+    // Synthetic duplicates are eligible copies, so the duplicate fix is offered.
+    let fix = try #require(store.recommendations.first { $0.id == "duplicate-copies" })
+    #expect(fix.count == fix.ids.count && fix.bytes > 0)
+    #expect(store.recommendedBytes >= fix.bytes)
+    store.review(fix)
+    #expect(store.selectedIDs == Set(fix.ids))
+    for _ in 0..<200 where store.review == nil { try await Task.sleep(for: .milliseconds(10)) }
+    #expect(store.review?.kind == .trash)
+    #expect(store.scanPlace == .wholeMac)
+}

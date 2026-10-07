@@ -435,3 +435,103 @@ fn fast_analytics_matches_the_reference_totals() {
         assert!(fast.disk_bytes > 0 && fast.reclaimable_bytes > 0 && fast.process_count > 0);
     }
 }
+
+#[test]
+fn recommendations_offer_conservative_one_click_fixes() {
+    let now = 2_000_000_000.0;
+    let day = 86_400.0;
+    let row = |module: &str, key: &str, bytes: u64, risk: Risk, last_used: Option<f64>| {
+        let mut f = Finding::new(
+            module,
+            key,
+            key,
+            Resource::File {
+                file: FileIdentity {
+                    path: key.into(),
+                    device: 1,
+                    inode: 1,
+                    modified_seconds: 0,
+                    modified_nanos: 0,
+                    tree_signature: None,
+                },
+            },
+            "test",
+        );
+        f.bytes = Some(bytes);
+        f.risk = risk;
+        f.actions = vec![if module == "trash" {
+            ActionKind::EmptyTrash
+        } else {
+            ActionKind::Trash
+        }];
+        f.last_used_at = last_used;
+        f.modified_at = Some(now);
+        f.brand = (module == "node").then(|| "pnpm".into());
+        f
+    };
+    let mut blocked = row(
+        "node",
+        "/p/blocked/node_modules",
+        9_000_000_000,
+        Risk::Rebuild,
+        None,
+    );
+    blocked.blocked_reason = Some("No owner".into());
+    // No last-use date: the modification time decides.
+    let mut never = row(
+        "node",
+        "/p/never/node_modules",
+        1_000_000_000,
+        Risk::Rebuild,
+        None,
+    );
+    never.modified_at = Some(now - 200.0 * day);
+    let rows = vec![
+        row(
+            "node",
+            "/p/old/node_modules",
+            3_000_000_000,
+            Risk::Rebuild,
+            Some(now - 90.0 * day),
+        ),
+        never,
+        // Used last week: not recommended.
+        row(
+            "node",
+            "/p/active/node_modules",
+            5_000_000_000,
+            Risk::Rebuild,
+            Some(now - 7.0 * day),
+        ),
+        blocked,
+        row("caches", "/c/pip", 2_000_000_000, Risk::Rebuild, None),
+        // A cache that needs review is not a quick fix.
+        row("caches", "/c/models", 8_000_000_000, Risk::Review, None),
+        row("caches", "/c/tiny", 10, Risk::Rebuild, None),
+        // Nested inside /c/pip: counted once.
+        row("caches", "/c/pip/http", 500_000_000, Risk::Rebuild, None),
+        row("large", "/v/movie.mov", 7_000_000_000, Risk::Review, None),
+        row("trash", "/t/old.zip", 100, Risk::Permanent, None),
+    ];
+    let store = ResultStore::default();
+    store.insert(rows);
+    let fixes = store.recommendations(now);
+    let summary: Vec<(&str, usize, u64)> = fixes
+        .iter()
+        .map(|r| (r.id.as_str(), r.count, r.bytes))
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            ("idle-dependencies", 2, 4_000_000_000),
+            ("rebuildable-caches", 3, 2_000_000_010),
+            ("empty-trash", 1, 100),
+        ]
+    );
+    let deps = &fixes[0];
+    assert_eq!(deps.brand.as_deref(), Some("pnpm"));
+    assert_eq!(deps.action, ActionKind::Trash);
+    assert!(deps.ids.contains(&"node:/p/old/node_modules".to_owned()));
+    assert_eq!(fixes[2].action, ActionKind::EmptyTrash);
+    assert_eq!(fixes[2].risk, Risk::Permanent);
+}

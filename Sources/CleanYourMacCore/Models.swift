@@ -92,6 +92,26 @@ extension Resource: Codable {
 
 public enum Risk: String, Codable, Sendable { case review = "Review", rebuild = "Rebuild required", permanent = "Permanent" }
 
+/// A one-click fix the core recommends from the current results.
+public struct Recommendation: Codable, Identifiable, Hashable, Sendable {
+    public let id: String
+    public let moduleID: String
+    public let title: String
+    public let detail: String
+    public let action: ActionKind
+    public let risk: Risk
+    /// Rows the fix applies to.
+    public let count: Int
+    /// Bytes freed, with nested folders counted once.
+    public let bytes: UInt64
+    /// The most common ecosystem logo among the rows.
+    public let brand: String?
+    public let ids: [String]
+    private enum CodingKeys: String, CodingKey {
+        case id, moduleID = "moduleId", title, detail, action, risk, count, bytes, brand, ids
+    }
+}
+
 public enum ActionKind: String, Codable, CaseIterable, Sendable {
     case trash, removeWorktree, resetSimulator, deleteSimulator, terminate, forceQuit, emptyTrash
     public var label: String {

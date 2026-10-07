@@ -77,46 +77,146 @@ private struct OverviewView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xl) {
-                PageHeader("Your Mac, with room to work", subtitle: "Inspect storage and developer clutter. Every removal starts with your selection.")
-                HStack {
-                    MetricTile("Scan results", value: store.overview.findings.formatted(), detail: "Across enabled modules")
-                    MetricTile("Ready to review", value: Display.bytes(store.overview.reclaimableBytes), detail: "Eligible items, overlaps counted once")
-                    MetricTile("Found on disk", value: Display.bytes(store.overview.diskBytes), detail: "Logical size of scanned items")
-                    MetricTile("Root folders", value: String(store.roots.count), detail: "Chosen by you")
-                }
-                ScopeView(store: store, usesRoots: true)
-                HStack {
-                    if store.isScanning { ProgressView().controlSize(.small); Text(store.progress).font(TypeStyle.caption); Spacer(); ActionButton("Cancel") { store.cancelScan() } }
-                    else { ActionButton("Scan enabled modules", kind: .primary, disabled: store.isApplying || store.demo) { store.scan() }; Text(store.progress).font(TypeStyle.caption).foregroundStyle(.secondary) }
-                }
+                PageHeader("Your Mac, with room to work", subtitle: "Scan, review the recommended fixes, done. Nothing is removed until you review it.")
+                ScanPanel(store: store)
                 WarningView(store: store)
-                ForEach(Category.allCases, id: \.self) { category in
-                    VStack(alignment: .leading, spacing: Space.md) {
-                        Text(category.rawValue).font(TypeStyle.sectionTitle)
-                        ForEach(store.enabledModules.filter { $0.category == category }, id: \.id) { module in
-                            Button { store.selectedModuleID = module.id; store.search = "" } label: {
-                                Panel {
-                                    HStack(spacing: Space.lg) {
-                                        Image(systemName: module.symbol).foregroundStyle(Palette.accentSymbol)
-                                        VStack(alignment: .leading, spacing: Space.xs) {
-                                            Text(module.name).font(TypeStyle.sectionTitle)
-                                            Text(module.summary).font(TypeStyle.secondary).foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        Text(store.count(for: module.id).formatted()).font(TypeStyle.numeric)
-                                        Image(systemName: "chevron.right").foregroundStyle(.secondary)
-                                    }
-                                }
-                            }.buttonStyle(.plain)
-                        }
-                    }
-                }
+                RecommendationsView(store: store)
+                AllToolsView(store: store)
             }.padding(Space.xl)
         }
         .task(id: store.storeVersion) {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
             await store.refreshOverview()
+        }
+    }
+}
+
+/// Where to scan, and the one button that scans everything enabled there.
+private struct ScanPanel: View {
+    @Bindable var store: AppStore
+    var body: some View {
+        Panel {
+            VStack(alignment: .leading, spacing: Space.lg) {
+                HStack(spacing: Space.md) {
+                    Picker("Scan", selection: $store.scanPlace) {
+                        ForEach(AppStore.ScanPlace.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    .disabled(store.isScanning)
+                    Text(placeDescription).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    if store.scanPlace == .folders { ActionButton("Choose folders", disabled: store.isScanning) { store.addRoot() } }
+                }
+                HStack(spacing: Space.md) {
+                    if store.isScanning {
+                        ProgressView().controlSize(.small)
+                        Text(store.progress).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer()
+                        ActionButton("Cancel") { store.cancelScan() }
+                    } else {
+                        ActionButton(store.lastScanAt == nil ? "Scan" : "Scan again", kind: .primary, disabled: store.isApplying || store.demo) { store.scan() }
+                        Text(lastScanned).font(TypeStyle.caption).foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                }
+            }
+        }
+    }
+    private var placeDescription: String {
+        switch store.scanPlace {
+        case .wholeMac: "Your home folder. System files and other drives are never scanned."
+        case .folders: store.roots.isEmpty ? "No folders chosen yet" : store.roots.map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: " · ")
+        }
+    }
+    private var lastScanned: String {
+        guard let date = store.lastScanAt else { return "Not scanned yet" }
+        return "Last scanned " + RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
+    }
+}
+
+/// The core's one-click fixes, largest first.
+private struct RecommendationsView: View {
+    @Bindable var store: AppStore
+    var body: some View {
+        if !store.recommendations.isEmpty {
+            VStack(alignment: .leading, spacing: Space.md) {
+                HStack(alignment: .firstTextBaseline, spacing: Space.md) {
+                    VStack(alignment: .leading, spacing: Space.xs) {
+                        Text("Recommended").font(TypeStyle.title)
+                        Text("Free up \(Display.bytes(store.recommendedBytes)) with these fixes").font(TypeStyle.secondary).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if store.recommendations.contains(where: { $0.action == .trash }) {
+                        ActionButton("Review all", kind: .primary, disabled: store.isApplying || store.isScanning) { store.reviewAllRecommendations() }
+                    }
+                }
+                ForEach(store.recommendations) { fix in RecommendationCard(store: store, fix: fix) }
+            }
+        } else if store.lastScanAt != nil, !store.isScanning {
+            Panel {
+                Label("Nothing to recommend right now. Each tool below still lists everything it found.", systemImage: "checkmark.seal")
+                    .font(TypeStyle.secondary).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct RecommendationCard: View {
+    @Bindable var store: AppStore
+    let fix: Recommendation
+    var body: some View {
+        Panel {
+            HStack(alignment: .top, spacing: Space.lg) {
+                RowIconView(icon: Display.icon(moduleID: fix.moduleID, path: nil, brand: fix.brand, symbol: store.modules.first { $0.id == fix.moduleID }?.symbol ?? "sparkles"))
+                VStack(alignment: .leading, spacing: Space.xs) {
+                    Text(fix.title).font(TypeStyle.sectionTitle)
+                    Text(fix.detail).font(TypeStyle.secondary).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: Space.sm) {
+                        StatusBadge(fix.risk.rawValue, warning: fix.risk == .permanent)
+                        Text(Display.items(fix.count)).font(TypeStyle.caption).foregroundStyle(.secondary)
+                        Button("Show items") { store.selectedModuleID = fix.moduleID }
+                            .buttonStyle(.link).font(TypeStyle.caption)
+                    }
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: Space.sm) {
+                    Text(Display.bytes(fix.bytes)).font(TypeStyle.headline).monospacedDigit()
+                    ActionButton("Review", kind: fix.risk == .permanent ? .destructive : .secondary, disabled: store.isApplying || store.isScanning) { store.review(fix) }
+                }
+            }
+        }
+    }
+}
+
+/// Every enabled tool, for looking closer than the recommendations do.
+private struct AllToolsView: View {
+    @Bindable var store: AppStore
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.md) {
+            Text("All tools").font(TypeStyle.title)
+            ForEach(Category.allCases, id: \.self) { category in
+                let modules = store.enabledModules.filter { $0.category == category }
+                if !modules.isEmpty {
+                    Text(category.rawValue).font(TypeStyle.sectionTitle).foregroundStyle(.secondary)
+                    ForEach(modules, id: \.id) { module in
+                        Button { store.selectedModuleID = module.id; store.search = "" } label: {
+                            Panel {
+                                HStack(spacing: Space.lg) {
+                                    Image(systemName: module.symbol).foregroundStyle(Palette.accentSymbol)
+                                    VStack(alignment: .leading, spacing: Space.xs) {
+                                        Text(module.name).font(TypeStyle.sectionTitle)
+                                        Text(module.summary).font(TypeStyle.secondary).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(store.count(for: module.id).formatted()).font(TypeStyle.numeric)
+                                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                                }
+                            }
+                        }.buttonStyle(.plain)
+                    }
+                }
+            }
         }
     }
 }

@@ -38,6 +38,12 @@ import SwiftUI
         Settings { PreferencesView(store: store) }
         MenuBarExtra("CleanYourMac", systemImage: "leaf", isInserted: $store.menuBarEnabled) {
             Button("Open CleanYourMac") { NSApplication.shared.activate(ignoringOtherApps: true) }
+            Button(store.isScanning ? "Scanning…" : "Scan Now") {
+                store.selectedModuleID = "overview"; store.scan(); NSApplication.shared.activate(ignoringOtherApps: true)
+            }.disabled(store.isScanning || store.isApplying)
+            if !store.recommendations.isEmpty {
+                Text("\(Display.bytes(store.recommendedBytes)) recommended to free")
+            }
             Text("\(store.count(for: "orphans").formatted()) orphan candidates")
             Text("\(Display.bytes(store.overview.diskBytes)) found across scanned tools")
             Button("Inspect Orphan Processes") { store.selectedModuleID = "orphans"; NSApplication.shared.activate(ignoringOtherApps: true) }

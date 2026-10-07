@@ -59,6 +59,17 @@ A module implements `ScanModule`. It declares a descriptor, streams findings to 
 
 Modules size their candidates in parallel and report them in order. Duplicate detection narrows candidates in stages: equal size, then an equal 64 KB prefix digest, then an equal full digest. Hard links to one inode are one copy.
 
+## Recommendations
+
+After a scan the overview offers a few one-click fixes (`cym_store::recommend`). Each rule is a row in a table: a module, the risks and action it accepts, and optionally how many days a project must have been idle (last use, or modification when that is unknown). The defaults are:
+- dependencies and build output of projects idle for 30 days;
+- caches that rebuild themselves;
+- Xcode build data;
+- duplicate copies;
+- emptying the Trash.
+
+Only eligible rows count. Sizes count nested folders once, and fixes under 1 MB are dropped. A fix opens the normal review with its rows selected, so the executor rechecks everything as usual.
+
 ## Actions
 
 `actions::execute` normalizes overlapping selections, then for each item:

@@ -108,6 +108,13 @@ fn dispatch(engine: &Engine, method: &str, p: &Value) -> Result<Value> {
                 .ok_or("This result view expired; query again.")?;
             value(snapshot.page(param(p, "offset")?, param::<usize>(p, "limit")?.min(5_000)))
         }
+        "recommendations" => value(
+            engine.results.recommendations(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0.0, |d| d.as_secs_f64()),
+            ),
+        ),
         "eligibleIds" => {
             let snapshot = engine
                 .results
