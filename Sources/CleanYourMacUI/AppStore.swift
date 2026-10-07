@@ -65,7 +65,6 @@ public final class AppStore {
     public var history: [ActionResult] = []
     public var review: ReviewDraft?
     public var error: String?
-    public var showSettings = false
     public var showInspector = true
     public var menuBarEnabled = false { didSet { persist(); configureMonitor() } }
     /// The Comfy palette; colors resolve against it at draw time.

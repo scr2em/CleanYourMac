@@ -25,10 +25,9 @@ public struct WorkspaceView: View {
             ToolbarItemGroup {
                 if store.demo { Text("Demo · actions disabled").font(TypeStyle.caption).foregroundStyle(.secondary) }
                 Button { store.showInspector.toggle() } label: { Label("Inspector", systemImage: "sidebar.right") }.help("Toggle inspector")
-                Button { store.showSettings = true } label: { Label("Settings", systemImage: "gearshape") }
+                SettingsLink { Label("Settings", systemImage: "gearshape") }.help("Settings")
             }
         }
-        .sheet(isPresented: $store.showSettings) { PreferencesView(store: store) }
         .sheet(item: $store.review) { draft in ReviewView(store: store, draft: draft) }
         .alert("Attention needed", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             Button("OK") { store.error = nil }
@@ -450,56 +449,129 @@ public struct PreferencesView: View {
     @State private var ignoredName = ""
     public init(store: AppStore) { self.store = store }
     public var body: some View {
-        VStack(alignment: .leading, spacing: Space.lg) {
-            PageHeader("Settings", subtitle: "Choose scan roots, protect paths and enable modules.")
-            ScrollView {
-                VStack(alignment: .leading, spacing: Space.xl) {
-                    Panel {
-                        VStack(alignment: .leading, spacing: Space.md) {
-                            Text("Scan roots").font(TypeStyle.sectionTitle)
-                            ForEach(store.roots, id: \.self) { root in HStack { Text(root).font(TypeStyle.code); Spacer(); Button("Remove") { store.roots.removeAll { $0 == root }; store.storageNavigation = []; store.persist() } } }
-                            ActionButton("Add folders") { store.addRoot() }
-                        }
-                    }
-                    Panel {
-                        VStack(alignment: .leading, spacing: Space.md) {
-                            Text("Protected paths").font(TypeStyle.sectionTitle)
-                            if store.exclusions.isEmpty { Text("Protect a finding from its inspector or context menu.").font(TypeStyle.secondary).foregroundStyle(.secondary) }
-                            ForEach(store.exclusions, id: \.self) { path in HStack { Text(path).font(TypeStyle.code); Spacer(); Button("Unprotect") { store.exclusions.removeAll { $0 == path }; store.persist() } } }
-                        }
-                    }
-                    Panel {
-                        VStack(alignment: .leading, spacing: Space.md) {
-                            Text("Ignored process names").font(TypeStyle.sectionTitle)
-                            ForEach(store.ignoredNames, id: \.self) { name in HStack { Text(name).font(TypeStyle.code); Spacer(); Button("Show again") { store.ignoredNames.removeAll { $0 == name }; store.persist() } } }
-                            HStack { TextField("Executable name", text: $ignoredName); Button("Ignore") { if !ignoredName.isEmpty && !store.ignoredNames.contains(ignoredName) { store.ignoredNames.append(ignoredName); store.persist(); ignoredName = "" } }.disabled(ignoredName.isEmpty) }
-                        }
-                    }
-                    Panel {
-                        VStack(alignment: .leading, spacing: Space.md) {
-                            Text("Modules").font(TypeStyle.sectionTitle)
-                            ForEach(store.modules, id: \.id) { module in
-                                Toggle(module.name, isOn: Binding(get: { !store.disabledModules.contains(module.id) }, set: { enabled in
-                                    store.disabledModules.removeAll { $0 == module.id }
-                                    if !enabled { store.disabledModules.append(module.id) }
-                                    if !enabled && store.selectedModuleID == module.id { store.selectedModuleID = "overview" }
-                                    store.persist()
-                                }))
+        TabView {
+            general.tabItem { Label("General", systemImage: "gearshape") }
+            protection.tabItem { Label("Protection", systemImage: "lock.shield") }
+            modules.tabItem { Label("Modules", systemImage: "square.stack.3d.up") }
+            appearance.tabItem { Label("Appearance", systemImage: "paintpalette") }
+        }
+        .frame(width: Layout.reviewWidth, height: Layout.reviewHeight)
+    }
+
+    private var general: some View {
+        Form {
+            Section {
+                if store.roots.isEmpty { Text("No folders yet.").foregroundStyle(.secondary) }
+                ForEach(store.roots, id: \.self) { root in
+                    LabeledContent {
+                        Button("Remove") { store.roots.removeAll { $0 == root }; store.storageNavigation = []; store.persist() }
+                    } label: { PathText(root) }
+                }
+                Button("Add Folders…") { store.addRoot() }
+            } header: {
+                Text("Scan roots")
+            } footer: {
+                Text("Storage and developer tools look inside these folders.").font(TypeStyle.caption).foregroundStyle(.secondary)
+            }
+            Section("Menu bar") {
+                Toggle("Show a menu bar summary and monitor orphan processes", isOn: $store.menuBarEnabled)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var protection: some View {
+        Form {
+            Section {
+                if store.exclusions.isEmpty {
+                    Text("Protect a finding from its inspector or context menu.").foregroundStyle(.secondary)
+                }
+                ForEach(store.exclusions, id: \.self) { path in
+                    LabeledContent {
+                        Button("Unprotect") { store.exclusions.removeAll { $0 == path }; store.persist() }
+                    } label: { PathText(path) }
+                }
+            } header: {
+                Text("Protected paths")
+            } footer: {
+                Text("Protected items and everything inside them are never offered for removal.").font(TypeStyle.caption).foregroundStyle(.secondary)
+            }
+            Section("Ignored process names") {
+                ForEach(store.ignoredNames, id: \.self) { name in
+                    LabeledContent {
+                        Button("Show Again") { store.ignoredNames.removeAll { $0 == name }; store.persist() }
+                    } label: { Text(name).font(TypeStyle.code).lineLimit(1).truncationMode(.middle) }
+                }
+                HStack {
+                    TextField("Executable name", text: $ignoredName, prompt: Text("Executable name"))
+                        .labelsHidden()
+                        .onSubmit(ignore)
+                    Button("Ignore", action: ignore).disabled(ignoredName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var modules: some View {
+        Form {
+            ForEach(Category.allCases, id: \.self) { category in
+                Section(category.rawValue) {
+                    ForEach(store.modules.filter { $0.category == category }, id: \.id) { module in
+                        Toggle(isOn: Binding(get: { !store.disabledModules.contains(module.id) }, set: { enabled in
+                            store.disabledModules.removeAll { $0 == module.id }
+                            if !enabled { store.disabledModules.append(module.id) }
+                            if !enabled && store.selectedModuleID == module.id { store.selectedModuleID = "overview" }
+                            store.persist()
+                        })) {
+                            Label {
+                                VStack(alignment: .leading, spacing: Space.xxs) {
+                                    Text(module.name)
+                                    Text(module.summary).font(TypeStyle.caption).foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: module.symbol).foregroundStyle(Palette.accentSymbol)
                             }
                         }
                     }
-                    Panel {
-                        VStack(alignment: .leading, spacing: Space.md) {
-                            Text("Appearance").font(TypeStyle.sectionTitle)
-                            Picker("Palette", selection: $store.theme) {
-                                ForEach(ComfyTheme.allCases) { Text($0.rawValue).tag($0) }
-                            }.pickerStyle(.segmented)
-                        }
-                    }
-                    Toggle("Show menu bar summary and monitor orphan processes", isOn: $store.menuBarEnabled)
                 }
             }
-            HStack { Spacer(); ActionButton("Done", kind: .primary) { store.showSettings = false } }
-        }.padding(Space.xl).frame(width: Layout.reviewWidth, height: Layout.windowMinHeight)
+        }
+        .formStyle(.grouped)
+    }
+
+    private var appearance: some View {
+        Form {
+            Section("Palette") {
+                Picker("Palette", selection: $store.theme) {
+                    ForEach(ComfyTheme.allCases) { theme in
+                        HStack(spacing: Space.sm) {
+                            ThemeSwatch(theme)
+                            Text(theme.rawValue)
+                        }
+                        .tag(theme)
+                    }
+                }
+                .pickerStyle(.radioGroup)
+                .labelsHidden()
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func ignore() {
+        let name = ignoredName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, !store.ignoredNames.contains(name) else { return }
+        store.ignoredNames.append(name); store.persist(); ignoredName = ""
+    }
+}
+
+/// A path shown with `~` for the home folder, truncated in the middle rather than widening its row.
+private struct PathText: View {
+    let path: String
+    init(_ path: String) { self.path = path }
+    var body: some View {
+        Text((path as NSString).abbreviatingWithTildeInPath)
+            .font(TypeStyle.code).lineLimit(1).truncationMode(.middle).help(path)
     }
 }

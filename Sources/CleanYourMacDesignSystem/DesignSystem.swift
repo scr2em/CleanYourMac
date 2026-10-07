@@ -176,6 +176,32 @@ public enum Palette {
         })
     }
 }
+extension ComfyTheme {
+    /// A colour from this palette, whichever palette is current, for previews.
+    func swatch(_ token: Palette.Token) -> Color {
+        let pair = hex(token)
+        return Color(nsColor: NSColor(name: nil) { appearance in
+            let hex = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? pair.dark : pair.light
+            return NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+        })
+    }
+}
+/// Overlapping dots previewing a palette's canvas, selection and accents.
+public struct ThemeSwatch: View {
+    private let theme: ComfyTheme
+    public init(_ theme: ComfyTheme) { self.theme = theme }
+    public var body: some View {
+        HStack(spacing: -Space.xs) {
+            ForEach([Palette.Token.canvas, .sidebarSelection, .accentSymbol, .accent], id: \.self) { token in
+                Circle()
+                    .fill(theme.swatch(token))
+                    .overlay(Circle().strokeBorder(Palette.borderStrong, lineWidth: Stroke.hairline))
+                    .frame(width: Layout.iconMedium, height: Layout.iconMedium)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
 public enum Stroke {
     public static let hairline: CGFloat = 1, focus: CGFloat = 2
 }
