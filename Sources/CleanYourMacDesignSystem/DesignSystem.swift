@@ -20,13 +20,31 @@ public enum TypeStyle {
 }
 /// Named Comfy palettes. Colors resolve at draw time, so switching applies on the next render.
 public enum ComfyTheme: String, CaseIterable, Identifiable, Sendable {
-    case terracotta = "Terracotta & Navy", mauve = "Cream & Mauve", rose = "Linen & Rose"
+    case ember = "Ember", terracotta = "Terracotta & Navy", mauve = "Cream & Mauve", rose = "Linen & Rose"
     public var id: String { rawValue }
-    nonisolated(unsafe) public static var current: ComfyTheme = .terracotta
+    nonisolated(unsafe) public static var current: ComfyTheme = .ember
 
     /// Light and dark sRGB values, mirroring docs/brand/tokens.json.
     func hex(_ token: Palette.Token) -> (light: UInt32, dark: UInt32) {
         switch (self, token) {
+        case (.ember, .canvas): (0xFAF7F6, 0x000000)
+        case (.ember, .sidebar): (0xF3ECEA, 0x0E0B0B)
+        case (.ember, .sidebarSelection): (0xF2D5D1, 0x3A100C)
+        case (.ember, .surface): (0xFFFFFF, 0x151010)
+        case (.ember, .elevated): (0xFFFFFF, 0x1F1716)
+        case (.ember, .border): (0xE9DEDB, 0x2E2423)
+        case (.ember, .borderStrong): (0xD4C2BE, 0x4A3533)
+        case (.ember, .track): (0xF0E4E1, 0x261C1B)
+        case (.ember, .accent): (0xAD2219, 0xC42A1E)
+        case (.ember, .onAccent): (0xFFFFFF, 0xFFFFFF)
+        case (.ember, .accentText): (0x7A160E, 0xFF7A6B)
+        case (.ember, .accentSymbol): (0xE93324, 0xE93324)
+        case (.ember, .selection): (0xFBE3DF, 0x3A100C)
+        case (.ember, .ink): (0x1A1110, 0xF5EEED)
+        case (.ember, .muted): (0x6B5B58, 0xB8A9A6)
+        case (.ember, .destructive): (0x7A160E, 0xFF8A7A)
+        case (.ember, .onDestructive): (0xFFFFFF, 0x000000)
+        case (.terracotta, .destructive): (0xA12D2A, 0xF57A96)
         case (.terracotta, .canvas): (0xF7F1E8, 0x241E1C)
         case (.terracotta, .sidebar): (0xF2EADF, 0x2C2523)
         case (.terracotta, .sidebarSelection): (0xEBD6CB, 0x4A3029)
