@@ -146,7 +146,7 @@ Storage Explorer shows each item directly in the folders that you select. For ea
 
 Large Files finds files of 100 MB or more in the folders that you select. Filter by size, age and last use. Then move the files that you do not need to the Trash.
 
-Files in your Library folder and in hidden folders of your home folder belong to an app or a tool, for example a virtual machine disk, a model, a device backup or a database. Large Files shows them, but you cannot select them. Remove them with their app or tool.
+Files in your Library folder and in hidden folders of your home folder belong to an app or a tool, for example a virtual machine disk, a model, a device backup or a database. Large Files shows them, but you cannot select them. Remove them with their app or tool. Version-control folders (`.git`, `.hg`, `.svn`, `.jj`, `.bzr`) are never searched, on any drive: their files belong to the repository.
 </details>
 
 <details>

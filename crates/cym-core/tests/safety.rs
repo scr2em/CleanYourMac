@@ -31,6 +31,40 @@ fn large_files_of_apps_and_tools_are_listed_but_never_offered() {
 }
 
 #[test]
+fn file_scans_never_enter_version_control_folders() {
+    let f = Fixture::new();
+    let big = |path: &str| {
+        let path = f.write(path, "");
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(150_000_000)
+            .unwrap();
+    };
+    for vcs in [".git", ".hg", ".svn", ".jj", ".bzr"] {
+        big(&format!("repo/{vcs}/store/pack.bin"));
+    }
+    big("repo/src/video.mov");
+    let engine = Engine::new(services(&f), builtin(&f));
+    let paths = |module: &str| -> Vec<String> {
+        scan(&engine, &f, module, vec![f.path()])
+            .iter()
+            .filter_map(|r| r.resource.path().map(str::to_owned))
+            .collect()
+    };
+    let large = paths("large");
+    assert_eq!(large.len(), 1, "{large:?}");
+    assert!(large[0].ends_with("repo/src/video.mov"));
+    // Every pack file is an identical copy of the video's zeros, and none is a duplicate.
+    let duplicates = paths("duplicates");
+    assert!(
+        duplicates.iter().all(|p| p.contains("/src/")),
+        "{duplicates:?}"
+    );
+}
+
+#[test]
 fn build_output_with_a_shipped_archive_needs_confirmation() {
     let f = Fixture::new();
     f.write("app/pubspec.yaml", "name: app");

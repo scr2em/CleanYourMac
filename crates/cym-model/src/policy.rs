@@ -314,6 +314,14 @@ pub const DUPLICATE_IGNORE_SUFFIXES: &[&str] = &[".egg-info", ".xcarchive", ".dS
 pub fn duplicate_excluded(path: &str) -> bool {
     system_excluded(path) || path.split('/').any(duplicate_ignored_name)
 }
+/// Version-control metadata folders: their files belong to the repository, never to the
+/// user directly, so file scans do not enter them.
+pub const VERSION_CONTROL: &[&str] = &[".git", ".hg", ".svn", ".jj", ".bzr", "_darcs", ".pijul"];
+/// Whether one path component names a version-control metadata folder, ignoring ASCII case.
+pub fn version_control(name: &str) -> bool {
+    VERSION_CONTROL.iter().any(|v| v.eq_ignore_ascii_case(name))
+}
+
 /// Whether one path component names a folder duplicate detection skips; compared without
 /// allocating, ignoring ASCII case.
 pub fn duplicate_ignored_name(name: &str) -> bool {
