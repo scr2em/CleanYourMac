@@ -142,6 +142,7 @@ impl ScanModule for ArtifactsModule {
                 }
                 if let Some(m) = self.matches(s, e.path()) {
                     let rule = m.rule;
+                    let risk = m.risk(s);
                     let mut reason = format!("{} {}. {}", rule.ecosystem, rule.kind, rule.rebuild);
                     let project = m.project.clone();
                     let mut details = vec![
@@ -177,7 +178,7 @@ impl ScanModule for ArtifactsModule {
                             "This build output is too large to check for a shipped build or the symbols needed to read its crash reports.",
                             vec![ActionKind::Trash],
                         ),
-                        Ok(None) => Candidate::new(e.clone(), &reason, vec![ActionKind::Trash], rule.risk),
+                        Ok(None) => Candidate::new(e.clone(), &reason, vec![ActionKind::Trash], risk),
                     };
                     candidates.push(
                         candidate
@@ -284,27 +285,28 @@ impl DependenciesModule {
             .lockfiles
             .iter()
             .find(|(_, lock)| s.is_file(&format!("{project}/{lock}")))
-            .map(|(n, _)| *n)
-            .unwrap_or("Unknown");
-        Candidate::new(
-            e,
-            "Project dependencies can be reinstalled, but local patches or edits may be lost. Manifests and lockfiles are preserved.",
-            vec![ActionKind::Trash],
-            Risk::Rebuild,
-        )
-        .title(name(&project))
-        .last_used(LastUsed::Project {
-            folder: project.clone(),
-        })
-        .details(vec![
-            detail("Project", project),
-            detail("Ecosystem", runtime),
-            detail("Package manager", manager),
-            detail("Artifact", "node_modules"),
-        ])
+            .map(|(n, _)| *n);
+        // Without a lockfile, a reinstall brings whatever versions are current.
+        let (reason, risk) = match manager {
+            Some(_) => ("Project dependencies can be reinstalled, but local patches or edits may be lost. Manifests and lockfiles are preserved.", Risk::Rebuild),
+            None => ("Project dependencies with no lockfile: a reinstall may bring other versions, and local patches or edits are lost.", Risk::Review),
+        };
+        let manager = manager.unwrap_or("Unknown");
+        Candidate::new(e, reason, vec![ActionKind::Trash], risk)
+            .title(name(&project))
+            .last_used(LastUsed::Project {
+                folder: project.clone(),
+            })
+            .details(vec![
+                detail("Project", project),
+                detail("Ecosystem", runtime),
+                detail("Package manager", manager),
+                detail("Artifact", "node_modules"),
+            ])
     }
-    fn matched(e: Entry, m: ArtifactMatch<'_>) -> Candidate {
+    fn matched(s: &Services, e: Entry, m: ArtifactMatch<'_>) -> Candidate {
         let rule = m.rule;
+        let risk = m.risk(s);
         let mut reason = format!("{} {}. {}", rule.ecosystem, rule.kind, rule.rebuild);
         let mut details = vec![
             detail("Project", m.project.clone()),
@@ -316,7 +318,10 @@ impl DependenciesModule {
             reason += &format!(" Official command: `{command}`.");
             details.push(detail("Official command", command));
         }
-        Candidate::new(e, &reason, vec![ActionKind::Trash], rule.risk)
+        if risk != rule.risk {
+            reason += " The project has no lockfile, so a reinstall may bring other versions.";
+        }
+        Candidate::new(e, &reason, vec![ActionKind::Trash], risk)
             .title(name(&m.project))
             .details(details)
             .last_used(LastUsed::Project { folder: m.project })
@@ -452,7 +457,7 @@ impl ScanModule for DependenciesModule {
                 continue;
             }
             if let Some(m) = self.matches(s, e.path()) {
-                found.push(Self::matched(e, m));
+                found.push(Self::matched(s, e, m));
             }
         }
         let found: Vec<Candidate> = found

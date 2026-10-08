@@ -168,7 +168,9 @@ impl Default for ToolchainsModule {
                     "Reinstall with nvm install; global packages for this version are lost.",
                 )
                 .in_use(&[InUse::Nvm(".nvm/alias")])
-                .command("nvm uninstall {name}"),
+                .command("nvm uninstall {name}")
+                // Global packages installed into a version are lost, as for conda and uv.
+                .risk(Risk::Review),
                 versions(
                     "Node.js",
                     "Node.js",
@@ -203,7 +205,8 @@ impl Default for ToolchainsModule {
                     "Reinstall with pyenv install; packages installed into it are lost.",
                 )
                 .in_use(&[InUse::VersionFile(".pyenv/version")])
-                .command("pyenv uninstall {name}"),
+                .command("pyenv uninstall {name}")
+                .risk(Risk::Review),
                 versions(
                     "Python",
                     "Python",
@@ -257,7 +260,8 @@ impl Default for ToolchainsModule {
                     "Reinstall with rbenv install; gems installed into it are lost.",
                 )
                 .in_use(&[InUse::VersionFile(".rbenv/version")])
-                .command("rbenv uninstall {name}"),
+                .command("rbenv uninstall {name}")
+                .risk(Risk::Review),
                 versions(
                     "Flutter",
                     "Flutter SDK",

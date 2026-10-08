@@ -198,6 +198,9 @@ pub struct ArtifactRule {
     pub risk: Risk,
     /// Left out when Git tracks it, for folders projects often commit (`vendor`).
     pub hide_tracked: bool,
+    /// Files that pin exactly what comes back, such as a lockfile. When the project has
+    /// none of them, what a reinstall brings may differ, so the folder is Review.
+    pub reproducible: &'static [&'static str],
 }
 fn rule(
     ecosystem: &'static str,
@@ -219,6 +222,7 @@ fn rule(
         apps: &[],
         risk: Risk::Rebuild,
         hide_tracked: false,
+        reproducible: &[],
     }
 }
 impl ArtifactRule {
@@ -246,9 +250,30 @@ impl ArtifactRule {
         self.risk = risk;
         self
     }
+    pub fn reproducible(mut self, files: &'static [&'static str]) -> Self {
+        self.reproducible = files;
+        self
+    }
     pub fn hide_tracked(mut self) -> Self {
         self.hide_tracked = true;
         self
+    }
+}
+impl ArtifactMatch<'_> {
+    /// The rule's risk, or Review when the rule needs a file that pins what comes back
+    /// (a lockfile) and the project has none.
+    pub fn risk(&self, s: &Services) -> Risk {
+        let pinned = self.rule.reproducible.is_empty()
+            || self
+                .rule
+                .reproducible
+                .iter()
+                .any(|f| present(s, &self.project, f).is_some());
+        if pinned {
+            self.rule.risk
+        } else {
+            Risk::Review
+        }
     }
 }
 /// A folder matched by a rule, with its project folder and the evidence that proved it.
@@ -516,7 +541,8 @@ pub fn build_output_rules() -> Vec<ArtifactRule> {
             &["CMakeLists.txt"],
             "Reconfigure and rebuild with CMake; cache options set in the build tree are lost.",
         )
-        .inside(&["CMakeCache.txt", "CMakeFiles/"]),
+        .inside(&["CMakeCache.txt", "CMakeFiles/"])
+        .risk(Risk::Review),
         // Game engines come before .NET because Unity generates .csproj files.
         rule(
             "Unity",
@@ -530,10 +556,20 @@ pub fn build_output_rules() -> Vec<ArtifactRule> {
         rule(
             "Unreal Engine",
             "build output or derived data",
-            &["Intermediate", "DerivedDataCache", "Binaries"],
+            &["Intermediate", "DerivedDataCache"],
             &["*.uproject"],
             "Rebuilt by the next editor launch or build, which can take a long time.",
         )
+        .apps(owners::UNREAL),
+        // Binaries come back only from source; a project shipped without it has no other copy.
+        rule(
+            "Unreal Engine",
+            "build output",
+            &["Binaries"],
+            &["*.uproject"],
+            "Rebuilt from Source by the next build, which can take a long time.",
+        )
+        .requires(&["Source/"])
         .apps(owners::UNREAL),
         rule(
             "Unreal Engine",
@@ -694,7 +730,16 @@ pub fn dependency_rules() -> Vec<ArtifactRule> {
             PYTHON,
             "Recreate it and reinstall packages; anything installed by hand is lost.",
         )
-        .inside(&["pyvenv.cfg"]),
+        .inside(&["pyvenv.cfg"])
+        .reproducible(&[
+            "requirements.txt",
+            "requirements.lock",
+            "poetry.lock",
+            "uv.lock",
+            "Pipfile.lock",
+            "pdm.lock",
+            "pylock.toml",
+        ]),
         rule(
             "Ruby (Bundler)",
             "installed gems",
@@ -728,10 +773,11 @@ pub fn dependency_rules() -> Vec<ArtifactRule> {
             "vendored crates",
             &["vendor"],
             &["Cargo.toml"],
-            "Restored by cargo vendor. Offline builds fail until it runs again, since .cargo/config.toml points them here.",
+            "Restored by cargo vendor, which needs the network. Every build fails until it runs again, since .cargo/config.toml points builds here; projects vendor often to build offline.",
         )
         .requires(&["Cargo.lock", ".cargo/config.toml"])
         .command("cargo vendor")
+        .risk(Risk::Review)
         .hide_tracked(),
         rule(
             "SwiftPM",
@@ -741,14 +787,16 @@ pub fn dependency_rules() -> Vec<ArtifactRule> {
             "Fetched again by the next swift build or swift package resolve.",
         )
         .command("swift package reset")
+        .reproducible(&["Package.resolved"])
         .apps(owners::XCODE),
         rule(
             "Terraform",
             "providers and modules",
             &[".terraform"],
             &["*.tf"],
-            "Restored by terraform init.",
-        ),
+            "Restored by terraform init, but it also records the selected workspace: afterwards the project is back on default, and the next plan or apply can target the wrong state.",
+        )
+        .risk(Risk::Review),
         rule(
             "Elixir",
             "dependencies",

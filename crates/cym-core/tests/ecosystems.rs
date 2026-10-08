@@ -299,9 +299,31 @@ fn dependencies_cover_every_ecosystem_once_and_without_descending() {
         "{:?}",
         report.warnings
     );
-    assert!(report.findings.iter().all(|r| r.risk == Risk::Rebuild
-        && r.actions == vec![ActionKind::Trash]
-        && r.blocked_reason.is_none()));
+    assert!(report
+        .findings
+        .iter()
+        .all(|r| r.actions == vec![ActionKind::Trash] && r.blocked_reason.is_none()));
+    // Rebuild only where what comes back is pinned: no lockfile beside the Python
+    // environment or SwiftPM checkouts, and a Cargo vendor folder every build depends on.
+    let mut risks: Vec<_> = report
+        .findings
+        .iter()
+        .map(|r| (r.title.as_str(), r.value("Artifact").unwrap(), r.risk))
+        .collect();
+    risks.sort_by_key(|r| (r.0, r.1));
+    assert_eq!(
+        risks,
+        [
+            ("app", ".venv", Risk::Review),
+            ("app", "node_modules", Risk::Rebuild),
+            ("crate", "vendor", Risk::Review),
+            ("edge", "node_modules", Risk::Rebuild),
+            ("gosvc", "vendor", Risk::Rebuild),
+            ("ios", "Pods", Risk::Rebuild),
+            ("kit", ".build/checkouts", Risk::Review),
+            ("site", "vendor", Risk::Rebuild),
+        ]
+    );
     let pods = report.findings.iter().find(|r| r.title == "ios").unwrap();
     assert_eq!(pods.value("Official command"), Some("pod install"));
     // Build Artifacts neither lists nor searches inside installed dependencies.
