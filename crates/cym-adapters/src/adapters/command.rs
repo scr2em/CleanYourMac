@@ -37,8 +37,15 @@ pub fn program(executable: &str) -> Option<String> {
     program_in(executable, &policy::home())
 }
 fn program_in(executable: &str, home: &str) -> Option<String> {
-    if APPROVED.contains(&executable) || CONTAINER_TOOLS.contains(&executable) {
+    if APPROVED.contains(&executable) {
         return Some(executable.to_owned());
+    }
+    if CONTAINER_TOOLS.contains(&executable) {
+        // Homebrew's folders belong to the user; the program and every folder above it must
+        // still be safe from other users. The resolved program is the one started.
+        let target = std::fs::canonicalize(executable).ok()?;
+        let target = target.to_str()?;
+        return trusted_chain(target).then(|| target.to_owned());
     }
     if !HOME_CONTAINER_TOOLS
         .iter()
@@ -48,8 +55,28 @@ fn program_in(executable: &str, home: &str) -> Option<String> {
     }
     let target = std::fs::canonicalize(executable).ok()?;
     let target = target.to_str()?;
-    (target.starts_with("/Applications/") && target.contains(".app/Contents/"))
-        .then(|| target.to_owned())
+    (target.starts_with("/Applications/")
+        && target.contains(".app/Contents/")
+        && trusted_chain(target))
+    .then(|| target.to_owned())
+}
+/// Whether a resolved program and every folder above it belong to root or to this user and
+/// cannot be changed by other users: nothing is writable by others, and only root-owned
+/// folders (such as `/Applications`, writable by administrators) may be group-writable.
+pub fn trusted_chain(path: &str) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let me = unsafe { libc::getuid() };
+    std::path::Path::new(path).ancestors().all(|p| {
+        if p.as_os_str().is_empty() {
+            return true;
+        }
+        std::fs::symlink_metadata(p).is_ok_and(|m| {
+            let owner_ok = m.uid() == 0 || m.uid() == me;
+            let others_write = m.mode() & 0o002 != 0;
+            let group_write = m.mode() & 0o020 != 0;
+            owner_ok && !others_write && (!group_write || m.uid() == 0)
+        })
+    })
 }
 /// Whether an executable is one this runner may start.
 pub fn approved(executable: &str) -> bool {
@@ -213,6 +240,14 @@ mod tests {
             program_in("/usr/bin/git", home).as_deref(),
             Some("/usr/bin/git")
         );
+        // A folder other users can write to breaks the chain of trust.
+        assert!(trusted_chain("/usr/bin/git"));
+        let open = std::path::Path::new(home).join("shared");
+        std::fs::create_dir_all(&open).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+        std::fs::write(open.join("docker"), "x").unwrap();
+        assert!(!trusted_chain(open.join("docker").to_str().unwrap()));
         let _ = std::fs::remove_dir_all(home);
     }
 }

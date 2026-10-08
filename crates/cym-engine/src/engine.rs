@@ -24,6 +24,9 @@ pub struct Engine {
     /// Set while the store holds example data loaded by the app (demo and screenshots)
     /// rather than findings this engine scanned; no action runs on it.
     pub example: Arc<std::sync::atomic::AtomicBool>,
+    /// Held while example data is loaded or replaced, so the flag and the rows change
+    /// together.
+    examples: Arc<std::sync::Mutex<()>>,
 }
 impl Engine {
     pub fn new(services: Services, registry: Registry) -> Self {
@@ -32,7 +35,18 @@ impl Engine {
             registry,
             results: Arc::default(),
             example: Default::default(),
+            examples: Default::default(),
         }
+    }
+    /// Replaces the results with example data (demo and screenshots); no action ever
+    /// changes anything for it.
+    pub fn load_examples(&self, findings: Vec<Finding>) -> usize {
+        let _guard = self.examples.lock().unwrap_or_else(|e| e.into_inner());
+        self.example
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.results.clear();
+        self.results.insert(findings);
+        self.results.len()
     }
     pub fn native() -> Self {
         Self::new(Services::native(), modules::builtin())
@@ -61,13 +75,16 @@ impl Engine {
         emit: &(dyn Fn(ScanEvent) + Sync),
     ) {
         // A real scan replaces example data entirely, so no example row stays beside it.
-        if self
-            .example
-            .swap(false, std::sync::atomic::Ordering::SeqCst)
         {
-            self.results.clear();
+            let _guard = self.examples.lock().unwrap_or_else(|e| e.into_inner());
+            if self
+                .example
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                self.results.clear();
+            }
+            self.results.clear_modules(ids);
         }
-        self.results.clear_modules(ids);
         self.run(
             ids,
             context,

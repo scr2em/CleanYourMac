@@ -1,30 +1,106 @@
 mod common;
 use common::*;
-use cym_core::{adapters::fs::rename_exclusive, git::risky_key, model::*, ports::*, Engine};
+use cym_core::{
+    adapters::fs::rename_exclusive,
+    git::{gitlink, risky_key, Git},
+    model::*,
+    ports::*,
+    Engine,
+};
 
 #[test]
 fn repository_settings_that_run_programs_are_found() {
-    let config = |entries: &[&str]| entries.join("\0").into_bytes();
+    // `git config --list --show-scope -z`: the scope, NUL, then `key\nvalue`, NUL.
+    let config = |entries: &[(&str, &str)]| {
+        entries
+            .iter()
+            .flat_map(|(scope, entry)| [scope.as_bytes(), b"\0", entry.as_bytes(), b"\0"].concat())
+            .collect::<Vec<u8>>()
+    };
     assert_eq!(
         risky_key(&config(&[
-            "global\tfilter.lfs.clean\ngit-lfs clean",
-            "local\tcore.bare\nfalse"
+            ("global", "filter.lfs.clean\ngit-lfs clean"),
+            ("local", "core.bare\nfalse")
         ])),
         None,
         "only the repository's own settings count"
     );
     assert_eq!(
         risky_key(&config(&[
-            "local\tcore.bare\nfalse",
-            "local\tfilter.x.clean\nsh -c evil"
+            ("local", "core.bare\nfalse"),
+            ("local", "filter.x.clean\nsh -c evil")
         ]))
         .as_deref(),
         Some("filter.x.clean")
     );
-    assert!(risky_key(&config(&["local\tdiff.pdf.textconv\npdftotext"])).is_some());
-    assert!(risky_key(&config(&["worktree\tgpg.program\n/tmp/x"])).is_some());
-    assert!(risky_key(&config(&["local\tinclude.path\n../evil"])).is_some());
-    assert!(risky_key(&config(&["local\tremote.origin.url\nhttps://x"])).is_none());
+    assert!(risky_key(&config(&[("local", "diff.pdf.textconv\npdftotext")])).is_some());
+    assert!(risky_key(&config(&[("worktree", "gpg.program\n/tmp/x")])).is_some());
+    assert!(risky_key(&config(&[("local", "include.path\n../evil")])).is_some());
+    assert!(risky_key(&config(&[("local", "remote.origin.url\nhttps://x")])).is_none());
+    assert_eq!(
+        gitlink(
+            &[
+                &b"100644 abc 0\treadme.md"[..],
+                b"\0",
+                b"160000 def 0\tsub",
+                b"\0"
+            ]
+            .concat()
+        )
+        .as_deref(),
+        Some("sub")
+    );
+}
+
+#[test]
+fn real_git_settings_and_nested_repositories_are_caught() {
+    if std::fs::metadata("/usr/bin/git").is_err() {
+        return;
+    }
+    let f = Fixture::new();
+    let s = services(&f);
+    let k = ScanControl::default();
+    let git = Git(s.commands.as_ref());
+    let ok = |path: &str, args: &[&str]| {
+        assert_eq!(git.run(path, args, &k).unwrap().status, 0, "{args:?}")
+    };
+    let clean = f.dir("clean");
+    ok(&clean, &["init", "-q", "-b", "main"]);
+    assert_eq!(git.risky_config(&clean, &k).unwrap(), None);
+    let filtered = f.dir("filtered");
+    ok(&filtered, &["init", "-q", "-b", "main"]);
+    ok(&filtered, &["config", "filter.evil.clean", "touch marker"]);
+    assert_eq!(
+        git.risky_config(&filtered, &k).unwrap().as_deref(),
+        Some("filter.evil.clean")
+    );
+    // A nested repository recorded as a gitlink.
+    let outer = f.dir("outer");
+    ok(&outer, &["init", "-q", "-b", "main"]);
+    let inner = f.dir("outer/sub");
+    ok(&inner, &["init", "-q", "-b", "main"]);
+    f.write("outer/sub/a.txt", "a");
+    ok(&inner, &["add", "a.txt"]);
+    ok(
+        &inner,
+        &[
+            "-c",
+            "user.name=F",
+            "-c",
+            "user.email=f@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "a",
+        ],
+    );
+    ok(&outer, &["add", "sub"]);
+    assert_eq!(
+        git.risky_config(&outer, &k).unwrap().as_deref(),
+        Some("nested repository sub")
+    );
 }
 
 #[test]

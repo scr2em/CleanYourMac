@@ -60,7 +60,11 @@ pub fn parse(bytes: &[u8], keys: &[&str]) -> Option<HashMap<String, Scalar>> {
         return binary(bytes, keys);
     }
     // An XML property list has no references between objects, so parsing it whole is
-    // bounded by its size.
+    // bounded by its size; its nesting is bounded first, because the parser recurses and a
+    // stack overflow cannot be caught.
+    if xml_depth(bytes) > MAX_DEPTH {
+        return None;
+    }
     let value = plist::Value::from_reader_xml(std::io::Cursor::new(bytes)).ok()?;
     let dict = value.as_dictionary()?;
     let mut found = HashMap::new();
@@ -80,6 +84,33 @@ pub fn parse(bytes: &[u8], keys: &[&str]) -> Option<HashMap<String, Scalar>> {
         found.insert((*key).to_owned(), value);
     }
     Some(found)
+}
+
+const MAX_DEPTH: usize = 64;
+/// The deepest nesting of `<array>` and `<dict>` elements, counted without parsing.
+fn xml_depth(bytes: &[u8]) -> usize {
+    let (mut depth, mut deepest) = (0usize, 0usize);
+    let mut rest = bytes;
+    while let Some(at) = rest.iter().position(|b| *b == b'<') {
+        rest = &rest[at + 1..];
+        let end = rest.iter().position(|b| *b == b'>').unwrap_or(rest.len());
+        let tag = &rest[..end];
+        let name: Vec<u8> = tag
+            .iter()
+            .take_while(|b| b.is_ascii_alphanumeric() || **b == b'/')
+            .copied()
+            .collect();
+        let empty = tag.ends_with(b"/");
+        match name.as_slice() {
+            b"array" | b"dict" if !empty => {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            b"/array" | b"/dict" => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    deepest
 }
 
 /// Seconds between 1970 and 2001, the epoch of binary property-list dates.
@@ -228,6 +259,17 @@ mod tests {
             &["CFBundleIdentifier"],
         );
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        // Deep nesting is refused before the recursive XML parser sees it.
+        let deep = format!(
+            "<plist><dict><key>K</key>{}{}</dict></plist>",
+            "<array>".repeat(100_000),
+            "</array>".repeat(100_000)
+        );
+        assert_eq!(parse(deep.as_bytes(), &["K"]), None);
+        assert_eq!(
+            xml_depth(b"<dict><array/><array><dict></dict></array></dict>"),
+            3
+        );
         // Truncated or nonsense binary data is refused, not trusted.
         assert_eq!(parse(&binary[..binary.len() - 5], &["x"]), None);
     }

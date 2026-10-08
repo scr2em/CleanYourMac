@@ -49,7 +49,8 @@ impl FileSystem for StdFileSystem {
         use std::os::unix::fs::OpenOptionsExt;
         let file = fs::OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_NOFOLLOW)
+            // Never follow a link, and never block opening a FIFO or device.
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
             .open(path)
             .map_err(|e| format!("Cannot read {path}: {e}"))?;
         if !file.metadata().is_ok_and(|m| m.is_file()) {

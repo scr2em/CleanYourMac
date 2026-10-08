@@ -230,7 +230,7 @@ fn row(
     ActionResult {
         id: uuid::Uuid::new_v4().to_string(),
         date: now(),
-        title: f.title.clone(),
+        title: journal_title(f),
         original_path: f.resource.path().map(Into::into),
         action,
         outcome,
@@ -241,6 +241,20 @@ fn row(
         journal_warning: None,
         overridable: false,
     }
+}
+
+/// The title kept in the local history. A session's title can quote the prompt typed in an
+/// AI tool, which should not outlive the session, so it is replaced by the tool and file.
+fn journal_title(f: &Finding) -> String {
+    if f.value("First prompt").is_some() || f.value("Session").is_some() {
+        let file = f
+            .resource
+            .path()
+            .and_then(|p| p.rsplit('/').next())
+            .unwrap_or("item");
+        return format!("{} session · {file}", f.value("Tool").unwrap_or("AI tool"));
+    }
+    f.title.clone()
 }
 
 /// Moves an unchanged item from Trash back to its unoccupied original location.

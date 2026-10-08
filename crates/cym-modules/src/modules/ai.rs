@@ -237,11 +237,7 @@ impl AiToolsModule {
             // A small file naming a folder; never a protected one such as the home folder.
             Root::Pointer(file) => {
                 let path = format!("{home}/{file}");
-                let small =
-                    std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_file() && m.len() <= 4096);
-                small
-                    .then(|| std::fs::read_to_string(&path).ok())
-                    .flatten()
+                read_small(&path)
                     .map(|t| t.trim().to_owned())
                     .filter(|t| t.starts_with('/'))
                     .map(|t| policy::canonical(&t))
@@ -272,6 +268,22 @@ impl AiToolsModule {
         }
         roots
     }
+}
+
+/// A small text file read without following a link or blocking on a FIFO.
+fn read_small(path: &str) -> Option<String> {
+    use std::{io::Read, os::unix::fs::OpenOptionsExt};
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    file.take(4097).read_to_string(&mut text).ok()?;
+    (text.len() <= 4096).then_some(text)
 }
 
 /// A folder holding nothing but Finder metadata.
@@ -1014,7 +1026,13 @@ fn git_blocker(s: &Services, path: &str, k: &ScanControl) -> Option<String> {
     }
     match git.run(
         path,
-        &["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+        &[
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=normal",
+            "--ignore-submodules=all",
+        ],
         k,
     ) {
         Ok(out) if out.status == 0 && out.data.is_empty() => None,

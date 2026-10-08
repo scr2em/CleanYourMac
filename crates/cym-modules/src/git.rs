@@ -86,10 +86,19 @@ impl Git<'_> {
             control,
         )?;
         if out.status != 0 {
-            // No readable configuration: nothing of the repository's own to run.
-            return Ok(None);
+            // Unreadable settings could hold anything; do not run more Git here.
+            return Ok(Some("settings Git could not read".into()));
         }
-        Ok(risky_key(&out.data))
+        if let Some(key) = risky_key(&out.data) {
+            return Ok(Some(key));
+        }
+        // A nested repository (a gitlink in the index) has settings of its own, which
+        // `status` would load; it is left to inspect too. Listing the index runs nothing.
+        let index = self.run(repository, &["ls-files", "--stage", "-z"], control)?;
+        if index.status != 0 {
+            return Ok(Some("an index Git could not read".into()));
+        }
+        Ok(gitlink(&index.data).map(|path| format!("nested repository {path}")))
     }
     pub fn common_directory(&self, repository: &str, control: &ScanControl) -> Result<String> {
         let out = self.run(
@@ -166,6 +175,7 @@ impl Git<'_> {
                 "-z",
                 "--untracked-files=normal",
                 "--ignored=traditional",
+                "--ignore-submodules=all",
             ],
             control,
         )?;
@@ -346,14 +356,19 @@ pub fn remove(
 
 /// The first repository-level setting in `git config --list --show-scope -z` output that
 /// names a program Git may run while inspecting or removing a worktree.
+///
+/// With `-z`, each setting is two NUL-terminated fields: its scope, then `key\nvalue`.
 pub fn risky_key(output: &[u8]) -> Option<String> {
-    output
-        .split(|b| *b == 0)
-        .filter_map(|entry| {
-            let text = String::from_utf8_lossy(entry);
-            let (scope, rest) = text.split_once('\t')?;
-            let key = rest.split('\n').next()?.to_ascii_lowercase();
-            matches!(scope, "local" | "worktree").then_some(key)
+    let fields: Vec<&[u8]> = output.split(|b| *b == 0).collect();
+    fields
+        .chunks(2)
+        .filter_map(|pair| {
+            let [scope, entry] = pair else { return None };
+            let key = String::from_utf8_lossy(entry)
+                .split('\n')
+                .next()?
+                .to_ascii_lowercase();
+            matches!(*scope, b"local" | b"worktree").then_some(key)
         })
         .find(|key| {
             let part = |i: usize| key.split('.').nth(i).unwrap_or_default().to_owned();
@@ -369,6 +384,18 @@ pub fn risky_key(output: &[u8]) -> Option<String> {
                         | "core.hookspath"
                 )
                 || (part(0) == "diff" && matches!(last, "textconv" | "command"))
+        })
+}
+
+/// The path of the first gitlink (mode 160000, a nested repository) in
+/// `git ls-files --stage -z` output.
+pub fn gitlink(output: &[u8]) -> Option<String> {
+    output
+        .split(|b| *b == 0)
+        .filter(|entry| entry.starts_with(b"160000 "))
+        .find_map(|entry| {
+            let text = String::from_utf8_lossy(entry);
+            text.split_once('\t').map(|(_, path)| path.to_owned())
         })
 }
 

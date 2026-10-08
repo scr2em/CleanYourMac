@@ -200,6 +200,28 @@ impl ContainersModule {
         let host = String::from_utf8_lossy(&out.data).trim().to_owned();
         (out.status == 0 && !host.is_empty()).then_some(host)
     }
+    /// The URI of Podman's default connection, such as
+    /// `ssh://core@127.0.0.1:52345/run/user/501/podman/podman.sock` for the local machine.
+    fn podman_endpoint(&self, s: &Services, exe: &str, k: &ScanControl) -> Option<String> {
+        let out = self
+            .run_tool(
+                s,
+                exe,
+                &["system", "connection", "list", "--format", "json"],
+                10,
+                k,
+            )
+            .ok()?;
+        if out.status != 0 {
+            return None;
+        }
+        let list: Vec<serde_json::Value> = serde_json::from_slice(&out.data).ok()?;
+        let default = list
+            .iter()
+            .find(|c| c["Default"].as_bool() == Some(true))
+            .or(list.first())?;
+        default["URI"].as_str().map(str::to_owned)
+    }
     /// Reclaimable space by kind, from `<tool> system df`.
     fn usage(&self, s: &Services, exe: &str, k: &ScanControl) -> Result<Vec<Usage>> {
         let out = self.run_tool(s, exe, &["system", "df", "--format", "{{json .}}"], 60, k)?;
@@ -288,6 +310,24 @@ pub fn parse_usage(output: &str) -> Vec<Usage> {
             })
         })
         .collect()
+}
+
+/// Whether an engine endpoint is on this Mac: a local socket, or SSH to this computer's
+/// own address (how Podman reaches its virtual machine).
+pub fn local_endpoint(uri: &str) -> bool {
+    if uri.starts_with("unix://") {
+        return true;
+    }
+    let Some(rest) = uri.strip_prefix("ssh://") else {
+        return false;
+    };
+    let authority = rest.split('/').next().unwrap_or_default();
+    let host = authority.rsplit('@').next().unwrap_or_default();
+    let host = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or_default(),
+        None => host.split(':').next().unwrap_or_default(),
+    };
+    matches!(host, "127.0.0.1" | "localhost" | "::1")
 }
 
 /// The engine a Docker context reaches.
@@ -382,7 +422,7 @@ impl ScanModule for ContainersModule {
         for tool in ["docker", "podman"] {
             k.check()?;
             let Some(exe) = self.cli(tool) else { continue };
-            let mut endpoint = None;
+            let endpoint: Option<String>;
             let engine = if tool == "docker" {
                 let Some(name) = self.context(s, &exe, k) else {
                     continue;
@@ -400,6 +440,17 @@ impl ScanModule for ContainersModule {
                 }
                 Some((engine_for_context(&name), name))
             } else {
+                // Only the Podman machine on this Mac: a connection can point at a server.
+                match self.podman_endpoint(s, &exe, k) {
+                    Some(uri) if local_endpoint(&uri) => endpoint = Some(uri),
+                    other => {
+                        sink.warning(format!(
+                            "Podman points at {}, not a machine on this Mac, so its data is not listed.",
+                            other.unwrap_or_else(|| "no machine".into())
+                        ));
+                        continue;
+                    }
+                }
                 ENGINES
                     .iter()
                     .find(|e| e.name == "Podman")
@@ -530,6 +581,11 @@ impl ScanModule for ContainersModule {
             if !host.starts_with("unix://") {
                 return Err("Docker no longer points at an engine on this Mac.".into());
             }
+        } else {
+            let uri = self.podman_endpoint(s, &exe, k).unwrap_or_default();
+            if Some(uri.as_str()) != f.value("Endpoint") || !local_endpoint(&uri) {
+                return Err("Podman now points at a different machine. Scan again.".into());
+            }
         }
         // The command removes what exists when it runs, so it must still match what was
         // reviewed: refuse when it would now free clearly more.
@@ -587,6 +643,16 @@ mod tests {
         assert_eq!(podman[0].reclaimable, 600);
         assert_eq!(podman[0].total, "3");
         assert_eq!(engine_for_context("colima-work").unwrap().name, "Colima");
+        assert!(local_endpoint("unix:///Users/me/.docker/run/docker.sock"));
+        assert!(local_endpoint(
+            "ssh://core@127.0.0.1:52345/run/user/501/podman/podman.sock"
+        ));
+        assert!(local_endpoint("ssh://root@[::1]:22/run/podman/podman.sock"));
+        assert!(!local_endpoint(
+            "ssh://deploy@prod.example.com/run/podman/podman.sock"
+        ));
+        assert!(!local_endpoint("ssh://user@127.0.0.1.evil.com/x"));
+        assert!(!local_endpoint("tcp://127.0.0.1:2375"));
         assert_eq!(
             task_args("docker", "volumes"),
             None,
