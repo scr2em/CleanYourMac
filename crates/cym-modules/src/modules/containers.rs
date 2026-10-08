@@ -87,7 +87,7 @@ const ENGINES: &[Engine] = &[
 /// Desktop virtual machine apps: (app, home-relative pattern of one machine, how to remove
 /// one). A machine is one bundle or folder holding its disks, snapshots and settings, so it
 /// is listed for its size and removed in its app, which also forgets it.
-const MACHINES: &[(&str, &str, &str)] = &[
+pub const MACHINES: &[(&str, &str, &str)] = &[
     (
         "UTM",
         "Library/Containers/com.utmapp.UTM/Data/Documents/*.utm",

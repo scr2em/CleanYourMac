@@ -1,4 +1,5 @@
 use super::project_folders::{self, package_tree};
+pub(crate) use super::project_folders::{app_home_folder, in_app_home_folder};
 use super::{
     add_files, descriptor, flush, glob, owners, owners_closed, Candidate, LastUsed, ScanModule,
 };
@@ -58,22 +59,6 @@ pub(crate) fn shipped_outputs(s: &Services, folder: &str) -> Option<String> {
     None
 }
 
-/// The home folder's app and tool folders: `~/Library` and hidden folders such as
-/// `~/.vscode` or `~/.cursor`. What they hold (editor extensions, app plugins, tool data)
-/// belongs to that app or tool, never to a project, so project scans do not enter them.
-pub(crate) fn app_home_folder(path: &str, home: &str) -> bool {
-    let name = name(path);
-    Path::new(path).parent() == Some(Path::new(home))
-        && (name.starts_with('.') || name.eq_ignore_ascii_case("Library"))
-}
-/// Whether `path` is inside one of the home folder's app and tool folders, such as an editor
-/// extension (`~/.vscode/extensions/…`, `~/.cursor/extensions/…`).
-pub(crate) fn in_app_home_folder(path: &str, home: &str) -> bool {
-    Path::new(path)
-        .ancestors()
-        .skip(1)
-        .any(|folder| app_home_folder(&folder.to_string_lossy(), home))
-}
 const APP_DATA: &str = "Inside an app's or tool's own folder, such as an editor extension; removing it would break that app or extension.";
 
 /// Refuses to move an item that Git tracks inside its repository. Inside a checkout of any

@@ -1323,3 +1323,28 @@ fn caches_wait_for_the_app_the_scan_named() {
     let reason = module.in_use(&google, chrome, ActionKind::Trash).unwrap();
     assert!(reason.contains("Google Chrome"), "{reason}");
 }
+
+/// Every folder Toolchains, Caches, Dependencies or Containers lists sits in an app or tool
+/// folder the other tools stay out of, so none of them offers a file from inside it.
+#[test]
+fn every_tool_location_is_an_app_or_tool_folder() {
+    use modules::project_folders::in_app_home_folder;
+    let home = "/Users/me";
+    let patterns: Vec<&str> = ToolchainsModule::default()
+        .locations
+        .iter()
+        .map(|l| l.pattern)
+        .chain(CachesModule::default().locations.iter().map(|l| l.path))
+        .chain(DependenciesModule::default().stores.iter().map(|l| l.path))
+        .chain(modules::containers::MACHINES.iter().map(|m| m.1))
+        .collect();
+    assert!(patterns.len() > 100);
+    for pattern in patterns {
+        let path = format!("{home}/{}/x", pattern.replace('*', "any"));
+        assert!(in_app_home_folder(&path, home), "{pattern}");
+    }
+    // A project folder is not one; a folder beside the home folder is not inside it.
+    assert!(!in_app_home_folder("/Users/me/Projects/app/x", home));
+    assert!(!in_app_home_folder("/Users/me/go/src/app/x", home));
+    assert!(!in_app_home_folder("/Users/me.old/.cache/x", home));
+}

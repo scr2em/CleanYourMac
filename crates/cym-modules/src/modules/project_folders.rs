@@ -35,6 +35,46 @@ pub fn generated_name(name: &str) -> bool {
     package_tree(name) || policy::generated_name(name) || policy::generated_suffix(name)
 }
 
+/// Folders in the home folder, besides `~/Library` and hidden ones, that an app or tool
+/// keeps for itself: conda installs, Flutter SDK versions, Go's module cache, virtual
+/// machines. Toolchains, Caches and Containers list what is in them; every other tool
+/// leaves them alone. A test checks each of those tools' locations is covered here.
+pub const TOOL_HOMES: &[&str] = &[
+    "anaconda3",
+    "miniconda3",
+    "miniforge3",
+    "mambaforge",
+    "micromamba",
+    "fvm",
+    "go/pkg",
+    "Parallels",
+    "Virtual Machines.localized",
+    "VirtualBox VMs",
+];
+/// The home folder's app and tool folders: `~/Library`, hidden folders such as `~/.vscode`
+/// or `~/.cursor`, and `TOOL_HOMES`. What they hold (editor extensions, app plugins, tool
+/// data, environments, virtual machines) belongs to that app or tool, never to a project,
+/// so project and file scans do not enter them.
+pub fn app_home_folder(path: &str, home: &str) -> bool {
+    match policy::home_relative(path, home) {
+        Some("") | None => false,
+        Some(relative) => {
+            (!relative.contains('/')
+                && (relative.starts_with('.') || relative.eq_ignore_ascii_case("Library")))
+                || TOOL_HOMES.iter().any(|t| t.eq_ignore_ascii_case(relative))
+        }
+    }
+}
+/// Whether `path` is inside one of the home folder's app and tool folders, such as an editor
+/// extension (`~/.vscode/extensions/…`) or a conda environment (`~/miniconda3/envs/…`).
+pub fn in_app_home_folder(path: &str, home: &str) -> bool {
+    std::path::Path::new(path)
+        .ancestors()
+        .skip(1)
+        .filter_map(|folder| folder.to_str())
+        .any(|folder| app_home_folder(folder, home))
+}
+
 fn parent(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(p, _)| p)
 }

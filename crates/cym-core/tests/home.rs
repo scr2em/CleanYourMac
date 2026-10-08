@@ -14,7 +14,13 @@ fn scan(engine: &Engine, module: &str, roots: Vec<String>) -> Vec<Finding> {
         .findings
 }
 
+/// Each case sets `HOME`, so they run one after another in a single test.
 #[test]
+fn tools_reading_the_home_folder() {
+    library_folders_and_finder_files_are_left_alone();
+    tool_homes_are_left_to_their_tools();
+}
+
 fn library_folders_and_finder_files_are_left_alone() {
     let f = Fixture::new();
     let home = f.dir("home");
@@ -56,4 +62,37 @@ fn library_folders_and_finder_files_are_left_alone() {
     assert!(top
         .iter()
         .all(|r| r.title != ".localized" && r.title != ".DS_Store"));
+}
+
+/// Conda installs and virtual machines in the home folder belong to their tools: Large
+/// Files lists their files blocked, Build Artifacts and Exact Duplicates stay out.
+fn tool_homes_are_left_to_their_tools() {
+    let f = Fixture::new();
+    let home = f.dir("home");
+    std::env::set_var("HOME", &home);
+    let big = |path: &str| {
+        let path = f.write(path, "");
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(150_000_000)
+            .unwrap();
+    };
+    big("home/VirtualBox VMs/dev/dev.vdi");
+    f.write("home/miniconda3/lib/python3.12/site.py", "");
+    f.write("home/miniconda3/lib/python3.12/__pycache__/site.pyc", "");
+    let body = "equal contents ".repeat(400);
+    f.write("home/miniconda3/pkgs/a/info.txt", &body);
+    f.write("home/miniconda3/envs/b/info.txt", &body);
+    let engine = Engine::new(services(&f), builtin(&f));
+    let large = scan(&engine, "large", vec![home.clone()]);
+    let vdi = large
+        .iter()
+        .find(|r| r.title == "dev.vdi")
+        .unwrap_or_else(|| panic!("{large:?}"));
+    assert!(vdi.actions.is_empty());
+    assert!(vdi.blocked_reason.is_some());
+    assert!(scan(&engine, "artifacts", vec![home.clone()]).is_empty());
+    assert!(scan(&engine, "duplicates", vec![home]).is_empty());
 }

@@ -222,6 +222,7 @@ impl ScanModule for DuplicatesModule {
         let mut warnings = vec![];
         let mut sizes = vec![];
         let projects = super::project_folders::rules();
+        let home = policy::home();
         let mut context = c.clone();
         // A root inside build output or installed packages is not searched at all.
         context.roots.retain(|r| {
@@ -240,6 +241,7 @@ impl ScanModule for DuplicatesModule {
                 let name = e.name();
                 return Ok(!(name.starts_with('.')
                     || name.eq_ignore_ascii_case("Library")
+                    || super::project_folders::app_home_folder(e.path(), &home)
                     || projects.generated(s, e.path())));
             }
             if e.regular && e.bytes >= self.minimum_bytes {
@@ -357,12 +359,11 @@ fn finder_file(name: &str) -> bool {
 }
 
 /// Whether a file in the home folder belongs to an app or tool: anything in the Library
-/// folder, or in a hidden folder at any depth (`~/.ollama`, `~/.colima`, a project's `.idea`).
+/// folder or another app or tool folder (`~/miniconda3`, `~/VirtualBox VMs`), or in a
+/// hidden folder at any depth (`~/.ollama`, `~/.colima`, a project's `.idea`).
 pub fn app_data(path: &str, home: &str) -> bool {
-    policy::home_relative(path, home).is_some_and(|rest| {
-        let first = rest.split('/').next().unwrap_or_default();
-        first.eq_ignore_ascii_case("Library") || hidden_folder(rest)
-    })
+    policy::home_relative(path, home).is_some_and(hidden_folder)
+        || super::project_folders::in_app_home_folder(path, home)
 }
 fn hidden_folder(relative: &str) -> bool {
     relative

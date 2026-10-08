@@ -7,9 +7,9 @@
 //! the archive, and moves the folder to the Trash; opening the archive in Finder brings the
 //! project back.
 use super::{
-    add_files, descriptor,
-    developer::{app_home_folder, in_app_home_folder},
-    flush, project_activity, Candidate, LastUsed, ScanModule,
+    add_files, descriptor, flush, project_activity,
+    project_folders::{app_home_folder, in_app_home_folder},
+    Candidate, LastUsed, ScanModule,
 };
 use crate::{git::Git, model::*, orphans, policy, ports::*, services::Services};
 use std::{collections::BTreeSet, path::Path, time::Duration};
