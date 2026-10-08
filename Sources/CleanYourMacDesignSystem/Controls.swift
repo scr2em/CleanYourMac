@@ -165,3 +165,177 @@ public struct SummaryLine: View {
         .accessibilityElement(children: .combine)
     }
 }
+
+/// The app's checkbox: a rounded square that fills with the accent and bounces when ticked.
+public struct SoftCheckboxStyle: ToggleStyle {
+    @Environment(\.isEnabled) private var enabled
+    public init() {}
+    public func makeBody(configuration: Configuration) -> some View {
+        Button { configuration.isOn.toggle() } label: {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(configuration.isOn ? Palette.accent : Palette.surface)
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(configuration.isOn ? .clear : Palette.borderStrong, lineWidth: 1.5))
+                .overlay(Image(systemName: "checkmark").font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Palette.onAccent).scaleEffect(configuration.isOn ? 1 : 0.3).opacity(configuration.isOn ? 1 : 0))
+                .frame(width: Layout.checkbox, height: Layout.checkbox)
+                .animation(Motion.press, value: configuration.isOn)
+                .opacity(enabled ? 1 : Opacity.disabled)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // VoiceOver hears an ordinary checkbox.
+        .accessibilityRepresentation { Toggle(isOn: configuration.$isOn) { configuration.label } }
+    }
+}
+
+/// A row's icon on a soft tinted tile, so symbols, logos and file icons sit alike.
+public struct IconTile: View {
+    let icon: RowIcon
+    public init(icon: RowIcon) { self.icon = icon }
+    public var body: some View {
+        RowIconView(icon: icon)
+            .frame(width: Layout.rowTile, height: Layout.rowTile)
+            .background(Palette.track, in: RoundedRectangle(cornerRadius: Layout.tileRadius, style: .continuous))
+    }
+}
+
+/// A small rounded label for a row's state, such as "Rebuild required".
+public struct Pill: View {
+    private let text: String, tone: Color?
+    public init(_ text: String, tone: Color? = nil) { self.text = text; self.tone = tone }
+    public var body: some View {
+        Text(text).font(TypeStyle.captionEmphasis).lineLimit(1)
+            .foregroundStyle(tone ?? Palette.muted)
+            .padding(.horizontal, Space.sm).padding(.vertical, Space.xxs)
+            .background((tone ?? Palette.muted).opacity(0.12), in: Capsule())
+    }
+}
+
+/// One destination in the sidebar: an icon tile and a name on a pill that fills when selected.
+public struct SidebarItem: View {
+    private let title: String, symbol: String, selected: Bool
+    private let action: () -> Void
+    @State private var hovered = false
+    public init(_ title: String, symbol: String, selected: Bool, action: @escaping () -> Void) {
+        self.title = title; self.symbol = symbol; self.selected = selected; self.action = action
+    }
+    public var body: some View {
+        Button(action: action) {
+            HStack(spacing: Space.sm + Space.xxs) {
+                Image(systemName: symbol).font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(selected ? Palette.onAccent : Palette.accentSymbol)
+                    .frame(width: Layout.sidebarTile, height: Layout.sidebarTile)
+                    .background(selected ? Palette.accent : Palette.track, in: RoundedRectangle(cornerRadius: Layout.smallRadius, style: .continuous))
+                Text(title).font(TypeStyle.label).foregroundStyle(Palette.ink).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Space.xs + Space.xxs).frame(height: Layout.sidebarRow)
+            .background(selected ? Palette.sidebarSelection : (hovered ? Palette.sidebarSelection.opacity(0.5) : .clear),
+                        in: RoundedRectangle(cornerRadius: Layout.rowRadius, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(Motion.quick, value: hovered)
+        .animation(Motion.press, value: selected)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// A sidebar group's heading.
+public struct SidebarHeading: View {
+    private let title: String
+    public init(_ title: String) { self.title = title }
+    public var body: some View {
+        Text(title).font(TypeStyle.captionEmphasis).foregroundStyle(Palette.muted)
+            .padding(.horizontal, Space.sm).padding(.top, Space.md).padding(.bottom, Space.xxs)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// The app's mark and name, at the top of the sidebar.
+public struct BrandMark: View {
+    public init() {}
+    public var body: some View {
+        HStack(spacing: Space.sm) {
+            Image(systemName: "leaf.fill").font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(Palette.onAccent)
+                .frame(width: 30, height: 30)
+                .background(LinearGradient(colors: [Palette.accentSymbol, Palette.accent], startPoint: .topLeading, endPoint: .bottomTrailing),
+                            in: RoundedRectangle(cornerRadius: Layout.tileRadius, style: .continuous))
+                .softShadow(0.5)
+            Text("CleanYourMac").font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(Palette.ink)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A pill-shaped segmented control whose selection slides between options.
+public struct PillSegments<Value: Hashable>: View {
+    private let options: [ChoiceOption<Value>]
+    @Binding private var selection: Value
+    @Namespace private var thumb
+    public init(selection: Binding<Value>, options: [ChoiceOption<Value>]) { self._selection = selection; self.options = options }
+    public var body: some View {
+        HStack(spacing: Space.xxs) {
+            ForEach(options) { option in
+                let chosen = option.value == selection
+                Button { selection = option.value } label: {
+                    Text(option.title).font(TypeStyle.label)
+                        .foregroundStyle(chosen ? Palette.ink : Palette.muted)
+                        .padding(.horizontal, Space.md).frame(height: Layout.chipHeight - Space.xs)
+                        .background {
+                            if chosen {
+                                Capsule().fill(Palette.surface).softShadow(0.4).matchedGeometryEffect(id: "thumb", in: thumb)
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(chosen ? [.isButton, .isSelected] : .isButton)
+            }
+        }
+        .padding(Space.xxs)
+        .background(Palette.track, in: Capsule())
+        .animation(Motion.press, value: selection)
+    }
+}
+
+/// A text-only button in the accent colour, for secondary links inside cards.
+public struct TextAction: View {
+    private let title: String, action: () -> Void
+    public init(_ title: String, action: @escaping () -> Void) { self.title = title; self.action = action }
+    public var body: some View {
+        Button(action: action) { Text(title).font(TypeStyle.captionEmphasis).foregroundStyle(Palette.accentText) }
+            .buttonStyle(.plain)
+    }
+}
+
+/// A soft card that expands to show details, used for scan warnings.
+public struct Callout<Content: View>: View {
+    private let title: String, symbol: String, tone: Color
+    private let content: Content
+    @State private var open = false
+    public init(_ title: String, symbol: String, tone: Color, @ViewBuilder content: () -> Content) {
+        self.title = title; self.symbol = symbol; self.tone = tone; self.content = content()
+    }
+    public var body: some View {
+        VStack(alignment: .leading, spacing: Space.sm) {
+            Button { open.toggle() } label: {
+                HStack(spacing: Space.sm) {
+                    Image(systemName: symbol).font(TypeStyle.label).foregroundStyle(tone)
+                    Text(title).font(TypeStyle.label).foregroundStyle(Palette.ink)
+                    Spacer()
+                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Palette.muted)
+                        .rotationEffect(.degrees(open ? 180 : 0))
+                }.contentShape(Rectangle())
+            }.buttonStyle(.plain)
+            if open { content.transition(.opacity.combined(with: .move(edge: .top))) }
+        }
+        .padding(.horizontal, Space.md).padding(.vertical, Space.sm + Space.xxs)
+        .background(tone.opacity(0.08), in: RoundedRectangle(cornerRadius: Layout.controlRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Layout.controlRadius, style: .continuous).strokeBorder(tone.opacity(0.25), lineWidth: Stroke.hairline))
+        .animation(Motion.press, value: open)
+    }
+}

@@ -7,26 +7,29 @@ public enum Space {
 public enum Layout {
     public static let sidebar: CGFloat = 220, inspector: CGFloat = 320, inspectorMin: CGFloat = 240, inspectorMax: CGFloat = 420
     public static let contentMin: CGFloat = 400, windowWidth: CGFloat = 1120, windowHeight: CGFloat = 760, windowMinWidth: CGFloat = 880, windowMinHeight: CGFloat = 560
-    public static let reviewWidth: CGFloat = 640, reviewHeight: CGFloat = 540, rowMinimum: CGFloat = 52, panelRadius: CGFloat = 16, controlRadius: CGFloat = 10, smallRadius: CGFloat = 5
-    public static let iconSmall: CGFloat = 12, iconMedium: CGFloat = 16, iconLarge: CGFloat = 32, rowIcon: CGFloat = 24, checkbox: CGFloat = 18
-    public static let sidebarRow: CGFloat = 36, controlHeight: CGFloat = 40
-    public static let chipHeight: CGFloat = 28, toolIcon: CGFloat = 40
+    /// Soft Studio radii: big, friendly corners on surfaces; pills for controls.
+    public static let reviewWidth: CGFloat = 640, reviewHeight: CGFloat = 540, rowMinimum: CGFloat = 56, panelRadius: CGFloat = 20, controlRadius: CGFloat = 14, smallRadius: CGFloat = 8
+    public static let rowRadius: CGFloat = 12, sheetRadius: CGFloat = 22, tileRadius: CGFloat = 10
+    public static let iconSmall: CGFloat = 12, iconMedium: CGFloat = 16, iconLarge: CGFloat = 32, rowIcon: CGFloat = 24, rowTile: CGFloat = 34, checkbox: CGFloat = 20
+    public static let sidebarRow: CGFloat = 36, sidebarTile: CGFloat = 26, controlHeight: CGFloat = 34
+    public static let chipHeight: CGFloat = 30, toolIcon: CGFloat = 44
     public static let scanOrb: CGFloat = 200, scanOrbCompact: CGFloat = 64, diskBar: CGFloat = 24
 }
-/// System font (SF Pro) on a compact macOS scale.
+/// Soft Studio type: SF Pro Rounded for titles, labels and figures, which carry the app's
+/// voice; regular SF Pro for running text, which stays easiest to read.
 public enum TypeStyle {
-    public static let pageTitle = Font.system(size: 24, weight: .semibold)
-    public static let title = Font.system(size: 17, weight: .semibold)
-    public static let headline = Font.system(size: 15, weight: .semibold)
-    public static let sectionTitle = Font.system(size: 13, weight: .semibold)
-    public static let rowTitle = Font.system(size: 13, weight: .medium)
+    public static let pageTitle = Font.system(size: 26, weight: .bold, design: .rounded)
+    public static let title = Font.system(size: 18, weight: .semibold, design: .rounded)
+    public static let headline = Font.system(size: 15, weight: .semibold, design: .rounded)
+    public static let sectionTitle = Font.system(size: 13, weight: .semibold, design: .rounded)
+    public static let rowTitle = Font.system(size: 13, weight: .semibold, design: .rounded)
     public static let secondary = Font.system(size: 13)
     public static let body = Font.system(size: 12)
-    public static let label = Font.system(size: 12, weight: .medium)
-    public static let numeric = Font.system(size: 12).monospacedDigit()
+    public static let label = Font.system(size: 12, weight: .semibold, design: .rounded)
+    public static let numeric = Font.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit()
     public static let caption = Font.system(size: 11)
-    public static let captionEmphasis = Font.system(size: 11, weight: .medium)
-    public static let metric = Font.system(size: 32, weight: .medium).monospacedDigit()
+    public static let captionEmphasis = Font.system(size: 11, weight: .semibold, design: .rounded)
+    public static let metric = Font.system(size: 34, weight: .bold, design: .rounded).monospacedDigit()
     public static let code = Font.system(size: 11, design: .monospaced)
 }
 /// Named Comfy palettes. Colors resolve at draw time, so switching applies on the next render.
@@ -204,9 +207,24 @@ public struct ThemeSwatch: View {
         .accessibilityHidden(true)
     }
 }
-/// Shared animation timing.
+/// Shared animation timing: quick for hover and focus, springy for presses and layout.
 public enum Motion {
     public static let quick = Animation.easeOut(duration: 0.15)
+    public static let press = Animation.spring(duration: 0.25, bounce: 0.35)
+}
+
+public extension View {
+    /// Soft Studio elevation: a tight contact shadow under a wide, faint one.
+    func softShadow(_ level: Double = 1) -> some View {
+        shadow(color: Palette.ink.opacity(0.05 * level), radius: 1, y: 1)
+            .shadow(color: Palette.ink.opacity(0.07 * level), radius: 14 * level, y: 6 * level)
+    }
+    /// A raised surface: filled, rounded, hairline-bordered and softly shadowed.
+    func card(radius: CGFloat = Layout.panelRadius, fill: Color = Palette.surface, elevation: Double = 1) -> some View {
+        background(fill, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Palette.border, lineWidth: Stroke.hairline))
+            .softShadow(elevation)
+    }
 }
 public enum Stroke {
     public static let hairline: CGFloat = 1, focus: CGFloat = 2
@@ -250,13 +268,18 @@ struct ComfyButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(TypeStyle.body.weight(.medium))
+            .font(TypeStyle.label)
             .foregroundStyle(foreground)
-            .padding(.horizontal, Space.lg).padding(.vertical, Space.sm - Space.xxs)
-            .background(fill, in: RoundedRectangle(cornerRadius: Layout.controlRadius))
-            .overlay(RoundedRectangle(cornerRadius: Layout.controlRadius).strokeBorder(kind == .secondary ? Palette.borderStrong : .clear, lineWidth: Stroke.hairline))
-            .opacity(enabled ? (configuration.isPressed ? Opacity.pressed : 1) : Opacity.disabled)
-            .contentShape(RoundedRectangle(cornerRadius: Layout.controlRadius))
+            .padding(.horizontal, Space.lg + Space.xxs).frame(minHeight: Layout.controlHeight)
+            .background(fill, in: Capsule())
+            // A soft top highlight gives filled buttons some body.
+            .overlay(Capsule().fill(LinearGradient(colors: [.white.opacity(kind == .secondary ? 0 : 0.18), .clear], startPoint: .top, endPoint: .center)))
+            .overlay(Capsule().strokeBorder(kind == .secondary ? Palette.borderStrong : .clear, lineWidth: Stroke.hairline))
+            .softShadow(kind == .secondary ? 0.4 : 0.7)
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(Motion.press, value: configuration.isPressed)
+            .opacity(enabled ? 1 : Opacity.disabled)
+            .contentShape(Capsule())
     }
     private var fill: Color {
         switch kind { case .primary: Palette.accent; case .secondary: Palette.surface; case .destructive: Palette.destructive }
@@ -270,10 +293,8 @@ public struct Panel<Content: View>: View {
     private let content: Content
     public init(@ViewBuilder content: () -> Content) { self.content = content() }
     public var body: some View {
-        content.padding(Space.lg).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: Layout.panelRadius))
-            .overlay(RoundedRectangle(cornerRadius: Layout.panelRadius).strokeBorder(Palette.border, lineWidth: Stroke.hairline))
-            .shadow(color: Palette.ink.opacity(0.06), radius: Space.sm, y: Space.xxs)
+        content.padding(Space.lg + Space.xxs).frame(maxWidth: .infinity, alignment: .leading)
+            .card()
     }
 }
 
@@ -287,8 +308,7 @@ public struct StatChip: View {
             Text(label).font(TypeStyle.caption).foregroundStyle(Palette.muted).lineLimit(1)
         }
         .padding(.horizontal, Space.md).padding(.vertical, Space.sm)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Layout.controlRadius))
-        .overlay(RoundedRectangle(cornerRadius: Layout.controlRadius).strokeBorder(Palette.border, lineWidth: Stroke.hairline))
+        .card(radius: Layout.controlRadius, elevation: 0.4)
         .accessibilityElement(children: .combine)
     }
 }
@@ -299,9 +319,9 @@ public struct MetricTile: View {
     public var body: some View {
         Panel {
             VStack(alignment: .leading, spacing: Space.sm) {
-                Text(title).font(TypeStyle.caption).foregroundStyle(.secondary)
+                Text(title).font(TypeStyle.caption).foregroundStyle(Palette.muted)
                 Text(value).font(TypeStyle.metric)
-                Text(detail).font(TypeStyle.caption).foregroundStyle(.secondary)
+                Text(detail).font(TypeStyle.caption).foregroundStyle(Palette.muted)
             }
         }.accessibilityElement(children: .combine)
     }
@@ -312,10 +332,10 @@ public struct StatusBadge: View {
     private let warning: Bool
     public init(_ title: String, warning: Bool = false) { self.title = title; self.warning = warning }
     public var body: some View {
-        Label(title, systemImage: warning ? "exclamationmark.circle" : "info.circle")
-            .font(TypeStyle.caption).foregroundStyle(warning ? Palette.warning : .secondary)
-            .padding(.horizontal, Space.sm).padding(.vertical, Space.xs)
-            .background(Palette.surface, in: Capsule())
+        Label(title, systemImage: warning ? "exclamationmark.circle.fill" : "info.circle.fill")
+            .font(TypeStyle.captionEmphasis).foregroundStyle(warning ? Palette.warning : Palette.accentText)
+            .padding(.horizontal, Space.sm).padding(.vertical, Space.xxs + 1)
+            .background((warning ? Palette.warning : Palette.accentSymbol).opacity(0.12), in: Capsule())
     }
 }
 
@@ -324,9 +344,9 @@ public struct EmptyState: View {
     public init(_ title: String, message: String, symbol: String = "tray") { self.title = title; self.message = message; self.symbol = symbol }
     public var body: some View {
         VStack(spacing: Space.lg) {
-            Image(systemName: symbol).font(TypeStyle.metric).foregroundStyle(.secondary)
+            Image(systemName: symbol).font(TypeStyle.metric).foregroundStyle(Palette.muted)
             Text(title).font(TypeStyle.sectionTitle)
-            Text(message).font(TypeStyle.secondary).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Text(message).font(TypeStyle.secondary).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
         }.padding(Space.xxl).frame(maxWidth: .infinity, maxHeight: .infinity).accessibilityElement(children: .combine)
     }
 }
@@ -347,25 +367,26 @@ public struct FindingRow: View {
     }
     public var body: some View {
         HStack(spacing: Space.md) {
-            Toggle("Select \(title) for review", isOn: $checked).labelsHidden().toggleStyle(.checkbox)
+            Toggle("Select \(title) for review", isOn: $checked).labelsHidden().toggleStyle(SoftCheckboxStyle())
                 .disabled(!eligible, because: disabledReason)
             Button(action: inspect) {
                 HStack(spacing: Space.md) {
-                    RowIconView(icon: icon)
-                    VStack(alignment: .leading, spacing: Space.xs) {
-                        Text(title).font(TypeStyle.rowTitle).lineLimit(1)
-                        Text(subtitle).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    IconTile(icon: icon)
+                    VStack(alignment: .leading, spacing: Space.xxs) {
+                        Text(title).font(TypeStyle.rowTitle).foregroundStyle(Palette.ink).lineLimit(1)
+                        Text(subtitle).font(TypeStyle.caption).foregroundStyle(Palette.muted).lineLimit(1).truncationMode(.middle)
                     }
-                    Spacer()
+                    Spacer(minLength: Space.md)
                     VStack(alignment: .trailing, spacing: Space.xs) {
-                        Text(value).font(TypeStyle.numeric)
-                        Text(badge).font(TypeStyle.caption).foregroundStyle(.secondary)
+                        Text(value).font(TypeStyle.numeric).foregroundStyle(Palette.ink)
+                        if !badge.isEmpty { Pill(badge) }
                     }
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityLabel("Inspect \(title), \(value), \(badge)")
         }
-        .padding(.horizontal, Space.lg).padding(.vertical, Space.sm).frame(minHeight: Layout.rowMinimum)
-        .background(active ? Palette.selection : .clear)
+        .padding(.horizontal, Space.md).padding(.vertical, Space.xs).frame(minHeight: Layout.rowMinimum)
+        .background(active ? Palette.selection : .clear, in: RoundedRectangle(cornerRadius: Layout.rowRadius, style: .continuous))
+        .padding(.horizontal, Space.sm)
     }
 }
 
@@ -398,7 +419,7 @@ public struct KeyValueRow: View {
     public init(_ label: String, _ value: String) { self.label = label; self.value = value }
     public var body: some View {
         VStack(alignment: .leading, spacing: Space.xs) {
-            Text(label).font(TypeStyle.caption).foregroundStyle(.secondary)
+            Text(label).font(TypeStyle.caption).foregroundStyle(Palette.muted)
             Text(value).font(TypeStyle.secondary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -410,7 +431,7 @@ public struct PageHeader: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: Space.sm) {
             Text(title).font(TypeStyle.pageTitle)
-            Text(subtitle).font(TypeStyle.secondary).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(subtitle).font(TypeStyle.secondary).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -471,7 +492,7 @@ public struct DiskBar: View {
                             .frame(width: Layout.iconSmall, height: Layout.iconSmall)
                         VStack(alignment: .leading, spacing: Space.xxs) {
                             Text(segment.label).font(TypeStyle.sectionTitle)
-                            Text(format(segment.bytes)).font(TypeStyle.secondary).foregroundStyle(.secondary).monospacedDigit()
+                            Text(format(segment.bytes)).font(TypeStyle.secondary).foregroundStyle(Palette.muted).monospacedDigit()
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -493,11 +514,49 @@ public struct DiskBar: View {
 
 public struct ComponentGallery: View {
     @State private var checked = false
+    @State private var size = "Any size"
+    @State private var place = "Whole Mac"
+    @State private var query = ""
     public init() {}
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xl) {
-                PageHeader("Component Gallery", subtitle: "The shared vocabulary used by every module. Fixture data only.")
+                ToolHeader("Component Gallery", subtitle: "The shared vocabulary used by every module. Fixture data only.", symbol: "paintpalette") {
+                    ActionButton("Scan", kind: .primary) {}
+                }
+                Panel {
+                    VStack(alignment: .leading, spacing: Space.md) {
+                        HStack(spacing: Space.sm) {
+                            ChipLabel(symbol: "laptopcomputer", label: "Scanning", value: "Whole Mac")
+                            SummaryLine([.init("128", "items"), .init("12.4 GB", "on disk"), .init("9.1 GB", "to review", emphasized: true)])
+                        }
+                        HStack(spacing: Space.sm) {
+                            SearchField("Search by name or path", text: $query).frame(width: 240)
+                            ChoiceChip("Size", selection: $size, neutral: "Any size", options: ["Any size", "Over 1 GB"].map { ChoiceOption($0, $0) })
+                            ChoiceChip("Modified", selection: .constant("Any time"), neutral: "Any time", options: [ChoiceOption("Any time", "Any time")])
+                            PillSegments(selection: $place, options: ["Whole Mac", "Chosen folders"].map { ChoiceOption($0, $0) })
+                        }
+                        HStack(spacing: Space.md) {
+                            Toggle("Selected", isOn: $checked).labelsHidden().toggleStyle(SoftCheckboxStyle())
+                            Toggle("Unselected", isOn: .constant(false)).labelsHidden().toggleStyle(SoftCheckboxStyle())
+                            Pill("Rebuild required"); Pill("Review", tone: Palette.warning); Pill("Duplicate", tone: Palette.accentSymbol)
+                            TextAction("Show items") {}
+                        }
+                    }
+                }
+                HStack(alignment: .top, spacing: Space.lg) {
+                    VStack(alignment: .leading, spacing: Space.xxs) {
+                        BrandMark().padding(.bottom, Space.sm)
+                        SidebarItem("Overview", symbol: "square.grid.2x2", selected: true) {}
+                        SidebarHeading("Developer")
+                        SidebarItem("Dependencies", symbol: "shippingbox", selected: false) {}
+                        SidebarItem("Build Artifacts", symbol: "hammer", selected: false) {}
+                    }
+                    .padding(Space.sm).frame(width: Layout.sidebar).background(Palette.sidebar, in: RoundedRectangle(cornerRadius: Layout.panelRadius))
+                    Callout("2 scan warnings · coverage may be incomplete", symbol: "exclamationmark.triangle.fill", tone: Palette.warning) {
+                        Text("Cannot read ~/Library/Mail: permission denied").font(TypeStyle.caption).foregroundStyle(Palette.muted)
+                    }
+                }
                 Panel {
                     DiskBar([
                         .init("Ready to free", bytes: 42_000_000_000, style: .ready),
@@ -532,7 +591,7 @@ public struct ComponentGallery: View {
                 Panel {
                     HStack(spacing: Space.md) {
                         ForEach(["nextdotjs", "react", "flutter", "rust", "python", "gradle", "swift", "xcode", "go", "dotnet", "unity", "pnpm"], id: \.self) { slug in
-                            RowIconView(icon: .brand(slug)).help(BrandCatalog.name(slug) ?? slug)
+                            IconTile(icon: .brand(slug)).help(BrandCatalog.name(slug) ?? slug)
                         }
                     }
                 }

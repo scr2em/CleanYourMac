@@ -19,12 +19,13 @@ struct ResultsTable: NSViewRepresentable {
         table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("result")))
         table.headerView = nil
         table.style = .plain
-        table.rowHeight = Layout.rowMinimum
+        table.rowHeight = Layout.rowMinimum + Space.xs
         table.usesAutomaticRowHeights = false
         table.selectionHighlightStyle = .none
         table.focusRingType = .none
         table.intercellSpacing = .zero
-        table.gridStyleMask = .solidHorizontalGridLineMask
+        // Rows are rounded and spaced; no grid lines between them.
+        table.gridStyleMask = []
         table.backgroundColor = .clear
         table.dataSource = context.coordinator
         table.delegate = context.coordinator

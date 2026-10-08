@@ -11,19 +11,26 @@ public struct WorkspaceView: View {
             SidebarView(store: store)
                 .navigationSplitViewColumnWidth(ideal: Layout.sidebar)
         } detail: {
+            // The page floats as a rounded sheet on the window, the app's signature shape.
             HSplitView {
                 content.frame(minWidth: Layout.contentMin)
                 if store.showInspector, store.inspected != nil, store.selectedModuleID != "activity", store.selectedModuleID != "gallery" {
                     InspectorView(store: store).frame(minWidth: Layout.inspectorMin, idealWidth: Layout.inspector, maxWidth: Layout.inspectorMax)
                 }
             }
+            .background(Palette.canvas)
+            .clipShape(RoundedRectangle(cornerRadius: Layout.sheetRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Layout.sheetRadius, style: .continuous).strokeBorder(Palette.border, lineWidth: Stroke.hairline))
+            .softShadow(0.8)
+            .padding([.trailing, .bottom], Space.sm)
+            .background(Palette.sidebar)
         }
         .frame(minWidth: Layout.windowMinWidth, minHeight: Layout.windowMinHeight)
-        .background(Palette.canvas)
+        .background(Palette.sidebar)
         .id(store.theme)
         .toolbar {
             ToolbarItemGroup {
-                if store.demo { Text("Demo · actions disabled").font(TypeStyle.caption).foregroundStyle(.secondary) }
+                if store.demo { Text("Demo · actions disabled").font(TypeStyle.caption).foregroundStyle(Palette.muted) }
                 Button { store.showInspector.toggle() } label: { Label("Inspector", systemImage: "sidebar.right") }.help("Toggle inspector")
                 SettingsLink { Label("Settings", systemImage: "gearshape") }.help("Settings")
             }
@@ -63,20 +70,28 @@ public struct WorkspaceView: View {
 private struct SidebarView: View {
     @Bindable var store: AppStore
     var body: some View {
-        List(selection: $store.selectedModuleID) {
-            Label("Overview", systemImage: "square.grid.2x2").tag("overview")
-            ForEach(Category.allCases, id: \.self) { category in
-                Section(category.rawValue) {
-                    ForEach(store.enabledModules.filter { $0.category == category }, id: \.id) { module in
-                        Label(module.name, systemImage: module.symbol).tag(module.id)
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.xxs) {
+                BrandMark().padding(.horizontal, Space.sm).padding(.top, Space.xs).padding(.bottom, Space.md)
+                item("Overview", symbol: "square.grid.2x2", id: "overview")
+                ForEach(Category.allCases, id: \.self) { category in
+                    let modules = store.enabledModules.filter { $0.category == category }
+                    if !modules.isEmpty {
+                        SidebarHeading(category.rawValue)
+                        ForEach(modules, id: \.id) { module in item(module.name, symbol: module.symbol, id: module.id) }
                     }
                 }
+                SidebarHeading("History")
+                item("Activity", symbol: "clock.arrow.circlepath", id: "activity")
+                item("Component Gallery", symbol: "paintpalette", id: "gallery")
             }
-            Section {
-                Label("Activity", systemImage: "clock.arrow.circlepath").tag("activity")
-                Label("Component Gallery", systemImage: "paintpalette").tag("gallery")
-            }
-        }.listStyle(.sidebar).scrollContentBackground(.hidden).background(Palette.sidebar).tint(Palette.accent).navigationTitle("CleanYourMac")
+            .padding(.horizontal, Space.sm).padding(.bottom, Space.lg)
+        }
+        .background(Palette.sidebar)
+        .navigationTitle("CleanYourMac")
+    }
+    private func item(_ title: String, symbol: String, id: String) -> some View {
+        SidebarItem(title, symbol: symbol, selected: (store.selectedModuleID ?? "overview") == id) { store.selectedModuleID = id }
     }
 }
 
@@ -119,11 +134,8 @@ private struct ScanPlacePicker: View {
     @Bindable var store: AppStore
     var body: some View {
         HStack(spacing: Space.md) {
-            Picker("Scan", selection: $store.scanPlace) {
-                ForEach(AppStore.ScanPlace.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented).labelsHidden().fixedSize()
-            .disabled(store.isScanning, because: store.whileScanning)
+            PillSegments(selection: $store.scanPlace, options: AppStore.ScanPlace.allCases.map { ChoiceOption($0, $0.rawValue) })
+                .disabled(store.isScanning, because: store.whileScanning)
             // Picking "Chosen folders" with none chosen asks for them straight away.
             .onChange(of: store.scanPlace) { _, place in
                 if place == .folders && store.roots.isEmpty { store.chooseFolders() }
@@ -147,13 +159,13 @@ private struct ScanHero: View {
         VStack(spacing: Space.lg) {
             Text(store.isScanning ? "Looking around your Mac…" : "Your Mac, with room to work").font(TypeStyle.pageTitle)
             Text(store.isScanning ? "You can keep working; nothing is changed while scanning." : "One scan finds what developers and everyday use leave behind. You choose what to remove.")
-                .font(TypeStyle.secondary).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                .font(TypeStyle.secondary).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
             ScanOrb("Scan", subtitle: store.scanPlace.rawValue, phase: store.isScanning ? .scanning(progress: store.scanFraction) : .idle) { store.scan() }
                 .matchedGeometryEffect(id: "orb", in: orb)
                 .disabled(store.isApplying || store.demo, because: store.reason(store.inDemo, store.whileApplying))
             if store.isScanning {
                 VStack(spacing: Space.sm) {
-                    Text(store.progress).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    Text(store.progress).font(TypeStyle.caption).foregroundStyle(Palette.muted).lineLimit(1).truncationMode(.middle)
                     HStack(spacing: Space.sm) {
                         StatChip("Found so far", value: Display.bytes(store.overview.diskBytes))
                         StatChip("Items", value: store.overview.findings.formatted())
@@ -164,7 +176,7 @@ private struct ScanHero: View {
                 .transition(.opacity)
             } else {
                 ScanPlacePicker(store: store)
-                Text(placeDescription(store)).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                Text(placeDescription(store)).font(TypeStyle.caption).foregroundStyle(Palette.muted).lineLimit(1).truncationMode(.middle)
                 DiskSpaceView(store: store).padding(.top, Space.lg)
             }
             WarningView(store: store)
@@ -189,11 +201,11 @@ private struct ScanSummary: View {
                         .font(TypeStyle.headline).contentTransition(.numericText())
                     if store.isScanning {
                         Text(store.scanTotal > 1 ? "\(store.scanFinished) of \(store.scanTotal) tools done · \(store.progress)" : store.progress)
-                            .font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            .font(TypeStyle.caption).foregroundStyle(Palette.muted).lineLimit(1).truncationMode(.middle)
                     } else {
-                        Text(lastScanned).font(TypeStyle.caption).foregroundStyle(.secondary)
+                        Text(lastScanned).font(TypeStyle.caption).foregroundStyle(Palette.muted)
                     }
-                    Text(placeDescription(store)).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    Text(placeDescription(store)).font(TypeStyle.caption).foregroundStyle(Palette.muted).lineLimit(1).truncationMode(.middle)
                 }
                 Spacer()
                 if store.isScanning { ActionButton("Cancel") { store.cancelScan() } } else { ScanPlacePicker(store: store) }
@@ -216,7 +228,7 @@ private struct DiskSpaceView: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text("Your disk").font(TypeStyle.sectionTitle)
                         Spacer()
-                        Text("\(Display.bytes(disk.used)) of \(Display.bytes(disk.total)) used").font(TypeStyle.caption).foregroundStyle(.secondary).monospacedDigit()
+                        Text("\(Display.bytes(disk.used)) of \(Display.bytes(disk.total)) used").font(TypeStyle.caption).foregroundStyle(Palette.muted).monospacedDigit()
                     }
                     DiskBar(disk.breakdown(found: store.overview.diskBytes, ready: store.recommendedBytes)) { Display.bytes($0) }
                 }
@@ -237,7 +249,7 @@ private struct RecommendationsView: View {
                         Text(store.isScanning
                              ? "Free up \(Display.bytes(store.recommendedBytes)) so far · fixes open for review as each tool finishes"
                              : "Free up \(Display.bytes(store.recommendedBytes)) with these fixes")
-                            .font(TypeStyle.secondary).foregroundStyle(.secondary).contentTransition(.numericText())
+                            .font(TypeStyle.secondary).foregroundStyle(Palette.muted).contentTransition(.numericText())
                     }
                     Spacer()
                     if store.recommendations.contains(where: { $0.action == .trash }) {
@@ -250,7 +262,7 @@ private struct RecommendationsView: View {
         } else if store.lastScanAt != nil, !store.isScanning {
             Panel {
                 Label("Nothing to recommend right now. Each tool below still lists everything it found.", systemImage: "checkmark.seal")
-                    .font(TypeStyle.secondary).foregroundStyle(.secondary)
+                    .font(TypeStyle.secondary).foregroundStyle(Palette.muted)
             }
         }
     }
@@ -262,15 +274,14 @@ private struct RecommendationCard: View {
     var body: some View {
         Panel {
             HStack(alignment: .top, spacing: Space.lg) {
-                RowIconView(icon: Display.icon(moduleID: fix.moduleID, path: nil, brand: fix.brand, symbol: store.modules.first { $0.id == fix.moduleID }?.symbol ?? "sparkles"))
+                IconTile(icon: Display.icon(moduleID: fix.moduleID, path: nil, brand: fix.brand, symbol: store.modules.first { $0.id == fix.moduleID }?.symbol ?? "sparkles"))
                 VStack(alignment: .leading, spacing: Space.xs) {
                     Text(fix.title).font(TypeStyle.sectionTitle)
-                    Text(fix.detail).font(TypeStyle.secondary).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text(fix.detail).font(TypeStyle.secondary).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: Space.sm) {
                         StatusBadge(fix.risk.rawValue, warning: fix.risk == .permanent)
-                        Text(Display.items(fix.count)).font(TypeStyle.caption).foregroundStyle(.secondary)
-                        Button("Show items") { store.selectedModuleID = fix.moduleID }
-                            .buttonStyle(.link).font(TypeStyle.caption)
+                        Text(Display.items(fix.count)).font(TypeStyle.caption).foregroundStyle(Palette.muted)
+                        TextAction("Show items") { store.selectedModuleID = fix.moduleID }
                     }
                 }
                 Spacer()
@@ -281,7 +292,7 @@ private struct RecommendationCard: View {
                     } else {
                         HStack(spacing: Space.xs) {
                             ProgressView().controlSize(.small)
-                            Text(store.isApplying ? "Action running" : "Still scanning").font(TypeStyle.caption).foregroundStyle(.secondary)
+                            Text(store.isApplying ? "Action running" : "Still scanning").font(TypeStyle.caption).foregroundStyle(Palette.muted)
                         }
                     }
                 }
@@ -299,7 +310,7 @@ private struct AllToolsView: View {
             ForEach(Category.allCases, id: \.self) { category in
                 let modules = store.enabledModules.filter { $0.category == category }
                 if !modules.isEmpty {
-                    Text(category.rawValue).font(TypeStyle.sectionTitle).foregroundStyle(.secondary)
+                    Text(category.rawValue).font(TypeStyle.sectionTitle).foregroundStyle(Palette.muted)
                     ForEach(modules, id: \.id) { module in
                         Button { store.selectedModuleID = module.id; store.search = "" } label: {
                             Panel {
@@ -307,14 +318,14 @@ private struct AllToolsView: View {
                                     Image(systemName: module.symbol).foregroundStyle(Palette.accentSymbol)
                                     VStack(alignment: .leading, spacing: Space.xs) {
                                         Text(module.name).font(TypeStyle.sectionTitle)
-                                        Text(module.summary).font(TypeStyle.secondary).foregroundStyle(.secondary)
+                                        Text(module.summary).font(TypeStyle.secondary).foregroundStyle(Palette.muted)
                                         if !module.inOverview {
-                                            Text("Not part of the scan above. Open it to scan.").font(TypeStyle.caption).foregroundStyle(.secondary)
+                                            Text("Not part of the scan above. Open it to scan.").font(TypeStyle.caption).foregroundStyle(Palette.muted)
                                         }
                                     }
                                     Spacer()
                                     Text(store.count(for: module.id).formatted()).font(TypeStyle.numeric)
-                                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                                    Image(systemName: "chevron.right").foregroundStyle(Palette.muted)
                                 }
                             }
                         }.buttonStyle(.plain)
@@ -418,24 +429,26 @@ private struct FinderView: View {
                 if store.selectedModuleID == "storage", !store.largest.isEmpty {
                     Panel {
                         VStack(alignment: .leading, spacing: Space.md) {
-                            Text("Largest items · size on disk in this folder").font(TypeStyle.caption).foregroundStyle(.secondary)
+                            Text("Largest items · size on disk in this folder").font(TypeStyle.caption).foregroundStyle(Palette.muted)
                             ForEach(store.largest) { row in
                                 StorageBar(row.title, value: Display.bytes(row.diskBytes), fraction: store.summary.diskBytes > 0 ? min(1, Double(row.diskBytes ?? 0) / Double(store.summary.diskBytes)) : 0)
                             }
                         }
                     }
                 }
-            }.padding(Space.xl)
-            Divider()
-            if store.resultTotal == 0 {
-                EmptyState(store.isScanning ? "Looking for items…" : "No results to show", message: store.isScanning ? "Results appear as the scan progresses." : "Scan this tool or adjust your roots and search. Review warnings for incomplete coverage.", symbol: store.currentModule?.symbol ?? "tray")
-            } else {
-                SelectionBar(store: store)
-                Divider()
-                ResultsTable(store: store, symbol: store.currentModule?.symbol ?? "doc")
+            }.padding([.horizontal, .top], Space.xl).padding(.bottom, Space.md)
+            VStack(spacing: 0) {
+                if store.resultTotal == 0 {
+                    EmptyState(store.isScanning ? "Looking for items…" : "Nothing here yet", message: store.isScanning ? "Results appear as the scan progresses." : "Scan this tool, or widen the folders and search. Warnings explain anything that couldn't be read.", symbol: store.currentModule?.symbol ?? "tray")
+                } else {
+                    SelectionBar(store: store)
+                    Divider().padding(.horizontal, Space.lg)
+                    ResultsTable(store: store, symbol: store.currentModule?.symbol ?? "doc").padding(.vertical, Space.xs)
+                }
             }
-            Divider()
-            SelectionFooter(store: store)
+            .card(radius: Layout.panelRadius)
+            .padding(.horizontal, Space.xl)
+            SelectionFooter(store: store).padding(.horizontal, Space.lg).padding(.vertical, Space.sm)
         }
     }
     private var sortDirectionLabel: String {
@@ -471,14 +484,14 @@ private struct WarningView: View {
     @Bindable var store: AppStore
     var body: some View {
         if !store.warnings.isEmpty {
-            DisclosureGroup {
+            Callout("\(store.warnings.count) scan warnings · coverage may be incomplete", symbol: "exclamationmark.triangle.fill", tone: Palette.warning) {
                 VStack(alignment: .leading, spacing: Space.sm) {
-                    ForEach(Array(store.warnings.enumerated()), id: \.offset) { _, warning in Text(warning).font(TypeStyle.caption).textSelection(.enabled) }
-                    Button("Open Full Disk Access Settings") {
+                    ForEach(Array(store.warnings.enumerated()), id: \.offset) { _, warning in Text(warning).font(TypeStyle.caption).foregroundStyle(Palette.muted).textSelection(.enabled) }
+                    TextAction("Open Full Disk Access Settings") {
                         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
-                    }.font(TypeStyle.caption)
-                }.padding(.top, Space.sm)
-            } label: { Label("\(store.warnings.count) scan warnings · coverage may be incomplete", systemImage: "exclamationmark.triangle").font(TypeStyle.caption).foregroundStyle(Palette.warning) }
+                    }
+                }
+            }
         }
     }
 }
@@ -497,13 +510,13 @@ private struct SelectionBar: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
             .disabled(store.eligibleTotal == 0 || store.isApplying, because: store.reason(store.whileApplying, store.eligibleTotal == 0 ? "Nothing listed here can be acted on." : nil))
             .help(store.selectionState == .all ? "Clear the selection" : "Select every item that can be acted on")
             .accessibilityLabel(title)
             if !store.selectedIDs.isEmpty {
                 Text("\(store.selectedIDs.count.formatted()) selected").font(TypeStyle.caption).foregroundStyle(Palette.muted)
-                Button("Clear") { store.deselectAll() }.buttonStyle(.borderless).font(TypeStyle.caption).disabled(store.isApplying, because: store.whileApplying)
+                TextAction("Clear") { store.deselectAll() }.disabled(store.isApplying, because: store.whileApplying)
             }
             Spacer()
             Text("⌘-click to add · ⇧-click for a range · ⌘A for all · Esc to clear")
@@ -533,7 +546,7 @@ private struct SelectionFooter: View {
         HStack(spacing: Space.md) {
             VStack(alignment: .leading, spacing: Space.xs) {
                 Text("\(store.selectedIDs.count.formatted()) selected").font(TypeStyle.sectionTitle)
-                Text(summary).font(TypeStyle.caption).foregroundStyle(.secondary)
+                Text(summary).font(TypeStyle.caption).foregroundStyle(Palette.muted)
             }
             Spacer()
             if !store.selectedIDs.isEmpty { ActionButton("Clear", disabled: store.isApplying, reason: store.whileApplying) { store.selectedIDs.removeAll() } }
@@ -541,7 +554,10 @@ private struct SelectionFooter: View {
                 ActionButton("Review " + action.label, kind: action == .trash ? .primary : .destructive, disabled: store.isApplying || store.isScanning, reason: store.reason(store.whileApplying, store.whileScanning)) { store.reviewSelection(action) }
             }
         }
-        .padding(Space.lg)
+        .padding(.horizontal, Space.lg).padding(.vertical, Space.md)
+        // A floating action card that lifts once something is selected.
+        .card(radius: Layout.panelRadius, elevation: store.selectedIDs.isEmpty ? 0.3 : 1.2)
+        .animation(Motion.press, value: store.selectedIDs.isEmpty)
         .task(id: store.selectedIDs) {
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
@@ -564,10 +580,10 @@ private struct InspectorView: View {
                 VStack(alignment: .leading, spacing: Space.xl) {
                     PageHeader(finding.title, subtitle: finding.moduleID == "orphans" ? "Suspected orphan process" : "Item details")
                     HStack(spacing: Space.sm) {
-                        RowIconView(icon: Display.icon(moduleID: finding.moduleID, path: finding.resource.path, brand: finding.brand, symbol: store.enabledModules.first { $0.id == finding.moduleID }?.symbol ?? "doc"))
+                        IconTile(icon: Display.icon(moduleID: finding.moduleID, path: finding.resource.path, brand: finding.brand, symbol: store.enabledModules.first { $0.id == finding.moduleID }?.symbol ?? "doc"))
                         StatusBadge(finding.risk.rawValue, warning: finding.risk == .permanent)
                         if let brand = finding.brand, let name = BrandCatalog.name(brand) {
-                            Text(name).font(TypeStyle.caption).foregroundStyle(.secondary)
+                            Text(name).font(TypeStyle.caption).foregroundStyle(Palette.muted)
                         }
                     }
                     Text(finding.reason).font(TypeStyle.secondary)
@@ -576,7 +592,7 @@ private struct InspectorView: View {
                         Panel {
                             VStack(alignment: .leading, spacing: Space.md) {
                                 Label("Protected", systemImage: "lock.shield").font(TypeStyle.sectionTitle).foregroundStyle(Palette.warning)
-                                Text(loss).font(TypeStyle.secondary).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                                Text(loss).font(TypeStyle.secondary).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
                                 ActionButton("\(kind.label) Anyway…", kind: .destructive, disabled: store.isApplying || store.isScanning || store.demo, reason: store.reason(store.inDemo, store.whileApplying, store.whileScanning)) { confirming = kind }
                             }
                         }
@@ -590,6 +606,8 @@ private struct InspectorView: View {
                             Text(loss + (kind == .trash ? " You can restore it from Activity while it is still in the Trash." : ""))
                         }
                     }
+                    Panel {
+                    VStack(alignment: .leading, spacing: Space.md) {
                     if let allocated = finding.allocatedBytes { KeyValueRow("Size on disk", Display.bytes(allocated)) }
                     if let bytes = finding.bytes, bytes != finding.allocatedBytes {
                         // Sparse files (virtual disks, Docker) and APFS clones can be far larger logically.
@@ -600,6 +618,8 @@ private struct InspectorView: View {
                     if let memory = finding.memoryBytes { KeyValueRow("Memory footprint", Display.bytes(memory)) }
                     if let path = finding.resource.path { KeyValueRow("Path", path) }
                     ForEach(Array(finding.details.enumerated()), id: \.offset) { _, detail in KeyValueRow(detail.label, detail.value) }
+                    }
+                    }
                     ActionButton("Reveal in Finder") { store.reveal(id: finding.id, path: finding.resource.path) }
                     if finding.moduleID == "storage", let path = finding.resource.path, store.core.isDirectory(path) {
                         ActionButton("Inspect folder", kind: .primary, disabled: store.isScanning || store.demo, reason: store.reason(store.inDemo, store.whileScanning)) { store.browse(path) }
@@ -608,7 +628,7 @@ private struct InspectorView: View {
                     else { ActionButton("Protect this path") { store.protect(path: finding.resource.path, id: finding.id) } }
                 }.padding(Space.xl)
             }
-        }.background(Palette.surface)
+        }.background(Palette.canvas)
     }
 }
 
@@ -625,7 +645,7 @@ private struct ReviewView: View {
                         VStack(alignment: .leading, spacing: Space.xs) {
                             Text(finding.title).font(TypeStyle.sectionTitle)
                             Text(finding.resource.path ?? finding.subtitle).font(TypeStyle.code).textSelection(.enabled)
-                            Text(finding.reason).font(TypeStyle.caption).foregroundStyle(.secondary)
+                            Text(finding.reason).font(TypeStyle.caption).foregroundStyle(Palette.muted)
                         }
                         Divider()
                     }
@@ -664,7 +684,7 @@ private struct ActivityView: View {
                                         Spacer()
                                         StatusBadge(row.outcome.rawValue.capitalized, warning: row.outcome == .failed)
                                     }
-                                    Text(row.action.label + " · " + row.date.formatted()).font(TypeStyle.caption).foregroundStyle(.secondary)
+                                    Text(row.action.label + " · " + row.date.formatted()).font(TypeStyle.caption).foregroundStyle(Palette.muted)
                                     Text(row.message).font(TypeStyle.secondary)
                                     if let warning = row.journalWarning { Text(warning).font(TypeStyle.caption).foregroundStyle(Palette.warning) }
                                     if let path = row.originalPath { Text(path).font(TypeStyle.code).textSelection(.enabled) }
@@ -698,7 +718,7 @@ public struct PreferencesView: View {
     private var general: some View {
         Form {
             Section {
-                if store.roots.isEmpty { Text("No folders yet.").foregroundStyle(.secondary) }
+                if store.roots.isEmpty { Text("No folders yet.").foregroundStyle(Palette.muted) }
                 ForEach(store.roots, id: \.self) { root in
                     LabeledContent {
                         Button("Remove") { store.roots.removeAll { $0 == root }; store.storageNavigation = []; store.persist() }
@@ -708,7 +728,7 @@ public struct PreferencesView: View {
             } header: {
                 Text("Scan roots")
             } footer: {
-                Text("Scans look only inside these folders when you choose Chosen folders. Adding one switches to it.").font(TypeStyle.caption).foregroundStyle(.secondary)
+                Text("Scans look only inside these folders when you choose Chosen folders. Adding one switches to it.").font(TypeStyle.caption).foregroundStyle(Palette.muted)
             }
             Section("Menu bar") {
                 Toggle("Show a menu bar summary and monitor orphan processes", isOn: $store.menuBarEnabled)
@@ -721,7 +741,7 @@ public struct PreferencesView: View {
         Form {
             Section {
                 if store.exclusions.isEmpty {
-                    Text("Protect a finding from its inspector or context menu.").foregroundStyle(.secondary)
+                    Text("Protect a finding from its inspector or context menu.").foregroundStyle(Palette.muted)
                 }
                 ForEach(store.exclusions, id: \.self) { path in
                     LabeledContent {
@@ -731,7 +751,7 @@ public struct PreferencesView: View {
             } header: {
                 Text("Protected paths")
             } footer: {
-                Text("Protected items and everything inside them are never offered for removal.").font(TypeStyle.caption).foregroundStyle(.secondary)
+                Text("Protected items and everything inside them are never offered for removal.").font(TypeStyle.caption).foregroundStyle(Palette.muted)
             }
             Section("Ignored process names") {
                 ForEach(store.ignoredNames, id: \.self) { name in
@@ -764,7 +784,7 @@ public struct PreferencesView: View {
                             Label {
                                 VStack(alignment: .leading, spacing: Space.xxs) {
                                     Text(module.name)
-                                    Text(module.summary).font(TypeStyle.caption).foregroundStyle(.secondary)
+                                    Text(module.summary).font(TypeStyle.caption).foregroundStyle(Palette.muted)
                                 }
                             } icon: {
                                 Image(systemName: module.symbol).foregroundStyle(Palette.accentSymbol)
