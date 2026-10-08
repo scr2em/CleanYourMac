@@ -119,8 +119,15 @@ fn binary(bytes: &[u8], keys: &[&str]) -> Option<HashMap<String, Scalar>> {
         let length = be(bytes.get(at + 2..at + 2 + width)?)? as usize;
         Some((marker, length, at + 2 + width))
     };
-    let string = |index: usize| -> Option<String> {
+    // Objects may be shared, so decoding is budgeted in total, not per object: a crafted
+    // file cannot make many keys decode one large string over and over.
+    let budget = std::cell::Cell::new(MAX_BYTES as usize * 2);
+    let string = |index: usize, limit: usize| -> Option<String> {
         let (marker, length, start) = header(offset(index)?)?;
+        if length > limit || length > budget.get() {
+            return None;
+        }
+        budget.set(budget.get() - length);
         match marker >> 4 {
             0x5 => String::from_utf8(bytes.get(start..start.checked_add(length)?)?.to_vec()).ok(),
             0x6 => {
@@ -138,7 +145,7 @@ fn binary(bytes: &[u8], keys: &[&str]) -> Option<HashMap<String, Scalar>> {
         let at = offset(index)?;
         let marker = *bytes.get(at)?;
         match marker >> 4 {
-            0x5 | 0x6 => string(index).map(Scalar::Text),
+            0x5 | 0x6 => string(index, 64 * 1024).map(Scalar::Text),
             0x3 => {
                 let raw: [u8; 8] = bytes.get(at + 1..at + 9)?.try_into().ok()?;
                 Some(Scalar::Date(f64::from_be_bytes(raw) + APPLE_EPOCH))
@@ -163,13 +170,17 @@ fn binary(bytes: &[u8], keys: &[&str]) -> Option<HashMap<String, Scalar>> {
     };
     let mut found = HashMap::new();
     for i in 0..count {
-        let Some(key) = string(reference(i)?) else {
+        // Wanted keys are short names; longer keys are skipped without decoding.
+        let Some(key) = string(reference(i)?, 128) else {
             continue;
         };
-        if keys.contains(&key.as_str()) {
+        if keys.contains(&key.as_str()) && !found.contains_key(&key) {
             if let Some(value) = scalar(reference(count + i)?) {
                 found.insert(key, value);
             }
+        }
+        if found.len() == keys.len() {
+            break;
         }
     }
     Some(found)
@@ -210,7 +221,43 @@ mod tests {
             Some("com.apple.dt.Xcode")
         );
         assert_eq!(values["CFBundleShortVersionString"].text(), Some("16.2"));
+        // Many keys sharing one large string: decoding stays within its budget.
+        let started = std::time::Instant::now();
+        let _ = parse(
+            &shared_string_bomb(60_000, 900_000),
+            &["CFBundleIdentifier"],
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
         // Truncated or nonsense binary data is refused, not trusted.
         assert_eq!(parse(&binary[..binary.len() - 5], &["x"]), None);
+    }
+
+    /// A binary property list whose root dictionary has `keys` entries that all refer to one
+    /// string object of `length` bytes.
+    fn shared_string_bomb(keys: usize, length: usize) -> Vec<u8> {
+        let mut out = b"bplist00".to_vec();
+        let mut offsets = vec![out.len()];
+        // Object 0: the dictionary, with a 4-byte count and 1-byte references to object 1.
+        out.push(0xDF);
+        out.push(0x12);
+        out.extend((keys as u32).to_be_bytes());
+        out.extend(std::iter::repeat_n(1u8, keys * 2));
+        offsets.push(out.len());
+        // Object 1: an ASCII string with a 4-byte length.
+        out.push(0x5F);
+        out.push(0x12);
+        out.extend((length as u32).to_be_bytes());
+        out.extend(std::iter::repeat_n(b'a', length));
+        let table = out.len();
+        for offset in &offsets {
+            out.extend((*offset as u32).to_be_bytes());
+        }
+        out.extend([0u8; 6]);
+        out.push(4); // offset size
+        out.push(1); // reference size
+        out.extend((offsets.len() as u64).to_be_bytes());
+        out.extend(0u64.to_be_bytes());
+        out.extend((table as u64).to_be_bytes());
+        out
     }
 }
