@@ -488,6 +488,7 @@ fn orphan_module_and_termination_use_the_exact_instance() {
             findings: vec![stale],
             kind: ActionKind::Terminate,
             context: ScanContext::default(),
+            acknowledged: vec![],
         },
         &k,
     );
@@ -499,6 +500,7 @@ fn orphan_module_and_termination_use_the_exact_instance() {
             findings: vec![row],
             kind: ActionKind::Terminate,
             context: ScanContext::default(),
+            acknowledged: vec![],
         },
         &k,
     );

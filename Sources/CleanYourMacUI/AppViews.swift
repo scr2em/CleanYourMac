@@ -545,6 +545,7 @@ private struct SelectionFooter: View {
 
 private struct InspectorView: View {
     @Bindable var store: AppStore
+    @State private var confirming: ActionKind?
     var body: some View {
         ScrollView {
             if let finding = store.inspected {
@@ -559,6 +560,24 @@ private struct InspectorView: View {
                     }
                     Text(finding.reason).font(TypeStyle.secondary)
                     if let blocked = finding.blockedReason { Label(blocked, systemImage: "lock").font(TypeStyle.secondary).foregroundStyle(Palette.warning) }
+                    if finding.blockedReason == nil, let loss = finding.acknowledgement, let kind = finding.acknowledgedActions?.first {
+                        Panel {
+                            VStack(alignment: .leading, spacing: Space.md) {
+                                Label("Protected", systemImage: "lock.shield").font(TypeStyle.sectionTitle).foregroundStyle(Palette.warning)
+                                Text(loss).font(TypeStyle.secondary).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                                ActionButton("\(kind.label) Anyway…", kind: .destructive, disabled: store.isApplying || store.isScanning || store.demo, reason: store.reason(store.inDemo, store.whileApplying, store.whileScanning)) { confirming = kind }
+                            }
+                        }
+                        .alert("\(kind.label) “\(finding.title)”?", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })) {
+                            Button("I understand, \(kind.label.lowercased())", role: .destructive) {
+                                if let kind = confirming { Task { await store.applyAcknowledged(finding, kind: kind) } }
+                                confirming = nil
+                            }
+                            Button("Cancel", role: .cancel) { confirming = nil }
+                        } message: {
+                            Text(loss + (kind == .trash ? " You can restore it from Activity while it is still in the Trash." : ""))
+                        }
+                    }
                     if let allocated = finding.allocatedBytes { KeyValueRow("Size on disk", Display.bytes(allocated)) }
                     if let bytes = finding.bytes, bytes != finding.allocatedBytes {
                         // Sparse files (virtual disks, Docker) and APFS clones can be far larger logically.

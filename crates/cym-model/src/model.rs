@@ -118,6 +118,12 @@ pub struct Finding {
     /// The ecosystem's brand (a Simple Icons slug), drawn as the row's icon.
     #[serde(default)]
     pub brand: Option<String>,
+    /// For a protected item the user may still remove: what they accept losing. The
+    /// `acknowledged_actions` apply only when a request names this finding as acknowledged.
+    #[serde(default)]
+    pub acknowledgement: Option<String>,
+    #[serde(default)]
+    pub acknowledged_actions: Vec<ActionKind>,
 }
 impl Finding {
     /// Size on disk (allocated blocks), or the logical size when that is all that is known.
@@ -145,6 +151,8 @@ impl Finding {
             blocked_reason: None,
             badge: None,
             brand: None,
+            acknowledgement: None,
+            acknowledged_actions: vec![],
         }
     }
     pub fn value(&self, label: &str) -> Option<&str> {
@@ -219,6 +227,10 @@ pub struct ActionRequest {
     pub findings: Vec<Finding>,
     pub kind: ActionKind,
     pub context: ScanContext,
+    /// IDs of protected findings the user confirmed removing; their acknowledged actions
+    /// become eligible. Blocked findings stay ineligible.
+    #[serde(default)]
+    pub acknowledged: Vec<String>,
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

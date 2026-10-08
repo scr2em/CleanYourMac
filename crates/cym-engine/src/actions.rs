@@ -43,7 +43,11 @@ pub fn execute(
 /// Eligibility and scope checks against the request's current context.
 fn check(f: &Finding, request: &ActionRequest) -> Result<()> {
     let c = &request.context;
-    if !f.actions.contains(&request.kind) || f.blocked_reason.is_some() {
+    // A protected item becomes eligible only for the actions the user acknowledged, and
+    // never while something blocks it.
+    let acknowledged =
+        request.acknowledged.contains(&f.id) && f.acknowledged_actions.contains(&request.kind);
+    if !(f.actions.contains(&request.kind) || acknowledged) || f.blocked_reason.is_some() {
         return Err("The requested action is not eligible for this finding.".into());
     }
     if let Some(path) = f.resource.path() {

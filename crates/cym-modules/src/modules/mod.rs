@@ -199,6 +199,8 @@ pub(crate) struct Candidate {
     /// Overrides the generic blocked reason; callers pass no actions when set.
     pub blocked: Option<String>,
     pub last_used: LastUsed,
+    /// What removing a protected item loses, and the actions the user may confirm.
+    pub acknowledge: Option<(String, Vec<ActionKind>)>,
 }
 impl Candidate {
     pub fn new(entry: Entry, reason: &str, actions: Vec<ActionKind>, risk: Risk) -> Self {
@@ -211,7 +213,13 @@ impl Candidate {
             details: vec![],
             blocked: None,
             last_used: LastUsed::Unknown,
+            acknowledge: None,
         }
+    }
+    /// Protected, but removable once the user confirms they accept `loss`.
+    pub fn acknowledge(mut self, loss: &str, actions: Vec<ActionKind>) -> Self {
+        self.acknowledge = Some((loss.into(), actions));
+        self
     }
     pub fn last_used(mut self, source: LastUsed) -> Self {
         self.last_used = source;
@@ -267,11 +275,18 @@ pub(crate) fn add_files(
                         control,
                     );
                     let used = c.last_used.resolve(services, c.entry.path());
-                    let _ = send.send((c.entry.identity.path, c.details, c.blocked, used, row));
+                    let _ = send.send((
+                        c.entry.identity.path,
+                        c.details,
+                        c.blocked,
+                        used,
+                        c.acknowledge,
+                        row,
+                    ));
                 });
             })
         });
-        for (done, (path, details, blocked, used, row)) in receive.iter().enumerate() {
+        for (done, (path, details, blocked, used, acknowledge, row)) in receive.iter().enumerate() {
             match row {
                 Ok(mut f) => {
                     f.details.extend(details);
@@ -281,6 +296,10 @@ pub(crate) fn add_files(
                     }
                     if blocked.is_some() {
                         f.blocked_reason = blocked;
+                    }
+                    if let Some((loss, actions)) = acknowledge {
+                        f.acknowledgement = Some(loss);
+                        f.acknowledged_actions = actions;
                     }
                     sink.finding(f);
                 }

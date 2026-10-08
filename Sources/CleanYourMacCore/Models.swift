@@ -166,8 +166,12 @@ public struct Finding: Identifiable, Codable, Hashable, Sendable {
     public var blockedReason: String?
     public var badge: String?
     public var brand: String?
+    /// For a protected item that may still be removed: what the user accepts losing.
+    public var acknowledgement: String?
+    /// Actions allowed once the user confirms the acknowledgement.
+    public var acknowledgedActions: [ActionKind]?
     private enum CodingKeys: String, CodingKey {
-        case id, moduleID = "moduleId", title, subtitle, resource, bytes, allocatedBytes, cpuPercent, memoryBytes, modifiedAt, lastUsedAt, details, actions, risk, reason, blockedReason, badge, brand
+        case id, moduleID = "moduleId", title, subtitle, resource, bytes, allocatedBytes, cpuPercent, memoryBytes, modifiedAt, lastUsedAt, details, actions, risk, reason, blockedReason, badge, brand, acknowledgement, acknowledgedActions
     }
     public init(id: String, moduleID: String, title: String, subtitle: String, resource: Resource, bytes: UInt64? = nil, allocatedBytes: UInt64? = nil, cpuPercent: Double? = nil, memoryBytes: UInt64? = nil, modifiedAt: Date? = nil, lastUsedAt: Date? = nil, details: [Detail] = [], actions: [ActionKind] = [], risk: Risk = .review, reason: String, blockedReason: String? = nil, badge: String? = nil, brand: String? = nil) {
         self.id = id; self.moduleID = moduleID; self.title = title; self.subtitle = subtitle; self.resource = resource
@@ -273,9 +277,11 @@ public struct ResultRow: Identifiable, Codable, Hashable, Sendable {
     public let brand: String?
     /// Why no action is offered, when one is blocked.
     public let blockedReason: String?
+    /// Protected, but removable from the inspector after confirming.
+    public let acknowledgeable: Bool
     public var isProcess: Bool { pid != nil }
     private enum CodingKeys: String, CodingKey {
-        case id, moduleID = "moduleId", title, subtitle, path, pid, bytes, allocatedBytes, cpuPercent, memoryBytes, modifiedAt, lastUsedAt, risk, badge, blocked, eligible, brand, blockedReason
+        case id, moduleID = "moduleId", title, subtitle, path, pid, bytes, allocatedBytes, cpuPercent, memoryBytes, modifiedAt, lastUsedAt, risk, badge, blocked, eligible, brand, blockedReason, acknowledgeable
     }
 }
 

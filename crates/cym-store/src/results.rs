@@ -90,6 +90,8 @@ pub struct Row {
     pub brand: Option<String>,
     /// Why no action is offered, when one is blocked.
     pub blocked_reason: Option<String>,
+    /// Protected, but removable from the inspector after confirming.
+    pub acknowledgeable: bool,
 }
 impl From<&Finding> for Row {
     fn from(f: &Finding) -> Self {
@@ -115,6 +117,7 @@ impl From<&Finding> for Row {
             eligible: !f.actions.is_empty() && f.blocked_reason.is_none(),
             brand: f.brand.clone(),
             blocked_reason: f.blocked_reason.clone(),
+            acknowledgeable: f.acknowledgement.is_some() && f.blocked_reason.is_none(),
         }
     }
 }

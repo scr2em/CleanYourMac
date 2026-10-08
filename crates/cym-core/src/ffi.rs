@@ -140,10 +140,11 @@ fn dispatch(engine: &Engine, method: &str, p: &Value) -> Result<Value> {
             &param::<Vec<String>>(p, "ids")?,
             param::<Option<usize>>(p, "preview")?.unwrap_or(200),
         )),
-        "executeSelection" => value(engine.execute_ids(
+        "executeSelection" => value(engine.execute_acknowledged(
             &param::<Vec<String>>(p, "ids")?,
             param(p, "kind")?,
             &param(p, "context")?,
+            &param::<Option<Vec<String>>>(p, "acknowledged")?.unwrap_or_default(),
             &ScanControl::default(),
         )),
         "removeResults" => value(engine.results.remove(&param::<Vec<String>>(p, "ids")?)),

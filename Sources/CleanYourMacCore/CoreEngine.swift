@@ -90,9 +90,10 @@ public final class CoreEngine: @unchecked Sendable {
         struct Params: Encodable { let ids: [String]; let preview: Int }
         return (try? await detached { try self.value("selection", Params(ids: ids, preview: preview), as: SelectionSummary.self) }) ?? .empty
     }
-    public func executeSelection(_ ids: [String], kind: ActionKind, context: ScanContext) async throws -> [ActionResult] {
-        struct Params: Encodable { let ids: [String]; let kind: ActionKind; let context: ScanContext }
-        return try await detached { try self.value("executeSelection", Params(ids: ids, kind: kind, context: context), as: [ActionResult].self) }
+    /// `acknowledged` names protected items the user confirmed removing.
+    public func executeSelection(_ ids: [String], kind: ActionKind, context: ScanContext, acknowledged: [String] = []) async throws -> [ActionResult] {
+        struct Params: Encodable { let ids: [String]; let kind: ActionKind; let context: ScanContext; let acknowledged: [String] }
+        return try await detached { try self.value("executeSelection", Params(ids: ids, kind: kind, context: context, acknowledged: acknowledged), as: [ActionResult].self) }
     }
     public func removeResults(_ ids: [String]) async {
         _ = try? await detached { try self.call("removeResults", ["ids": ids], as: Int.self) }

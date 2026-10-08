@@ -13,6 +13,7 @@ fn trash(f: &Fixture, finding: &Finding, context: ScanContext) -> ActionResult {
                 findings: vec![finding.clone()],
                 kind: ActionKind::Trash,
                 context,
+                acknowledged: vec![],
             },
             &ScanControl::default(),
         )
@@ -61,6 +62,7 @@ fn reviewed_trash_and_restore_use_exact_resources() {
                 findings: vec![finding],
                 kind: ActionKind::Trash,
                 context: f.context(),
+                acknowledged: vec![],
             },
             &ScanControl::default(),
         )
@@ -91,6 +93,7 @@ fn restoring_a_changed_trash_folder_is_rejected() {
                 findings: vec![finding],
                 kind: ActionKind::Trash,
                 context: f.context(),
+                acknowledged: vec![],
             },
             &ScanControl::default(),
         )
@@ -116,6 +119,7 @@ fn changed_folder_is_not_moved() {
                 findings: report.findings,
                 kind: ActionKind::Trash,
                 context: f.context(),
+                acknowledged: vec![],
             },
             &ScanControl::default(),
         )
@@ -305,4 +309,54 @@ fn outermost_selection_matches_the_pairwise_reference() {
         .collect();
     assert_eq!(got, reference(&rows));
     assert!(got.len() > 10 && got.len() < rows.len());
+}
+
+#[test]
+fn protected_items_move_to_trash_only_once_acknowledged() {
+    let f = Fixture::new();
+    let s = services(&f);
+    f.write("Archives/2026-09-18/App.xcarchive/Info.plist", "x");
+    let folder = f.at("Archives/2026-09-18");
+    let mut archive = file_finding(
+        "xcode:archive",
+        "storage",
+        s.entry(&folder).unwrap().identity,
+    );
+    archive.actions = vec![];
+    archive.acknowledgement = Some("May be the only copy of a shipped build.".into());
+    archive.acknowledged_actions = vec![ActionKind::Trash];
+    let run = |finding: &Finding, kind: ActionKind, acknowledged: Vec<String>| {
+        engine(&f)
+            .execute(
+                &ActionRequest {
+                    findings: vec![finding.clone()],
+                    kind,
+                    context: f.context(),
+                    acknowledged,
+                },
+                &ScanControl::default(),
+            )
+            .remove(0)
+    };
+    // Not acknowledged, or acknowledged for a different action: refused.
+    assert_eq!(
+        run(&archive, ActionKind::Trash, vec![]).outcome,
+        Outcome::Failed
+    );
+    assert_eq!(
+        run(&archive, ActionKind::EmptyTrash, vec![archive.id.clone()]).outcome,
+        Outcome::Failed
+    );
+    // A blocked item cannot be acknowledged into eligibility.
+    let mut blocked = archive.clone();
+    blocked.blocked_reason = Some("Xcode is running.".into());
+    assert_eq!(
+        run(&blocked, ActionKind::Trash, vec![blocked.id.clone()]).outcome,
+        Outcome::Failed
+    );
+    assert!(fs::metadata(&folder).is_ok());
+    // Acknowledged: moved to the Trash, still restorable.
+    let done = run(&archive, ActionKind::Trash, vec![archive.id.clone()]);
+    assert_eq!(done.outcome, Outcome::Applied, "{}", done.message);
+    assert!(fs::metadata(&folder).is_err());
 }

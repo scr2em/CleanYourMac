@@ -906,6 +906,10 @@ impl ScanModule for XcodeModule {
                         vec![],
                         Risk::Review,
                     )
+                    .acknowledge(
+                        "This archive may be the only copy of a build you shipped, with the debug symbols (dSYMs) needed to read its crash reports.",
+                        vec![ActionKind::Trash],
+                    )
                 } else {
                     let accessed = derived_data_accessed(e.path());
                     Candidate::new(

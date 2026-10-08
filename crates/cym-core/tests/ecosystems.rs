@@ -285,6 +285,7 @@ fn artifact_actions_recheck_project_evidence() {
             findings: report.findings.clone(),
             kind: ActionKind::Trash,
             context: f.context(),
+            acknowledged: vec![],
         },
         &ScanControl::default(),
     );
@@ -695,6 +696,7 @@ fn toolchain_actions_refuse_running_and_default_versions() {
             findings: vec![stale.clone()],
             kind: ActionKind::Trash,
             context: f.context(),
+            acknowledged: vec![],
         },
         &k,
     );

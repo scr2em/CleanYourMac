@@ -9,6 +9,8 @@ public struct ReviewDraft: Identifiable {
     public let ids: [String]
     public let kind: ActionKind
     public let selection: SelectionSummary
+    /// Protected items among `ids` the user confirmed removing.
+    public var acknowledged: [String] = []
 }
 public enum SortOrder: String, CaseIterable {
     case size = "Size", name = "Name", lastUsed = "Last used", cpu = "CPU"
@@ -239,7 +241,14 @@ public final class AppStore {
     public func notSelectable(_ row: CleanYourMacCore.ResultRow) -> String? {
         if let busy = whileApplying { return busy }
         guard !row.eligible else { return nil }
+        if row.acknowledgeable { return "Protected. Open it in the inspector to move it to Trash anyway." }
         return row.blockedReason ?? "Listed for information; nothing can be done with it here."
+    }
+    /// Moves one protected item the user explicitly confirmed losing.
+    public func applyAcknowledged(_ finding: Finding, kind: ActionKind) async {
+        guard !isApplying, !isScanning, finding.acknowledgedActions?.contains(kind) == true else { return }
+        let summary = await core.selection([finding.id], preview: 0)
+        await apply(ReviewDraft(ids: [finding.id], kind: kind, selection: summary, acknowledged: [finding.id]))
     }
 
     /// When the app becomes active again: forget results deleted elsewhere in the meantime
@@ -492,7 +501,7 @@ public final class AppStore {
         guard !demo else { error = "Demo mode cannot modify files or processes."; return }
         isApplying = true
         let results: [ActionResult]
-        do { results = try await core.executeSelection(draft.ids, kind: draft.kind, context: context) }
+        do { results = try await core.executeSelection(draft.ids, kind: draft.kind, context: context, acknowledged: draft.acknowledged) }
         catch { self.error = error.localizedDescription; isApplying = false; return }
         for result in results {
             guard let id = result.findingID else { continue }
