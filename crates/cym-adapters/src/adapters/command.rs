@@ -27,13 +27,33 @@ pub const HOME_CONTAINER_TOOLS: &[&str] = &[
     ".docker/bin/docker",
     ".rd/bin/docker",
 ];
+/// The program to start for an approved executable, or `None` when it is not approved.
+///
+/// The tools in the home folder are links that Docker Desktop, OrbStack and Rancher Desktop
+/// make into their app bundles. Any program running as the user could replace such a link,
+/// so one is started only when it resolves into an app bundle in `/Applications`, which
+/// macOS protects from other apps, and the resolved program is the one started.
+pub fn program(executable: &str) -> Option<String> {
+    program_in(executable, &policy::home())
+}
+fn program_in(executable: &str, home: &str) -> Option<String> {
+    if APPROVED.contains(&executable) || CONTAINER_TOOLS.contains(&executable) {
+        return Some(executable.to_owned());
+    }
+    if !HOME_CONTAINER_TOOLS
+        .iter()
+        .any(|t| executable == format!("{home}/{t}"))
+    {
+        return None;
+    }
+    let target = std::fs::canonicalize(executable).ok()?;
+    let target = target.to_str()?;
+    (target.starts_with("/Applications/") && target.contains(".app/Contents/"))
+        .then(|| target.to_owned())
+}
 /// Whether an executable is one this runner may start.
 pub fn approved(executable: &str) -> bool {
-    APPROVED.contains(&executable)
-        || CONTAINER_TOOLS.contains(&executable)
-        || HOME_CONTAINER_TOOLS
-            .iter()
-            .any(|t| executable == format!("{}/{t}", policy::home()))
+    program(executable).is_some()
 }
 const LIMIT: usize = 4_194_304;
 
@@ -55,9 +75,10 @@ fn run(
     timeout: Duration,
     control: &ScanControl,
 ) -> Result<Output> {
-    if !approved(executable) {
+    let Some(executable) = program(executable) else {
         return Err("Unapproved executable".into());
-    }
+    };
+    let executable = executable.as_str();
     // A tool finds its own helpers (credential helpers, plugins) beside it.
     let folder = std::path::Path::new(executable)
         .parent()
@@ -172,5 +193,26 @@ fn read_bounded(mut pipe: impl Read) -> Result<Vec<u8>> {
         Err("Command output exceeded the 4 MB limit".into())
     } else {
         Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_planted_tool_in_the_home_folder_is_never_started() {
+        let home = std::env::temp_dir().join(format!("cym-runner-{}", std::process::id()));
+        let tool = home.join(".docker/bin/docker");
+        std::fs::create_dir_all(tool.parent().unwrap()).unwrap();
+        std::fs::write(&tool, "#!/bin/sh\necho planted").unwrap();
+        let home = home.to_str().unwrap();
+        assert_eq!(program_in(tool.to_str().unwrap(), home), None);
+        assert_eq!(program_in("/tmp/docker", home), None);
+        assert_eq!(
+            program_in("/usr/bin/git", home).as_deref(),
+            Some("/usr/bin/git")
+        );
+        let _ = std::fs::remove_dir_all(home);
     }
 }

@@ -164,11 +164,17 @@ fn dispatch(engine: &Engine, method: &str, p: &Value) -> Result<Value> {
         "retainInScope" => value(engine.retain_in_scope(&param(p, "context")?)),
         "removeResults" => value(engine.results.remove(&param::<Vec<String>>(p, "ids")?)),
         "loadResults" => {
+            engine
+                .example
+                .store(true, std::sync::atomic::Ordering::SeqCst);
             engine.results.clear();
             engine.results.insert(param(p, "findings")?);
             value(engine.results.len())
         }
         "synthesize" => {
+            engine
+                .example
+                .store(true, std::sync::atomic::Ordering::SeqCst);
             engine.results.clear();
             engine.results.insert(crate::results::synthetic(
                 param::<usize>(p, "count")?.min(5_000_000),

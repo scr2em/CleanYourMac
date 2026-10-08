@@ -86,3 +86,31 @@ fn restoring_never_replaces_a_new_file() {
     rename_exclusive(&from, &free).unwrap();
     assert_eq!(std::fs::read_to_string(&free).unwrap(), "trashed");
 }
+
+#[test]
+fn example_results_are_never_acted_on() {
+    let f = Fixture::new();
+    let keep = f.write("keep.txt", "keep");
+    let engine = Engine::new(services(&f), builtin(&f));
+    let identity = engine
+        .services
+        .snapshot(&keep, &ScanControl::default())
+        .unwrap();
+    engine
+        .results
+        .insert(vec![file_finding("storage:keep", "storage", identity)]);
+    engine
+        .example
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let result = engine
+        .execute_ids(
+            &["storage:keep".into()],
+            ActionKind::Trash,
+            &f.context(),
+            &ScanControl::default(),
+        )
+        .remove(0);
+    assert_eq!(result.outcome, Outcome::Failed);
+    assert!(result.message.contains("example"), "{}", result.message);
+    assert!(std::fs::metadata(&keep).is_ok());
+}

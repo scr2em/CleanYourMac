@@ -21,6 +21,9 @@ pub struct Engine {
     pub registry: Registry,
     /// The app's current result set; scans started with `store` write here.
     pub results: Arc<ResultStore>,
+    /// Set while the store holds example data loaded by the app (demo and screenshots)
+    /// rather than findings this engine scanned; no action runs on it.
+    pub example: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Engine {
     pub fn new(services: Services, registry: Registry) -> Self {
@@ -28,6 +31,7 @@ impl Engine {
             services,
             registry,
             results: Arc::default(),
+            example: Default::default(),
         }
     }
     pub fn native() -> Self {
@@ -56,6 +60,13 @@ impl Engine {
         concurrency: usize,
         emit: &(dyn Fn(ScanEvent) + Sync),
     ) {
+        // A real scan replaces example data entirely, so no example row stays beside it.
+        if self
+            .example
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            self.results.clear();
+        }
         self.results.clear_modules(ids);
         self.run(
             ids,
@@ -189,6 +200,15 @@ impl Engine {
         force: bool,
         control: &ScanControl,
     ) -> Vec<ActionResult> {
+        if self.example.load(std::sync::atomic::Ordering::SeqCst) {
+            return ids
+                .iter()
+                .map(|id| ActionResult {
+                    message: "These are example results; nothing on your Mac was changed.".into(),
+                    ..actions::unlisted(id, kind)
+                })
+                .collect();
+        }
         let request = ActionRequest {
             findings: self.results.findings(ids),
             kind,

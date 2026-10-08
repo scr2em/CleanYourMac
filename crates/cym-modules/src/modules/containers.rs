@@ -142,10 +142,15 @@ impl ContainersModule {
     /// The first installed command-line tool named `name` (`docker` or `podman`).
     pub fn cli(&self, name: &str) -> Option<String> {
         let home = self.home();
-        command::HOME_CONTAINER_TOOLS
+        // System locations first; links in the home folder are checked by the runner.
+        command::CONTAINER_TOOLS
             .iter()
-            .map(|t| format!("{home}/{t}"))
-            .chain(command::CONTAINER_TOOLS.iter().map(|t| (*t).to_owned()))
+            .map(|t| (*t).to_owned())
+            .chain(
+                command::HOME_CONTAINER_TOOLS
+                    .iter()
+                    .map(|t| format!("{home}/{t}")),
+            )
             .filter(|p| p.ends_with(&format!("/{name}")))
             .find(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file()))
     }
