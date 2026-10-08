@@ -11,19 +11,21 @@ public struct WorkspaceView: View {
             SidebarView(store: store)
                 .navigationSplitViewColumnWidth(ideal: Layout.sidebar)
         } detail: {
-            // The page floats as a rounded sheet on the window, the app's signature shape.
-            HSplitView {
-                content.frame(minWidth: Layout.contentMin)
-                if store.showInspector, store.inspected != nil, store.selectedModuleID != "activity", store.selectedModuleID != "gallery" {
-                    InspectorView(store: store).frame(minWidth: Layout.inspectorMin, idealWidth: Layout.inspector, maxWidth: Layout.inspectorMax)
-                }
-            }
-            .background(Palette.canvas)
+            // The page floats as a rounded sheet on the window, the app's signature shape. All
+            // SwiftUI, so it keeps inside the safe area that newer macOS uses to slide content
+            // under the sidebar and toolbar (an AppKit split view here ignored it).
+            content
+                .frame(minWidth: Layout.contentMin, maxWidth: .infinity, maxHeight: .infinity)
+                .background(Palette.canvas)
             .clipShape(RoundedRectangle(cornerRadius: Layout.sheetRadius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: Layout.sheetRadius, style: .continuous).strokeBorder(Palette.border, lineWidth: Stroke.hairline))
             .softShadow(0.8)
             .padding([.trailing, .bottom], Space.sm)
             .background(Palette.sidebar)
+            .inspector(isPresented: inspectorShown) {
+                InspectorView(store: store)
+                    .inspectorColumnWidth(min: Layout.inspectorMin, ideal: Layout.inspector, max: Layout.inspectorMax)
+            }
         }
         .frame(minWidth: Layout.windowMinWidth, minHeight: Layout.windowMinHeight)
         .background(Palette.sidebar)
@@ -56,6 +58,13 @@ public struct WorkspaceView: View {
                 }
             }
         }
+    }
+    /// The inspector shows the inspected item on tool pages; closing it hides it until toggled.
+    private var inspectorShown: Binding<Bool> {
+        Binding(
+            get: { store.showInspector && store.inspected != nil && store.selectedModuleID != "activity" && store.selectedModuleID != "gallery" },
+            set: { if !$0 { store.showInspector = false } }
+        )
     }
     @ViewBuilder private var content: some View {
         switch store.selectedModuleID {
