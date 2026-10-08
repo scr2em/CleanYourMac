@@ -234,6 +234,9 @@ pub(crate) struct Candidate {
     pub last_used: LastUsed,
     /// What removing a protected item loses, and the actions the user may confirm.
     pub acknowledge: Option<(String, Vec<ActionKind>)>,
+    /// Bytes removing the item frees, when that differs from its own size: an Ollama model's
+    /// manifest frees the model files only it uses.
+    pub frees: Option<u64>,
 }
 impl Candidate {
     pub fn new(entry: Entry, reason: &str, actions: Vec<ActionKind>, risk: Risk) -> Self {
@@ -247,7 +250,12 @@ impl Candidate {
             blocked: None,
             last_used: LastUsed::Unknown,
             acknowledge: None,
+            frees: None,
         }
+    }
+    pub fn frees(mut self, bytes: u64) -> Self {
+        self.frees = Some(bytes);
+        self
     }
     /// Protected, but removable once the user confirms they accept `loss`.
     pub fn acknowledge(mut self, loss: &str, actions: Vec<ActionKind>) -> Self {
@@ -308,6 +316,13 @@ pub(crate) fn add_files(
                         control,
                     );
                     let used = c.last_used.resolve(services, c.entry.path());
+                    let row = row.map(|mut f| {
+                        if let Some(bytes) = c.frees {
+                            f.bytes = Some(bytes);
+                            f.allocated_bytes = Some(bytes);
+                        }
+                        f
+                    });
                     let _ = send.send((
                         c.entry.identity.path,
                         c.details,

@@ -13,6 +13,11 @@ use super::{add_files, descriptor, flush, glob, owners_closed, Candidate, LastUs
 use crate::{model::*, policy, ports::*, services::Services};
 use std::{collections::HashSet, path::Path};
 
+pub mod catalog;
+pub mod readers;
+use readers::Read;
+pub use readers::Reader;
+
 /// How much removing an item costs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tier {
@@ -39,8 +44,8 @@ impl Tier {
     }
 }
 
-/// A place inside a tool's data folder, relative to it. A `*` in the last component lists one
-/// item per match.
+/// A place inside a tool's data folder, relative to it. A `*` in a component lists one item
+/// per match.
 #[derive(Clone, Debug)]
 pub struct AiLocation {
     pub path: &'static str,
@@ -48,6 +53,8 @@ pub struct AiLocation {
     pub tier: Tier,
     /// What removing it costs.
     pub note: &'static str,
+    /// How to read each item, for sessions and models.
+    pub read: Option<Reader>,
 }
 pub fn at(path: &'static str, title: &'static str, tier: Tier, note: &'static str) -> AiLocation {
     AiLocation {
@@ -55,6 +62,13 @@ pub fn at(path: &'static str, title: &'static str, tier: Tier, note: &'static st
         title,
         tier,
         note,
+        read: None,
+    }
+}
+impl AiLocation {
+    pub fn reads(mut self, reader: Reader) -> Self {
+        self.read = Some(reader);
+        self
     }
 }
 
@@ -63,9 +77,14 @@ pub fn at(path: &'static str, title: &'static str, tier: Tier, note: &'static st
 pub enum Root {
     /// Relative to the home folder; a `*` in the name matches several folders, as with
     /// `.claude-*` for extra accounts.
-    Home(&'static str),
+    Home(String),
     /// A folder named by an environment variable, when the user set one.
     Env(&'static str),
+    /// A folder inside the one an environment variable names, such as `$HF_HOME/hub`.
+    EnvJoin(&'static str, &'static str),
+    /// A folder named in a file in the home folder, such as LM Studio's
+    /// `~/.lmstudio-home-pointer`.
+    Pointer(&'static str),
 }
 
 /// The session store a tool keeps, read to show and group transcripts.
@@ -75,7 +94,7 @@ pub enum Sessions {
     Claude,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct AiTool {
     pub name: &'static str,
     pub roots: Vec<Root>,
@@ -86,6 +105,9 @@ pub struct AiTool {
     /// Parts of an executable's path that mean the tool is running under another name, such
     /// as Claude Code's native binary named after its version.
     pub process_paths: &'static [&'static str],
+    /// Parts of a command line that mean the tool is running inside an interpreter, such as
+    /// Node.js for Gemini CLI.
+    pub commands: &'static [&'static str],
     /// Bundle-identifier prefixes of its apps.
     pub apps: &'static [&'static str],
     /// The tool's own cleanup command or setting, shown with every item.
@@ -107,7 +129,7 @@ pub struct AiToolsModule {
 impl Default for AiToolsModule {
     fn default() -> Self {
         Self {
-            tools: vec![claude()],
+            tools: catalog::all(),
             home: None,
             env: None,
         }
@@ -115,12 +137,13 @@ impl Default for AiToolsModule {
 }
 
 const RESUME: &str = "Removing a transcript ends --resume and --continue for that session.";
+const MODEL_TOOLS: &[&str] = &["Ollama", "Hugging Face", "LM Studio", "Local models"];
 
 /// Claude Code: `~/.claude`, extra accounts in `~/.claude-*`, and `CLAUDE_CONFIG_DIR`.
 pub fn claude() -> AiTool {
     AiTool {
         name: "Claude Code",
-        roots: vec![Root::Home(".claude"), Root::Home(".claude-*"), Root::Env("CLAUDE_CONFIG_DIR")],
+        roots: vec![Root::Home(".claude".into()), Root::Home(".claude-*".into()), Root::Env("CLAUDE_CONFIG_DIR")],
         // Claude Code's own cleanup treats these as removable (code.claude.com/docs/en/claude-directory).
         locations: vec![
             at("downloads", "Installer downloads", Tier::Safe, "Downloaded installers of the claude binary."),
@@ -153,6 +176,7 @@ pub fn claude() -> AiTool {
         apps: &["com.anthropic.claudefordesktop"],
         command: Some("claude purge --dry-run shows what Claude Code would remove for a project; cleanupPeriodDays (default 30) removes old transcripts automatically."),
         markers: &["projects", ".claude.json", "settings.json", "sessions", "history.jsonl"],
+        commands: &["@anthropic-ai/claude-code"],
         home_locations: vec![
             at("Library/Caches/claude-cli-nodejs", "MCP and error logs", Tier::Safe, "Logs Claude Code writes per project."),
             at(".cache/claude/staging", "Installer staging", Tier::Safe, "Files left by the native installer."),
@@ -190,12 +214,7 @@ impl AiToolsModule {
                     })
                     .map(|e| e.path().to_owned())
                     .collect(),
-                Root::Home(name) => vec![format!("{home}/{name}")],
-                Root::Env(var) => self
-                    .var(var)
-                    .map(|v| policy::canonical(&v))
-                    .into_iter()
-                    .collect(),
+                other => self.root_path(other, &home).into_iter().collect(),
             };
             for path in paths {
                 if s.is_dir(&path) && !found.contains(&path) {
@@ -204,6 +223,21 @@ impl AiToolsModule {
             }
         }
         found
+    }
+    /// A root that names one folder.
+    fn root_path(&self, root: &Root, home: &str) -> Option<String> {
+        match root {
+            Root::Home(name) => Some(format!("{home}/{name}")),
+            Root::Env(var) => self.var(var).map(|v| policy::canonical(&v)),
+            Root::EnvJoin(var, sub) => self
+                .var(var)
+                .map(|v| policy::canonical(&format!("{}/{sub}", v.trim_end_matches('/')))),
+            Root::Pointer(file) => std::fs::read_to_string(format!("{home}/{file}"))
+                .ok()
+                .map(|t| t.trim().to_owned())
+                .filter(|t| t.starts_with('/'))
+                .map(|t| policy::canonical(&t)),
+        }
     }
     /// The tool a path belongs to, with the data folder holding it.
     fn owner(&self, s: &Services, path: &str) -> Option<(&AiTool, String)> {
@@ -221,12 +255,7 @@ impl AiToolsModule {
         let mut roots: Vec<String> = tool
             .home_locations
             .iter()
-            .map(|l| {
-                format!(
-                    "{home}/{}",
-                    l.path.rsplit_once("/*").map_or(l.path, |(p, _)| p)
-                )
-            })
+            .map(|l| format!("{home}/{}", fixed_prefix(l.path)))
             .collect();
         if tool.sessions == Some(Sessions::Claude) {
             roots.push(format!("{home}/.local/share/claude/versions"));
@@ -242,25 +271,77 @@ fn empty(s: &Services, path: &str) -> bool {
         .all(|e| e.name() == ".DS_Store")
 }
 
-/// Existing items for a location: the path itself, or each match of its last `*`.
-fn expand(s: &Services, root: &str, location: &AiLocation) -> Vec<Entry> {
-    match location.path.rsplit_once('/') {
-        Some((parent, last)) if last.contains('*') => s
-            .children(&format!("{root}/{parent}"), &mut vec![])
-            .into_iter()
-            .filter(|e| glob(last, e.name()).is_some())
-            .collect(),
-        _ if location.path.contains('*') => s
-            .children(root, &mut vec![])
-            .into_iter()
-            .filter(|e| glob(location.path, e.name()).is_some())
-            .collect(),
-        _ => s
-            .entry(&format!("{root}/{}", location.path))
-            .ok()
-            .into_iter()
-            .collect(),
+/// Matches a name against a pattern in which each `*` stands for any run of characters.
+fn wildcard(pattern: &str, name: &str) -> bool {
+    let mut pieces = pattern.split('*');
+    let first = pieces.next().unwrap_or_default();
+    let Some(mut rest) = name.strip_prefix(first) else {
+        return false;
+    };
+    let pieces: Vec<&str> = pieces.collect();
+    for (i, piece) in pieces.iter().enumerate() {
+        if i + 1 == pieces.len() {
+            return rest.len() >= piece.len() && rest.ends_with(piece);
+        }
+        match rest.find(piece) {
+            Some(at) => rest = &rest[at + piece.len()..],
+            None => return false,
+        }
     }
+    rest.is_empty()
+}
+fn now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64())
+}
+
+/// The part of a location's path before its first pattern component.
+fn fixed_prefix(path: &str) -> String {
+    path.split('/')
+        .take_while(|c| !c.contains('*'))
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Existing items for a location, with the names each `*` component matched. Names in
+/// `catalog::NEVER` are never returned.
+fn expand(s: &Services, root: &str, location: &AiLocation) -> Vec<(Entry, Vec<String>)> {
+    let parts: Vec<&str> = location.path.split('/').collect();
+    let mut current: Vec<(String, Vec<String>)> = vec![(root.to_owned(), vec![])];
+    for (i, part) in parts.iter().enumerate() {
+        let last = i + 1 == parts.len();
+        current = if part.contains('*') {
+            current
+                .into_iter()
+                .flat_map(|(dir, matched)| {
+                    s.children(&dir, &mut vec![])
+                        .into_iter()
+                        .filter(|e| {
+                            wildcard(part, e.name())
+                                && !catalog::NEVER.contains(&e.name())
+                                && (last || e.directory)
+                        })
+                        .map(move |e| {
+                            let mut m = matched.clone();
+                            m.push(e.name().to_owned());
+                            (e.path().to_owned(), m)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        } else {
+            current
+                .into_iter()
+                .map(|(dir, m)| (format!("{dir}/{part}"), m))
+                .collect()
+        };
+    }
+    current
+        .into_iter()
+        .filter(|(path, _)| !catalog::NEVER.contains(&path.rsplit('/').next().unwrap_or_default()))
+        .filter_map(|(path, m)| s.entry(&path).ok().map(|e| (e, m)))
+        .collect()
 }
 
 /// What a Claude Code transcript says about its session.
@@ -308,12 +389,12 @@ pub fn session_info(head: &str) -> SessionInfo {
     info
 }
 /// The text the user typed, ignoring slash-command wrappers, tool results and system notes.
-fn prompt_text(content: &serde_json::Value) -> Option<String> {
+pub(crate) fn prompt_text(content: &serde_json::Value) -> Option<String> {
     let raw = match content {
         serde_json::Value::String(s) => s.clone(),
         serde_json::Value::Array(parts) => parts
             .iter()
-            .filter(|p| p["type"] == "text")
+            .filter(|p| matches!(p["type"].as_str(), Some("text" | "input_text") | None))
             .filter_map(|p| p["text"].as_str())
             .collect::<Vec<_>>()
             .join(" "),
@@ -394,6 +475,7 @@ fn running(s: &Services, tool: &AiTool) -> Vec<String> {
                     .process_paths
                     .iter()
                     .any(|part| p.identity.executable.contains(part))
+                || tool.commands.iter().any(|part| p.command.contains(part))
         })
         .map(|p| {
             format!(
@@ -719,8 +801,7 @@ impl ScanModule for AiToolsModule {
                             .filter(|n| glob(name, n).is_some())
                             .map(|n| format!("{home}/{n}")),
                     ),
-                    Root::Home(name) => roots.push(format!("{home}/{name}")),
-                    Root::Env(var) => roots.extend(self.var(var).map(|v| policy::canonical(&v))),
+                    other => roots.extend(self.root_path(other, &home)),
                 }
             }
             roots.extend(self.home_roots(tool, &home));
@@ -738,11 +819,13 @@ impl ScanModule for AiToolsModule {
         let mut candidates = vec![];
         let mut warnings = vec![];
         for tool in &self.tools {
+            k.check()?;
             for location in &tool.home_locations {
-                for e in expand(s, &home, location) {
+                for (e, matched) in expand(s, &home, location) {
                     if !c.allows(e.path()) {
                         continue;
                     }
+                    let title = titled(location.title, &matched);
                     candidates.push(
                         Candidate::new(
                             e,
@@ -750,7 +833,7 @@ impl ScanModule for AiToolsModule {
                             vec![ActionKind::Trash],
                             location.tier.risk(),
                         )
-                        .title(location.title)
+                        .title(title)
                         .details(vec![
                             detail("Tool", tool.name),
                             detail("Tier", location.tier.label()),
@@ -761,53 +844,65 @@ impl ScanModule for AiToolsModule {
             if tool.sessions == Some(Sessions::Claude) {
                 self.claude_versions(s, &mut candidates);
             }
-            for root in self.roots(s, tool) {
+            let roots = self.roots(s, tool);
+            let several = roots.len() > 1;
+            for root in roots {
                 k.check()?;
                 if !c.allows(&root) {
                     continue;
                 }
                 sink.progress(format!("Reading {}", short(&root, &home)));
-                let base = |tier: Tier| {
-                    let mut d = vec![
-                        detail("Tool", tool.name),
-                        detail("Tier", tier.label()),
-                        detail("Data folder", short(&root, &home)),
-                    ];
-                    if let Some(command) = tool.command {
-                        d.push(detail("Official cleanup", command));
-                    }
-                    d
-                };
                 if empty(s, &root) {
                     if let Ok(e) = s.entry(&root) {
                         candidates.push(
                             Candidate::new(e, &format!("An empty {} data folder, for example from an account you no longer use.", tool.name), vec![ActionKind::Trash], Tier::Safe.risk())
                                 .title(format!("Empty folder · {}", short(&root, &home)))
-                                .details(base(Tier::Safe)),
+                                .details(self.base(tool, &root, Tier::Safe)),
                         );
                     }
                     continue;
                 }
                 for location in &tool.locations {
-                    for e in expand(s, &root, location) {
-                        if !c.allows(e.path()) {
+                    if location.read == Some(Reader::Ollama) {
+                        self.ollama(s, tool, &root, &mut candidates);
+                        continue;
+                    }
+                    for (e, matched) in expand(s, &root, location) {
+                        // A download that may still be running is left alone for an hour.
+                        let recent = now() - e.modified() < 3600.0;
+                        if !c.allows(e.path()) || (location.path.contains("-partial") && recent) {
                             continue;
                         }
-                        let title = if location.path.contains('*') {
-                            format!("{} · {}", location.title, e.name())
-                        } else {
-                            location.title.to_owned()
+                        let mut title = titled(location.title, &matched);
+                        if several {
+                            title = format!("{title} · {}", short(&root, &home));
+                        }
+                        let read = location
+                            .read
+                            .map(|r| readers::read(s, r, e.path(), e.directory));
+                        let candidate = match read {
+                            None => Some(self.plain(tool, &root, location, e, title)),
+                            Some(Read::Skip) => None,
+                            Some(Read::Named(name)) => {
+                                let mut c = self.plain(
+                                    tool,
+                                    &root,
+                                    location,
+                                    e,
+                                    format!("{} · {name}", location.title),
+                                );
+                                c.details.push(detail("Repository", name));
+                                Some(c)
+                            }
+                            Some(Read::Session(info)) => {
+                                let gone = info.cwd.as_deref().is_some_and(|cwd| !s.exists(cwd));
+                                Some(self.session(tool, &root, location, e, title, info, gone))
+                            }
+                            Some(Read::OrphanWorkspace { folder, chats }) => {
+                                Some(self.orphan_workspace(tool, &root, e, &folder, chats))
+                            }
                         };
-                        candidates.push(
-                            Candidate::new(
-                                e,
-                                &format!("{} {}", location.note, tier_note(location.tier)),
-                                vec![ActionKind::Trash],
-                                location.tier.risk(),
-                            )
-                            .title(format!("{title} · {}", short(&root, &home)))
-                            .details(base(location.tier)),
-                        );
+                        candidates.extend(candidate);
                     }
                 }
                 match tool.sessions {
@@ -824,7 +919,7 @@ impl ScanModule for AiToolsModule {
             .into_iter()
             .filter(|cand| c.allows(cand.entry.path()))
             .collect();
-        add_files(s, sink, "ai", candidates, k)
+        add_files(s, &mut Tiered(sink), "ai", candidates, k)
     }
     fn in_use(&self, s: &Services, f: &Finding, _: ActionKind) -> Option<String> {
         let path = f.resource.path()?;
@@ -832,17 +927,19 @@ impl ScanModule for AiToolsModule {
         if let Err(reason) = owners_closed(s, tool.apps) {
             return Some(reason);
         }
-        let live = live_sessions(s, &root);
-        if !live.names.is_empty() {
-            return Some(format!(
-                "{} is running with this data folder:\n{}",
-                tool.name,
-                live.names
-                    .iter()
-                    .map(|n| format!("• {n}"))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            ));
+        if tool.sessions == Some(Sessions::Claude) {
+            let live = live_sessions(s, &root);
+            if !live.names.is_empty() {
+                return Some(format!(
+                    "{} is running with this data folder:\n{}",
+                    tool.name,
+                    live.names
+                        .iter()
+                        .map(|n| format!("• {n}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ));
+            }
         }
         let running: Vec<String> = running(s, tool)
             .into_iter()
@@ -852,15 +949,186 @@ impl ScanModule for AiToolsModule {
     }
     fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
         let path = f.resource.path().ok_or("Missing path")?;
-        let (_, root) = self
+        let (tool, root) = self
             .owner(s, path)
             .ok_or("This item is no longer inside an AI tool's data folder.")?;
         // A running session's own files are never moved, whatever the user confirms.
-        let live = live_sessions(s, &root);
-        if live.sessions.iter().any(|id| path.contains(id.as_str())) {
-            return Err("This session is running in Claude Code.".into());
+        if tool.sessions == Some(Sessions::Claude) {
+            let live = live_sessions(s, &root);
+            if live.sessions.iter().any(|id| path.contains(id.as_str())) {
+                return Err("This session is running in Claude Code.".into());
+            }
         }
         Ok(())
+    }
+}
+
+/// Shows each finding's tier as its badge, so the list can be filtered and totalled by tier.
+struct Tiered<'a>(&'a mut dyn Sink);
+impl Sink for Tiered<'_> {
+    fn finding(&mut self, mut finding: Finding) {
+        if let Some(tier) = finding.value("Tier") {
+            finding.badge = Some(tier.to_owned());
+        }
+        self.0.finding(finding);
+    }
+    fn warning(&mut self, warning: String) {
+        self.0.warning(warning);
+    }
+    fn progress(&mut self, message: String) {
+        self.0.progress(message);
+    }
+}
+
+/// A location's title, with the names its patterns matched.
+fn titled(title: &str, matched: &[String]) -> String {
+    if matched.is_empty() {
+        title.to_owned()
+    } else {
+        format!("{title} · {}", matched.join(" / "))
+    }
+}
+
+fn gigabytes(bytes: u64) -> String {
+    format!("{:.1} GB", bytes as f64 / 1e9)
+}
+
+impl AiToolsModule {
+    /// The details every row of a data folder carries.
+    fn base(&self, tool: &AiTool, root: &str, tier: Tier) -> Vec<Detail> {
+        let mut d = vec![
+            detail("Tool", tool.name),
+            detail("Tier", tier.label()),
+            detail("Data folder", short(root, &self.home())),
+        ];
+        if let Some(command) = tool.command {
+            d.push(detail("Official cleanup", command));
+        }
+        d
+    }
+    fn plain(
+        &self,
+        tool: &AiTool,
+        root: &str,
+        location: &AiLocation,
+        e: Entry,
+        title: String,
+    ) -> Candidate {
+        let what = if MODEL_TOOLS.contains(&tool.name) {
+            ""
+        } else {
+            tier_note(location.tier)
+        };
+        Candidate::new(
+            e,
+            format!("{} {what}", location.note).trim(),
+            vec![ActionKind::Trash],
+            location.tier.risk(),
+        )
+        .title(title)
+        .details(self.base(tool, root, location.tier))
+    }
+    /// A session of a tool other than Claude Code, with its project and first prompt.
+    #[allow(clippy::too_many_arguments)]
+    fn session(
+        &self,
+        tool: &AiTool,
+        root: &str,
+        location: &AiLocation,
+        e: Entry,
+        fallback: String,
+        info: SessionInfo,
+        gone: bool,
+    ) -> Candidate {
+        let home = self.home();
+        let mut details = self.base(tool, root, location.tier);
+        if let Some(cwd) = &info.cwd {
+            details.push(detail("Project", short(cwd, &home)));
+        }
+        if let Some(prompt) = &info.first_prompt {
+            details.push(detail("First prompt", prompt.clone()));
+        }
+        if let Some(branch) = &info.branch {
+            details.push(detail("Branch", branch.clone()));
+        }
+        if let Some(started) = &info.started {
+            details.push(detail("Started", started.clone()));
+        }
+        let state = if gone {
+            details.push(detail("Project folder", "Missing"));
+            "Orphan: the project folder no longer exists. "
+        } else {
+            ""
+        };
+        let title = match (&info.title, &info.first_prompt) {
+            (Some(t), _) | (None, Some(t)) => format!("{} · {t}", location.title),
+            _ => fallback,
+        };
+        let modified = e.modified();
+        Candidate::new(
+            e,
+            &format!("{state}{} {}", location.note, tier_note(location.tier)),
+            vec![ActionKind::Trash],
+            location.tier.risk(),
+        )
+        .title(title)
+        .details(details)
+        .last_used(LastUsed::At(modified))
+    }
+    /// Editor state kept for a folder that no longer exists.
+    fn orphan_workspace(
+        &self,
+        tool: &AiTool,
+        root: &str,
+        e: Entry,
+        folder: &str,
+        chats: bool,
+    ) -> Candidate {
+        let home = self.home();
+        let tier = if chats { Tier::Caution } else { Tier::Review };
+        let mut details = self.base(tool, root, tier);
+        details.push(detail("Project", short(folder, &home)));
+        details.push(detail("Project folder", "Missing"));
+        let chats = if chats {
+            " It also holds the chat sessions of that folder."
+        } else {
+            ""
+        };
+        let modified = e.modified();
+        Candidate::new(
+            e,
+            &format!("Orphan: {} keeps open files, search history and extension data for {}, which no longer exists.{chats} {}", tool.name, short(folder, &home), tier_note(tier)),
+            vec![ActionKind::Trash],
+            tier.risk(),
+        )
+        .title(format!("Workspace data · {}", short(folder, &home)))
+        .details(details)
+        .last_used(LastUsed::At(modified))
+    }
+    /// Ollama models. Removing a model's manifest is what `ollama rm` does; Ollama then frees
+    /// the files no other model uses the next time it starts.
+    fn ollama(&self, s: &Services, tool: &AiTool, root: &str, out: &mut Vec<Candidate>) {
+        for m in readers::ollama_models(s, root) {
+            let Ok(e) = s.entry(&m.manifest) else {
+                continue;
+            };
+            let mut details = self.base(tool, root, Tier::Review);
+            details.push(detail("Model", m.name.clone()));
+            details.push(detail("Shared with other models", gigabytes(m.shared)));
+            let modified = e.modified();
+            out.push(
+                Candidate::new(
+                    e,
+                    &format!("A local model. Ollama frees its files ({}) the next time it starts; ollama pull {} downloads it again. Files other models use stay.", gigabytes(m.unique), m.name),
+                    vec![ActionKind::Trash],
+                    Tier::Review.risk(),
+                )
+                .title(format!("Model · {}", m.name))
+                .details(details)
+                .frees(m.unique)
+                .last_used(LastUsed::At(modified)),
+            );
+        }
     }
 }
 

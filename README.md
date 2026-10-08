@@ -24,6 +24,7 @@ CleanYourMac finds items that use disk space on your Mac. Examples are large dow
 | **Git worktrees** | See the branch, local changes, locks and size of each worktree. A badge shows registrations that have no folder. |
 | **Simulators and Xcode data** | See simulator app data, DerivedData and device support. Xcode archives are protected. |
 | **Toolchains, SDKs and caches** | Find installed language versions, SDK components, virtual devices, package caches and logs. |
+| **AI tools** | Find the caches, session transcripts and downloaded models of Claude Code, Codex, Gemini CLI, Cursor, Ollama and other AI tools. Each item has a risk tier. |
 | **Applications and possible leftovers** | See each application and its related files as separate items. The app shows when the owner of a file is not certain. |
 | **Orphan processes** | See processes that their parent left running, with CPU and memory use. Then you can quit them. |
 
@@ -222,6 +223,37 @@ Toolchains & SDKs shows each installed version, with its size and the uninstall 
 - **Android:** system images, NDK, build tools and virtual devices.
 
 You cannot select a version that is in use. A version is in use when it is the default or global version, when `.tool-versions` or a mise configuration pins it, or when an Android virtual device uses it. You cannot select a virtual device while its emulator runs.
+</details>
+
+<details>
+<summary><strong>AI Tools</strong>: caches, sessions and models of AI tools</summary>
+
+AI Tools reads the data folders of AI coding tools and local model stores. Each item has one of three tiers:
+
+| Tier | Badge | Examples | What you lose |
+| --- | --- | --- | --- |
+| **Safe** | *Rebuild* | Caches, logs, telemetry, plugin downloads, shell snapshots, old Claude Code versions | Nothing. The tool makes the item again. |
+| **Review** | *Review* | Subagent transcripts, saved tool output, job scratch files, worktrees of agents, downloaded models | Examine the item first. You download a model again to use it. |
+| **Caution** | *Review* | Session transcripts, chats, prompt history, edit checkpoints | You cannot resume the session again. |
+
+The app never shows settings, credentials, instructions (`CLAUDE.md`, `AGENTS.md`), skills, agents, commands, plugins, marketplaces or memory.
+
+**Sessions.** For each session, the app shows the project folder, the first prompt, the branch and the start date. When the project folder does not exist, the item has the label *Orphan*. Worktrees that agents made and removed are identified. For Claude Code, you can remove the `subagents` and `tool-results` folders of a session and keep its main transcript. The session continues to resume. When a background job is blocked and has open tasks, its scratch files show a warning.
+
+**Safety.** All actions move items to the Trash. The app does not move items while the tool runs. For Claude Code, the app reads `sessions/` and does not move the files of a running session, also when you continue the action. Each item shows the cleanup command or setting of the tool, if the tool has one (for example, `cleanupPeriodDays` of Claude Code). Each item shows its tier as its badge. Select a tier with the **Tier** filter: the totals then show how much space that tier frees, before you act.
+
+| Tool | Data folders | What the app reads |
+| --- | --- | --- |
+| Claude Code | `~/.claude`, other accounts in `~/.claude-*`, `CLAUDE_CONFIG_DIR`, `~/.local/share/claude/versions` | Transcripts by project, background jobs, running sessions, empty account folders. It keeps the version of the launcher and the two newest versions. |
+| Claude Desktop | `~/Library/Application Support/Claude` | Caches, the virtual machine image, Claude Code sessions |
+| Codex | `~/.codex`, `CODEX_HOME` | Session rollouts by date, archived sessions, worktrees, logs |
+| Gemini CLI, Qwen Code | `~/.gemini`, `~/.qwen` | Chats of each project, saved chats, restore snapshots |
+| GitHub Copilot CLI, Cline CLI, opencode, Hermes, herdr, Goose, Amp, Kiro CLI, Crush | The data folder of each tool | Sessions, logs, caches and worktrees |
+| Cursor, VS Code, Windsurf, Kiro, Trae, Void | `~/Library/Application Support/<editor>`, `~/.cursor` | Editor caches (VS Code caches are in Caches & Logs), workspace data of folders that do not exist, chat sessions, Cline, Roo Code and Kilo Code tasks |
+| Zed, Continue | `~/Library/Application Support/Zed`, `~/.continue` | Agent threads, chat sessions, code index |
+| Ollama | `~/.ollama/models`, `OLLAMA_MODELS` | Each model, with the size of the files that only it uses. The app moves the manifest to the Trash, as `ollama rm` does. Ollama removes the model files when it starts again. Unfinished downloads that are older than one hour. |
+| Hugging Face | `~/.cache/huggingface/hub`, `HF_HOME`, `HF_HUB_CACHE` | Each model, dataset and Space |
+| LM Studio, Whisper, PyTorch Hub, GPT4All, DiffusionBee | The model folder of each tool | Each downloaded model |
 </details>
 
 <details>

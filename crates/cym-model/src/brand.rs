@@ -70,11 +70,28 @@ const MODULES: &[(&str, &str)] = &[
     ("worktrees", "git"),
 ];
 
+/// AI tools, as the AI Tools module names them in the "Tool" detail, and their brands.
+const TOOLS: &[(&str, &str)] = &[
+    ("claude code", "claude"),
+    ("claude desktop", "claude"),
+    ("cline cli", "cline"),
+    ("cursor", "cursor"),
+    ("gemini cli", "googlegemini"),
+    ("github copilot cli", "githubcopilot"),
+    ("hugging face", "huggingface"),
+    ("lm studio", "lmstudio"),
+    ("ollama", "ollama"),
+    ("qwen code", "qwen"),
+    ("windsurf", "windsurf"),
+    ("zed", "zedindustries"),
+];
+
 /// Every slug this module can return, so the app's icon set can be checked against it.
 pub fn slugs() -> Vec<&'static str> {
     let mut all: Vec<_> = ECOSYSTEMS
         .iter()
         .chain(MODULES)
+        .chain(TOOLS)
         .map(|(_, slug)| *slug)
         .chain(["huggingface", "pytorch"])
         .collect();
@@ -97,6 +114,10 @@ pub fn for_ecosystem(name: &str) -> Option<&'static str> {
 pub fn of(f: &Finding) -> Option<&'static str> {
     if let Some((_, slug)) = MODULES.iter().find(|(m, _)| *m == f.module_id) {
         return Some(slug);
+    }
+    if f.module_id == "ai" {
+        let tool = f.value("Tool")?.to_lowercase();
+        return TOOLS.iter().find(|(t, _)| *t == tool).map(|(_, s)| *s);
     }
     // A known package manager (pnpm, Yarn, Bun) is more specific than its ecosystem.
     if let Some(slug) = f.value("Package manager").and_then(for_ecosystem) {

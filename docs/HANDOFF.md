@@ -14,6 +14,7 @@ The migration's core work is done. The app runs on the Rust core:
 ## Continue in this order
 
 1. Run `scripts/test-native.sh` on a Mac with a simulator runtime and record the results in VERIFICATION.md.
+   Also check AI Tools with real data: a Claude Code session still resumes after its `tool-results` folder is in the Trash; the bundle identifiers of Kiro, Trae, Void and the Codex app (`crates/cym-modules/src/modules/ai/catalog.rs`) match the installed apps; Ollama frees a model's files when it starts after its manifest is in the Trash.
 2. Give each finder its own scope in AppStore: included and excluded paths, query, filters, sort order and scan task. The current global scan task cancels other finders' scans. Known-location tools should filter their inventory by the finder's scope.
 3. Finish the visual pass to match the Figma screens: result summaries directly below search, Overview analytics charts from `Analytics.modules`, orphaned-worktree badges in rows, and size and name sorting. Capture real app screenshots using synthetic data.
 4. Add Code Connect mappings and more Figma screens (Overview, Activity, Settings).

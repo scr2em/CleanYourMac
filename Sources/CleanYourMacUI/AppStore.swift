@@ -31,6 +31,12 @@ public enum SizeFilter: String, CaseIterable {
     var minimum: UInt64 { switch self { case .all: 0; case .large: 100_000_000; case .huge: 1_000_000_000 } }
 }
 /// How long ago something was modified or last used.
+/// AI Tools risk tiers, which the core reports as each item's badge.
+public enum TierFilter: String, CaseIterable {
+    case all = "All tiers", safe = "Safe", review = "Review", caution = "Caution"
+    var badge: String? { self == .all ? nil : rawValue }
+}
+
 public enum AgeFilter: String, CaseIterable {
     case all = "Any time", day = "Over a day ago", week = "Over a week ago", month = "Over a month ago", year = "Over a year ago"
     var days: Double? { switch self { case .all: nil; case .day: 1; case .week: 7; case .month: 30; case .year: 365 } }
@@ -90,7 +96,7 @@ public final class AppStore {
     public var selectedModuleID: String? = "overview" {
         didSet {
             if selectedModuleID != oldValue {
-                selectedIDs = []; inspectedID = nil; search = ""; sizeFilter = .all; ageFilter = .all; usedFilter = .all
+                selectedIDs = []; inspectedID = nil; search = ""; sizeFilter = .all; ageFilter = .all; usedFilter = .all; tierFilter = .all
                 if !isScanning && !demo {
                     progress = scanStatuses[selectedModuleID ?? "overview"] ?? "Ready · scan this tool"
                     warnings = moduleWarnings[selectedModuleID ?? "overview"] ?? []
@@ -130,6 +136,8 @@ public final class AppStore {
     public var ageFilter: AgeFilter = .all
     /// Last used longer ago than this; items with no recorded use count by modification.
     public var usedFilter: AgeFilter = .all
+    /// AI Tools only: one risk tier, so the totals show what that tier frees.
+    public var tierFilter: TierFilter = .all
     public var isScanning = false
     public var isApplying = false
     public var progress = "Ready"
@@ -244,13 +252,14 @@ public final class AppStore {
             minBytes: sizeFilter.minimum,
             modifiedBefore: ageFilter.cutoff,
             lastUsedBefore: usedFilter.cutoff,
+            badge: selectedModuleID == "ai" ? tierFilter.badge : nil,
             sort: sort.core,
             ascending: sortAscending
         )
     }
     /// Changes whenever the visible rows can change; drives debounced re-queries.
     public var queryKey: String {
-        "\(selectedModuleID ?? "")|\(search)|\(sizeFilter.rawValue)|\(ageFilter.rawValue)|\(usedFilter.rawValue)|\(sort.rawValue)|\(sortAscending)|\(storeVersion)|\(storageNavigation.count)"
+        "\(selectedModuleID ?? "")|\(search)|\(sizeFilter.rawValue)|\(ageFilter.rawValue)|\(usedFilter.rawValue)|\(tierFilter.rawValue)|\(sort.rawValue)|\(sortAscending)|\(storeVersion)|\(storageNavigation.count)"
     }
     /// Runs the current query in the core and resets the page cache. Stale answers are dropped.
     public func requery() async {

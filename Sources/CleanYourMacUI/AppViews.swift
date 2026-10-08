@@ -413,12 +413,15 @@ private struct FinderView: View {
                 HStack(spacing: Space.sm) {
                     SearchField("Search by name or path", text: $store.search).frame(minWidth: 180, maxWidth: 340)
                     // Processes have no file dates or disk size; every other tool can be filtered.
+                    if store.selectedModuleID == "ai" {
+                        ChoiceChip("Tier", selection: $store.tierFilter, neutral: .all, options: TierFilter.allCases.map { ChoiceOption($0, $0.rawValue) })
+                    }
                     if store.selectedModuleID != "orphans" {
                         ChoiceChip("Size", selection: $store.sizeFilter, neutral: .all, options: SizeFilter.allCases.map { ChoiceOption($0, $0.rawValue) })
                         ChoiceChip("Modified", selection: $store.ageFilter, neutral: .all, options: AgeFilter.allCases.map { ChoiceOption($0, $0.rawValue) })
                         ChoiceChip("Last used", selection: $store.usedFilter, neutral: .all, options: AgeFilter.allCases.map { ChoiceOption($0, $0.rawValue) })
-                        if store.sizeFilter != .all || store.ageFilter != .all || store.usedFilter != .all {
-                            Button("Clear") { store.sizeFilter = .all; store.ageFilter = .all; store.usedFilter = .all }
+                        if store.sizeFilter != .all || store.ageFilter != .all || store.usedFilter != .all || store.tierFilter != .all {
+                            Button("Clear") { store.sizeFilter = .all; store.ageFilter = .all; store.usedFilter = .all; store.tierFilter = .all }
                                 .buttonStyle(.plain).font(TypeStyle.label).foregroundStyle(Palette.accentText)
                         }
                     }

@@ -275,3 +275,242 @@ fn old_claude_versions_and_unrelated_folders() {
         .ends_with(".claude-work/debug")));
     assert!(titles.contains(&"MCP and error logs"));
 }
+
+#[test]
+fn codex_gemini_and_cli_sessions_show_their_project() {
+    let f = Fixture::new();
+    let live = f.dir("home/projects/live");
+    let gone = f.at("home/projects/gone");
+    f.write(
+        "home/.codex/sessions/2026/09/01/rollout-2026-09-01T08-00-00-a.jsonl",
+        &[
+            format!(r#"{{"type":"session_meta","payload":{{"id":"a","timestamp":"2026-09-01T08:00:00Z","cwd":"{gone}","git":{{"branch":"fix"}}}}}}"#),
+            r#"{"type":"event_msg","payload":{"type":"user_message","message":"rename the module"}}"#.to_owned(),
+        ]
+        .join("\n"),
+    );
+    f.write("home/.codex/log/codex-tui.log", "x");
+    f.write("home/.codex/config.toml", "model = \"x\"");
+    f.write("home/.codex/auth.json", "{}");
+    // Gemini CLI: the project is named in .project_root beside the chats.
+    f.write("home/.gemini/tmp/abc123/.project_root", &live);
+    f.write(
+        "home/.gemini/tmp/abc123/chats/session-1.json",
+        r#"{"startTime":"2026-09-02T09:00:00Z","messages":[{"type":"user","content":"write docs"}]}"#,
+    );
+    f.write("home/.gemini/tmp/bin/rg", "x");
+    f.write("home/.gemini/oauth_creds.json", "{}");
+    f.write("home/.gemini/settings.json", "{}");
+    // Copilot CLI keeps a workspace.yaml in each session folder.
+    f.write(
+        "home/.copilot/session-state/s1/workspace.yaml",
+        &format!("id: s1\ncwd: {live}\nsummary: Add login page\n"),
+    );
+    f.write("home/.copilot/config.json", "{}");
+
+    let findings = scan(&f, vec![]);
+    let find = |part: &str| {
+        findings
+            .iter()
+            .find(|r| r.resource.path().is_some_and(|p| p.ends_with(part)))
+    };
+    let rollout = find("rollout-2026-09-01T08-00-00-a.jsonl").expect("codex session");
+    assert_eq!(rollout.value("Tool"), Some("Codex"));
+    assert_eq!(rollout.value("Tier"), Some("Caution"));
+    assert_eq!(rollout.value("First prompt"), Some("rename the module"));
+    assert_eq!(rollout.value("Branch"), Some("fix"));
+    assert_eq!(rollout.value("Project folder"), Some("Missing"));
+    assert!(rollout.reason.starts_with("Orphan"));
+    assert!(find(".codex/log").is_some_and(|r| r.value("Tier") == Some("Safe")));
+    assert_eq!(
+        rollout.badge.as_deref(),
+        Some("Caution"),
+        "the tier is the badge"
+    );
+
+    let chats = find("tmp/abc123/chats").expect("gemini chats");
+    assert_eq!(chats.value("Tool"), Some("Gemini CLI"));
+    assert_eq!(chats.value("Project"), Some("~/projects/live"));
+    assert_eq!(chats.value("First prompt"), Some("write docs"));
+    assert_eq!(chats.value("Project folder"), None);
+    assert_eq!(chats.brand.as_deref(), Some("googlegemini"));
+    assert_eq!(rollout.brand.as_deref(), None, "no Codex logo");
+    assert!(find("tmp/bin").is_some());
+
+    let copilot = find("session-state/s1").expect("copilot session");
+    assert_eq!(copilot.title, "Session · Add login page");
+    assert_eq!(copilot.value("Project"), Some("~/projects/live"));
+
+    for never in [
+        "config.toml",
+        "auth.json",
+        "oauth_creds.json",
+        "settings.json",
+        "config.json",
+    ] {
+        assert!(
+            findings
+                .iter()
+                .all(|r| !r.resource.path().unwrap_or_default().ends_with(never)),
+            "{never} must never be listed"
+        );
+    }
+}
+
+#[test]
+fn editors_list_orphan_workspaces_and_extension_tasks() {
+    let f = Fixture::new();
+    let live = f.dir("home/projects/live");
+    let gone = f.at("home/projects/gone app");
+    let cursor = "home/Library/Application Support/Cursor";
+    f.write(&format!("{cursor}/Cache/data_0"), "x");
+    f.write(&format!("{cursor}/User/globalStorage/state.vscdb"), "x");
+    // One workspace whose folder exists, one whose folder is gone and has chats.
+    f.write(
+        &format!("{cursor}/User/workspaceStorage/w1/workspace.json"),
+        &format!(r#"{{"folder":"file://{live}"}}"#),
+    );
+    f.write(
+        &format!("{cursor}/User/workspaceStorage/w2/workspace.json"),
+        &format!(r#"{{"folder":"file://{}"}}"#, gone.replace(' ', "%20")),
+    );
+    f.write(
+        &format!("{cursor}/User/workspaceStorage/w2/chatSessions/c.json"),
+        r#"{"requests":[{"message":{"text":"why is CI red"}}]}"#,
+    );
+    // A Roo Code task, with its workspace in history_item.json.
+    let task = format!("{cursor}/User/globalStorage/rooveterinaryinc.roo-cline/tasks/t1");
+    f.write(
+        &format!("{task}/ui_messages.json"),
+        r#"[{"ts":1759312800000,"type":"say","say":"task","text":"port the parser"}]"#,
+    );
+    f.write(
+        &format!("{task}/history_item.json"),
+        &format!(r#"{{"id":"t1","workspace":"{live}"}}"#),
+    );
+
+    let findings = scan(&f, vec![]);
+    let find = |part: &str| {
+        findings
+            .iter()
+            .find(|r| r.resource.path().is_some_and(|p| p.ends_with(part)))
+    };
+    assert!(find("Cursor/Cache").is_some_and(|r| r.value("Tier") == Some("Safe")));
+    assert!(
+        find("workspaceStorage/w1").is_none(),
+        "the folder still exists"
+    );
+    let orphan = find("workspaceStorage/w2").expect("orphan workspace");
+    assert_eq!(orphan.value("Tier"), Some("Caution"), "it holds chats");
+    assert_eq!(orphan.value("Project"), Some("~/projects/gone app"));
+    let chats = find("w2/chatSessions").expect("chat sessions");
+    assert_eq!(chats.value("First prompt"), Some("why is CI red"));
+    let roo = find("tasks/t1").expect("roo task");
+    assert_eq!(roo.title, "Roo Code task · port the parser");
+    assert_eq!(roo.value("Project"), Some("~/projects/live"));
+    assert_eq!(roo.value("Started"), Some("2025-10-01T10:00:00Z"));
+    assert!(findings.iter().all(|r| !r
+        .resource
+        .path()
+        .unwrap_or_default()
+        .ends_with("state.vscdb")));
+}
+
+#[test]
+fn local_models_report_what_removing_them_frees() {
+    let f = Fixture::new();
+    let store = "home/.ollama/models";
+    let manifest = |layers: &[(&str, u64)]| {
+        let layers: Vec<String> = layers
+            .iter()
+            .map(|(d, s)| format!(r#"{{"digest":"{d}","size":{s}}}"#))
+            .collect();
+        format!(
+            r#"{{"config":{{"digest":"sha256:cfg","size":10}},"layers":[{}]}}"#,
+            layers.join(",")
+        )
+    };
+    // Two models share a base layer; each has its own adapter. The config is shared too.
+    f.write(
+        &format!("{store}/manifests/registry.ollama.ai/library/llama3/latest"),
+        &manifest(&[("sha256:base", 4_000_000_000), ("sha256:a", 100)]),
+    );
+    f.write(
+        &format!("{store}/manifests/hf.co/org/model/q4"),
+        &manifest(&[("sha256:base", 4_000_000_000), ("sha256:b", 300)]),
+    );
+    f.write(&format!("{store}/blobs/sha256-base"), "x");
+    // An old unfinished download, and one that may still be running.
+    let old = f.write(&format!("{store}/blobs/sha256-dead-partial-0"), "x");
+    std::fs::File::options()
+        .write(true)
+        .open(&old)
+        .unwrap()
+        .set_modified(
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000),
+        )
+        .unwrap();
+    f.write(&format!("{store}/blobs/sha256-new-partial"), "x");
+    // Hugging Face, in the location HF_HOME names.
+    f.write("hf/hub/models--meta-llama--Llama-3-8B/blobs/x", "x");
+    f.write("hf/token", "secret");
+
+    let findings = scan(&f, vec![("HF_HOME".into(), f.at("hf"))]);
+    let find = |part: &str| {
+        findings
+            .iter()
+            .find(|r| r.resource.path().is_some_and(|p| p.ends_with(part)))
+    };
+    let llama = find("library/llama3/latest").expect("llama3");
+    assert_eq!(llama.title, "Model · llama3:latest");
+    assert_eq!(llama.bytes, Some(100), "only its own layer is freed");
+    assert_eq!(llama.value("Shared with other models"), Some("4.0 GB"));
+    let other = find("hf.co/org/model/q4").unwrap();
+    assert_eq!(other.title, "Model · hf.co/org/model:q4");
+    assert!(find("sha256-dead-partial-0").is_some_and(|r| r.value("Tier") == Some("Safe")));
+    assert!(
+        find("sha256-new-partial").is_none(),
+        "may still be downloading"
+    );
+
+    let repo = find("models--meta-llama--Llama-3-8B").expect("hub repo");
+    assert_eq!(repo.title, "Model · meta-llama/Llama-3-8B");
+    assert_eq!(repo.value("Tool"), Some("Hugging Face"));
+    assert!(find("hf/token").is_none());
+}
+
+#[test]
+fn tiers_filter_the_list_and_its_totals() {
+    let f = Fixture::new();
+    f.write("home/.codex/log/a.log", "12345");
+    f.write("home/.codex/history.jsonl", "1234567890");
+    let module = AiToolsModule {
+        home: Some(f.at("home")),
+        env: Some(vec![]),
+        ..Default::default()
+    };
+    let engine = Engine::new(services(&f), builtin(&f).register(Arc::new(module)));
+    let context = ScanContext {
+        roots: vec![f.at("home")],
+        ..Default::default()
+    };
+    engine.scan_to_store(
+        &["ai".into()],
+        &context,
+        &ScanControl::default(),
+        1,
+        &|_| {},
+    );
+    let tier = |badge: &str| {
+        engine.results.query(&cym_core::results::Query {
+            module: Some("ai".into()),
+            badge: Some(badge.into()),
+            ..Default::default()
+        })
+    };
+    let safe = tier("Safe");
+    let caution = tier("Caution");
+    assert_eq!(safe.len(), 1);
+    assert_eq!(caution.len(), 1);
+    assert_eq!(caution.summary.logical_bytes, 10);
+}

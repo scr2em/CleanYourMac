@@ -63,6 +63,8 @@ pub struct Query {
     /// Only rows last used before this Unix time; rows with no recorded use count by their
     /// modification time.
     pub last_used_before: Option<f64>,
+    /// Only rows with this badge, such as an AI Tools tier ("Safe", "Review", "Caution").
+    pub badge: Option<String>,
     pub sort: SortKey,
     pub ascending: bool,
 }
@@ -307,6 +309,7 @@ struct SummaryKey {
     min_bytes: u64,
     modified_before: Option<u64>,
     last_used_before: Option<u64>,
+    badge: Option<String>,
 }
 impl ResultStore {
     fn changed(&self) {
@@ -484,6 +487,7 @@ impl ResultStore {
         let unfiltered = q.min_bytes == 0
             && q.modified_before.is_none()
             && q.last_used_before.is_none()
+            && q.badge.is_none()
             && needle.unicode.is_empty();
         // With no filter the snapshot shares the cached order instead of copying it.
         let rows: Ordered = if unfiltered {
@@ -499,6 +503,7 @@ impl ResultStore {
                             && q.last_used_before.is_none_or(|t| {
                                 f.last_used_at.or(f.modified_at).is_some_and(|u| u < t)
                             })
+                            && q.badge.as_ref().is_none_or(|b| f.badge.as_ref() == Some(b))
                             && needle.matches(f)
                     })
                     .cloned()
@@ -512,6 +517,7 @@ impl ResultStore {
             min_bytes: q.min_bytes,
             modified_before: q.modified_before.map(f64::to_bits),
             last_used_before: q.last_used_before.map(f64::to_bits),
+            badge: q.badge.clone(),
         };
         // Totals, largest items, busiest process and eligible count depend on which rows
         // match, not on their order, so a re-sort or repeat query reuses them.
