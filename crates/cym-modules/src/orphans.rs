@@ -243,6 +243,26 @@ pub fn signal(
 }
 /// Current-user developer tools, optionally limited to a working directory.
 pub fn active_tools(services: &Services, directory: Option<&str>) -> Vec<String> {
+    running(services, DEVELOPER_TOOLS, directory)
+        .iter()
+        .map(describe)
+        .collect()
+}
+/// Whether a process named `name` runs `program`: the same name in any case, or followed by
+/// a version or a separator (`python3.12`, `postgres: checkpointer`, `qemu-system-aarch64`,
+/// `Emacs-arm64-11`). `node` does not match `nodemon`. Every module matches names this way.
+pub fn named(name: &str, program: &str) -> bool {
+    name.len() >= program.len()
+        && name.is_char_boundary(program.len())
+        && name[..program.len()].eq_ignore_ascii_case(program)
+        && name[program.len()..]
+            .chars()
+            .next()
+            .is_none_or(|c| c.is_ascii_digit() || matches!(c, ':' | '-' | ' ' | '.'))
+}
+/// The current user's processes running one of `programs` (see `named`), inside `directory`
+/// when one is given.
+pub fn running(services: &Services, programs: &[&str], directory: Option<&str>) -> Vec<Snapshot> {
     let uid = services.processes.current_uid();
     services
         .processes
@@ -251,14 +271,20 @@ pub fn active_tools(services: &Services, directory: Option<&str>) -> Vec<String>
         .filter_map(|pid| services.processes.inspect(pid))
         .filter(|p| {
             p.identity.uid == uid
-                && DEVELOPER_TOOLS.contains(&p.name.to_lowercase().as_str())
+                && programs.iter().any(|program| named(&p.name, program))
                 && directory.is_none_or(|root| {
                     p.cwd
                         .as_ref()
                         .is_some_and(|cwd| policy::contains(cwd, root))
                 })
         })
-        .map(|p| describe(&p))
+        .collect()
+}
+/// `running`, described for a reason shown to the user.
+pub fn running_list(services: &Services, programs: &[&str]) -> Vec<String> {
+    running(services, programs, None)
+        .iter()
+        .map(describe)
         .collect()
 }
 /// `node (PID 42489) in ~/projects/app · /opt/homebrew/bin/node`: enough to tell which

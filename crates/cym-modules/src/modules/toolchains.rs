@@ -776,18 +776,13 @@ impl ToolchainsModule {
     }
 }
 
-/// Process-name prefixes of the Android emulator.
-const EMULATOR: &[&str] = &["qemu-system-", "emulator"];
-/// The first running process whose name starts with one of `prefixes`.
-fn running(s: &Services, prefixes: &[&str]) -> Option<Snapshot> {
-    s.processes
-        .pids()
+/// Process names of the Android emulator.
+const EMULATOR: &[&str] = &["qemu-system", "emulator"];
+/// The first of the current user's processes running one of `programs`.
+fn running(s: &Services, programs: &[&str]) -> Option<Snapshot> {
+    crate::orphans::running(s, programs, None)
         .into_iter()
-        .filter_map(|pid| s.processes.inspect(pid))
-        .find(|p| {
-            let name = p.name.to_lowercase();
-            prefixes.iter().any(|prefix| name.starts_with(prefix))
-        })
+        .next()
 }
 
 impl ScanModule for ToolchainsModule {

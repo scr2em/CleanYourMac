@@ -383,9 +383,8 @@ impl ScanModule for XcodeModule {
                 format!("{name} (PID {})", a.pid)
             })
             .collect();
-        let building: Vec<String> = orphans::active_tools(s, None)
+        let building: Vec<String> = orphans::running_list(s, &["xcodebuild", "swift-frontend"])
             .into_iter()
-            .filter(|t| t.starts_with("xcodebuild ") || t.starts_with("swift-frontend "))
             .chain(open)
             .collect();
         (!building.is_empty()).then(|| {

@@ -469,3 +469,51 @@ fn virtual_machines_are_listed_for_their_size_and_removed_in_their_app() {
         assert!(vm.value("Official cleanup").is_some());
     }
 }
+
+/// Every module matches process names one way, so a check written for `limactl` finds it.
+#[test]
+fn process_names_match_one_way_everywhere() {
+    use cym_core::{modules::containers::ContainersModule, modules::ScanModule, orphans};
+    for (name, program) in [
+        ("python3.12", "python"),
+        ("Python", "python"),
+        ("postgres: checkpointer", "postgres"),
+        ("qemu-system-aarch64", "qemu-system"),
+        ("limactl", "limactl"),
+    ] {
+        assert!(orphans::named(name, program), "{name} {program}");
+    }
+    for (name, program) in [
+        ("nodemon", "node"),
+        ("pythonw", "python"),
+        ("lim", "limactl"),
+    ] {
+        assert!(!orphans::named(name, program), "{name} {program}");
+    }
+    // Lima's download cache waits while Lima runs (it never did: `limactl` was looked for
+    // among the developer tools only).
+    let f = Fixture::new();
+    let cache = f.dir("home/Library/Caches/lima");
+    let mut s = services(&f);
+    let module = ContainersModule {
+        home: Some(f.at("home")),
+    };
+    let finding = Finding::new(
+        "containers",
+        &cache,
+        "Lima downloads",
+        Resource::File {
+            file: s.entry(&cache).unwrap().identity,
+        },
+        "",
+    );
+    assert_eq!(module.in_use(&s, &finding, ActionKind::Trash), None);
+    let mut lima = process("/opt/homebrew/bin/limactl", 1, 501);
+    lima.identity.pid = 77;
+    s.processes = std::sync::Arc::new(FakeProcesses {
+        rows: std::sync::Mutex::new(vec![lima]),
+        ..Default::default()
+    });
+    let reason = module.in_use(&s, &finding, ActionKind::Trash).unwrap();
+    assert!(reason.contains("limactl (PID 77)"), "{reason}");
+}

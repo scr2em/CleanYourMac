@@ -41,16 +41,9 @@ const DETACHED: &[&str] = &[
     "ssh-agent",
     "gpg-agent",
 ];
-/// Whether a process name is one of `DETACHED`, ignoring case and a version suffix
-/// (`postgres: checkpointer`, `Emacs-arm64-11`).
+/// Whether a process name is one of `DETACHED` (see `orphans::named`).
 pub fn detached_by_design(name: &str) -> bool {
-    let name = name.to_ascii_lowercase();
-    DETACHED.iter().any(|d| {
-        name == *d
-            || name
-                .strip_prefix(d)
-                .is_some_and(|rest| rest.starts_with([':', '-', ' ', '.']))
-    })
+    DETACHED.iter().any(|d| orphans::named(name, d))
 }
 
 pub struct OrphanModule;

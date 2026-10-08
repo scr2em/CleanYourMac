@@ -613,10 +613,7 @@ impl ScanModule for ContainersModule {
         let (_, _, process) = CACHES
             .iter()
             .find(|(p, _, _)| policy::contains(path, &format!("{home}/{p}")))?;
-        let running: Vec<String> = orphans::active_tools(s, None)
-            .into_iter()
-            .filter(|t| t.starts_with(&format!("{process} ")))
-            .collect();
+        let running = orphans::running_list(s, &[process]);
         (!running.is_empty()).then(|| format!("Stop {process} first:{}", orphans::list(&running)))
     }
     fn preflight(&self, _: &Services, f: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
