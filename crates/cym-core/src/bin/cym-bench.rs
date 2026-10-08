@@ -1,15 +1,24 @@
 //! Repeatable performance benchmark for the core.
 //!
 //! cargo run --release --bin cym-bench [-- --rows N] [--runs N] [--fixture DIR]
+//!                                    [--walkers-only] [--cold]
+//!
+//! `--walkers-only` times only the walker comparison. `--cold` also times each walker with
+//! the file system cache dropped before every run (Linux as root, or macOS with `sudo` for
+//! `purge`). `CYM_WALK_THREADS=N` sets the parallel walker's listing threads.
 //!
 //! Generates a deterministic developer home folder once (JavaScript and Next.js projects,
 //! Rust targets, Python environments, source trees, duplicate sets and large sparse files),
 //! then times each file module's scan with a warm cache and the result store's operations on
 //! synthetic rows. Prints medians as a Markdown table.
 use cym_core::{
+    adapters::{
+        bulk::BulkFileSystem,
+        fs::{ParallelWalker, PrefetchWalker, StackWalker},
+    },
     model::*,
     modules,
-    ports::ScanControl,
+    ports::{FileSystem, ScanControl, Visit, Walker},
     results::{synthetic, Query, ResultStore, SortKey},
     Engine, Services,
 };
@@ -72,6 +81,10 @@ fn main() {
         median(runs, || timed(walked).1),
         &format!("{count} entries visited"),
     );
+    compare_walkers(&context, runs, args.iter().any(|a| a == "--cold"));
+    if args.iter().any(|a| a == "--walkers-only") {
+        return;
+    }
     for (module, label) in [
         ("large", "Scan · Large Files"),
         ("duplicates", "Scan · Exact Duplicates"),
@@ -185,6 +198,123 @@ fn main() {
                 std::process::exit(0);
             }
         }
+    }
+}
+
+/// The same walks and scans with each walker: the plain stack, the default read-ahead, and
+/// parallel listing. Cold runs drop the file system cache before each run.
+fn compare_walkers(context: &ScanContext, runs: usize, cold: bool) {
+    let files: Arc<dyn FileSystem> = Arc::new(BulkFileSystem);
+    let base = Services::native();
+    let walkers: [(&str, Arc<dyn Walker>); 3] = [
+        ("stack", Arc::new(StackWalker(files.clone()))),
+        (
+            "prefetch",
+            Arc::new(PrefetchWalker::new(files.clone(), Some(base.io.clone()))),
+        ),
+        ("parallel", {
+            let mut walker = ParallelWalker::new(files.clone());
+            if let Some(threads) = std::env::var("CYM_WALK_THREADS")
+                .ok()
+                .and_then(|t| t.parse().ok())
+            {
+                walker.threads = threads;
+            }
+            Arc::new(walker)
+        }),
+    ];
+    let control = ScanControl::default();
+    let caches = if cold && drop_caches() {
+        vec![false, true]
+    } else {
+        if cold {
+            println!("| (cold runs skipped) | | could not drop the file system cache |");
+        }
+        vec![false]
+    };
+    for cold in caches {
+        let state = if cold { "cold" } else { "warm" };
+        for (name, walker) in &walkers {
+            let services = Services {
+                walker: walker.clone(),
+                ..base.clone()
+            };
+            let engine = Engine::new(services.clone(), modules::builtin());
+            let walk = || {
+                let mut count = 0usize;
+                services
+                    .walk(context, &control, &mut vec![], &mut |_| {
+                        count += 1;
+                        Ok(true)
+                    })
+                    .unwrap();
+                count
+            };
+            let raw = || {
+                let mut count = 0usize;
+                for root in &context.roots {
+                    walker
+                        .walk(root, &control, &mut |_| {}, &mut |_| {
+                            count += 1;
+                            Ok(Visit::Descend)
+                        })
+                        .unwrap();
+                }
+                count
+            };
+            let large = || engine.scan_report(&["large".into()], context, &control);
+            let sample = |work: &dyn Fn()| {
+                if cold {
+                    drop_caches();
+                }
+                timed(work).1
+            };
+            if !cold {
+                walk();
+            }
+            report(
+                &format!("Walker · {name} · listing only ({state})"),
+                median(runs, || {
+                    sample(&|| {
+                        raw();
+                    })
+                }),
+                &format!("{} entries", raw()),
+            );
+            report(
+                &format!("Walker · {name} · walk with scope checks ({state})"),
+                median(runs, || {
+                    sample(&|| {
+                        walk();
+                    })
+                }),
+                "",
+            );
+            report(
+                &format!("Walker · {name} · Large Files scan ({state})"),
+                median(runs, || {
+                    sample(&|| {
+                        large();
+                    })
+                }),
+                "",
+            );
+        }
+    }
+}
+
+/// Drops the file system cache, so the next walk reads from the disk. Needs root.
+fn drop_caches() -> bool {
+    let synced = std::process::Command::new("sync")
+        .status()
+        .is_ok_and(|s| s.success());
+    if cfg!(target_os = "macos") {
+        synced
+            && std::process::Command::new("purge")
+                .status()
+                .is_ok_and(|s| s.success())
+    } else {
+        synced && fs::write("/proc/sys/vm/drop_caches", "3").is_ok()
     }
 }
 

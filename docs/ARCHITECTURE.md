@@ -38,7 +38,7 @@ let engine = Engine::new(services, modules::builtin());
 | Port | Default adapter | Notes |
 | --- | --- | --- |
 | `FileSystem` | `BulkFileSystem` | On macOS, folders are listed with `getattrlistbulk`, one call for many entries' names and metadata; links and special files, other platforms and volumes without support use `StdFileSystem` (`lstat`). Also inspect, resolve, read, remove, rename |
-| `Walker` | `PrefetchWalker` | Depth-first, with the next folders listed ahead of time on the I/O pool; `StackWalker` is the sequential equivalent. Scope, exclusions, packages and limits are enforced by `Services::walk` |
+| `Walker` | `ParallelWalker` | Depth-first in `StackWalker`'s exact order. While listings wait on the disk, a few threads list the folders already queued, nearest first, as the calling thread visits entries; with a warm cache it runs as a plain stack walk. `StackWalker` is the sequential equivalent and `PrefetchWalker` the earlier read-ahead walker, both kept for comparison. Scope, exclusions, packages and limits are enforced by `Services::walk` |
 | `Sizer` | `MetadataSizer` | Parallel (rayon), hard links counted once, order-independent folder fingerprint |
 | `Hasher` | `Blake3Hasher` | `Sha256Hasher` is also provided; prefix hashing for staged duplicate detection |
 | `CommandRunner` | `SystemRunner` | Allow-listed tools, argument arrays, clean environment, own process group, deadline, bounded output |

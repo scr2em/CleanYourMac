@@ -66,7 +66,7 @@ impl Services {
         let files: Arc<dyn FileSystem> = Arc::new(bulk::BulkFileSystem);
         let io = Arc::new(io_pool());
         Self {
-            walker: Arc::new(fs::PrefetchWalker::new(files.clone(), Some(io.clone()))),
+            walker: Arc::new(fs::ParallelWalker::new(files.clone())),
             sizer: Arc::new(fs::MetadataSizer::new(files.clone()).on(io.clone())),
             fs: files,
             hasher: Arc::new(fs::Blake3Hasher),

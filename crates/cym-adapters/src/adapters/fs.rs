@@ -293,6 +293,209 @@ impl Walker for PrefetchWalker {
     }
 }
 
+/// A folder on the walk's stack, listed by whichever thread claims it first.
+struct Slot {
+    path: String,
+    claimed: AtomicBool,
+    listing: std::sync::Mutex<Option<Listing>>,
+}
+impl Slot {
+    fn new(path: String) -> Arc<Self> {
+        Arc::new(Self {
+            path,
+            claimed: AtomicBool::new(false),
+            listing: Default::default(),
+        })
+    }
+}
+/// State shared between a walk and its listing threads.
+struct Shared {
+    /// Folders waiting to be listed, nearest the top of the walk's stack last.
+    todo: std::sync::Mutex<Vec<Arc<Slot>>>,
+    more: std::sync::Condvar,
+    /// Signalled when a listing thread finishes a folder.
+    ready: std::sync::Mutex<()>,
+    listed: std::sync::Condvar,
+    /// Entries listed ahead and not yet visited, which bounds the walk's memory.
+    buffered: std::sync::atomic::AtomicUsize,
+    done: AtomicBool,
+}
+
+/// Depth-first traversal in exactly `StackWalker`'s order, with every folder the visitor
+/// descends into listed by a few threads while the calling thread visits entries. The
+/// visitor still runs on the calling thread, one entry at a time, so modules need no change.
+///
+/// Listing threads take the queued folders nearest the top of the stack first, the ones
+/// the walk needs soonest; the calling thread lists the folder it needs now itself unless a
+/// listing thread already claimed it, so it waits only on a listing already in progress.
+/// Skipped folders are never queued, so no listing is wasted.
+///
+/// Like `PrefetchWalker`, it hands folders out only while listings wait on the disk: a cached
+/// folder lists faster than another thread can be told about it. The threads start the first
+/// time listings turn slow, so walks of cached or small folders run as a plain stack walk.
+pub struct ParallelWalker {
+    pub fs: Arc<dyn FileSystem>,
+    /// Listing threads besides the calling thread.
+    pub threads: usize,
+    /// Entries that may be listed ahead of the walk before listing threads pause.
+    pub ahead: usize,
+    /// The average listing time above which folders are listed in parallel.
+    pub slow_listing: std::time::Duration,
+}
+impl ParallelWalker {
+    pub fn new(fs: Arc<dyn FileSystem>) -> Self {
+        let threads = std::thread::available_parallelism().map_or(3, |n| n.get().clamp(2, 8) - 1);
+        Self {
+            fs,
+            threads,
+            ahead: 200_000,
+            slow_listing: std::time::Duration::from_micros(50),
+        }
+    }
+}
+fn list_ahead(fs: &dyn FileSystem, shared: &Shared, ahead: usize) {
+    loop {
+        let slot = {
+            let Ok(mut todo) = shared.todo.lock() else {
+                return;
+            };
+            loop {
+                if shared.done.load(Ordering::Acquire) {
+                    return;
+                }
+                if shared.buffered.load(Ordering::Acquire) < ahead {
+                    if let Some(slot) = todo.pop() {
+                        break slot;
+                    }
+                }
+                todo = match shared.more.wait(todo) {
+                    Ok(todo) => todo,
+                    Err(_) => return,
+                };
+            }
+        };
+        if slot.claimed.swap(true, Ordering::AcqRel) {
+            continue;
+        }
+        // The walk waits for this listing, so a panic must still deliver one.
+        let listing =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fs.children(&slot.path)))
+                .unwrap_or_else(|_| Err(format!("Cannot read {}", slot.path)));
+        let count = listing.as_ref().map_or(0, Vec::len);
+        shared.buffered.fetch_add(count, Ordering::AcqRel);
+        if let Ok(mut slot) = slot.listing.lock() {
+            *slot = Some(listing);
+        }
+        drop(shared.ready.lock());
+        shared.listed.notify_all();
+    }
+}
+impl Walker for ParallelWalker {
+    fn walk(
+        &self,
+        root: &str,
+        control: &ScanControl,
+        problem: &mut dyn FnMut(String),
+        visit: &mut dyn FnMut(&Entry) -> Result<Visit>,
+    ) -> Result<()> {
+        let shared = Shared {
+            todo: Default::default(),
+            more: Default::default(),
+            ready: Default::default(),
+            listed: Default::default(),
+            buffered: Default::default(),
+            done: AtomicBool::new(false),
+        };
+        // Stops the listing threads however the walk ends.
+        struct Finish<'a>(&'a Shared);
+        impl Drop for Finish<'_> {
+            fn drop(&mut self) {
+                self.0.done.store(true, Ordering::Release);
+                if let Ok(mut todo) = self.0.todo.lock() {
+                    todo.clear();
+                }
+                self.0.more.notify_all();
+            }
+        }
+        std::thread::scope(|scope| {
+            let _finish = Finish(&shared);
+            let mut started = false;
+            // Exponential moving average of this thread's own listing time, in nanoseconds.
+            let (mut average, slow) = (0u128, self.slow_listing.as_nanos());
+            // Folders at the bottom of the stack already offered to the listing threads.
+            let mut offered = 0;
+            let mut stack = vec![Slot::new(root.to_owned())];
+            while let Some(slot) = stack.pop() {
+                control.check()?;
+                offered = offered.min(stack.len());
+                let listing = if !slot.claimed.swap(true, Ordering::AcqRel) {
+                    let started = std::time::Instant::now();
+                    let listing = self.fs.children(&slot.path);
+                    average = (average * 7 + started.elapsed().as_nanos()) / 8;
+                    listing
+                } else {
+                    let mut guard = shared.ready.lock().map_err(|_| "Walk failed.")?;
+                    let listing = loop {
+                        if let Some(listing) = slot.listing.lock().ok().and_then(|mut l| l.take()) {
+                            break listing;
+                        }
+                        guard = shared.listed.wait(guard).map_err(|_| "Walk failed.")?;
+                    };
+                    drop(guard);
+                    let count = listing.as_ref().map_or(0, Vec::len);
+                    shared.buffered.fetch_sub(count, Ordering::AcqRel);
+                    shared.more.notify_one();
+                    listing
+                };
+                let children = match listing {
+                    Ok(children) => children,
+                    Err(e) => {
+                        problem(e);
+                        continue;
+                    }
+                };
+                let pushed = stack.len();
+                for child in children {
+                    control.check()?;
+                    let entry = match child {
+                        Ok(entry) => entry,
+                        Err(e) => {
+                            problem(e);
+                            continue;
+                        }
+                    };
+                    match visit(&entry)? {
+                        Visit::Stop => return Ok(()),
+                        Visit::Descend if entry.directory && !entry.symlink => {
+                            stack.push(Slot::new(entry.identity.path))
+                        }
+                        _ => {}
+                    }
+                }
+                // The calling thread takes the newest folder next; the rest are offered to
+                // the listing threads, newest last so they are taken first.
+                let next = stack.len().saturating_sub(1);
+                if stack.len() == pushed || self.threads == 0 || average < slow || offered >= next {
+                    continue;
+                }
+                if !started {
+                    started = true;
+                    for _ in 0..self.threads {
+                        let (fs, shared, ahead) = (self.fs.as_ref(), &shared, self.ahead);
+                        scope.spawn(move || list_ahead(fs, shared, ahead));
+                    }
+                }
+                if let Ok(mut todo) = shared.todo.lock() {
+                    todo.extend(stack[offered..next].iter().cloned());
+                }
+                offered = next;
+                shared.more.notify_all();
+            }
+            Ok(())
+        })
+    }
+}
+
 /// Logical and allocated size with hard links counted once, plus an order-independent
 /// metadata fingerprint of every descendant. Subdirectories are sized in parallel.
 pub struct MetadataSizer {

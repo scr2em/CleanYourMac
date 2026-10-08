@@ -211,7 +211,7 @@ fn cancelled_walk_stops() {
 
 #[test]
 fn prefetching_walker_visits_in_stack_order_and_honors_skip_and_stop() {
-    use cym_core::adapters::fs::{PrefetchWalker, StackWalker, StdFileSystem};
+    use cym_core::adapters::fs::{ParallelWalker, PrefetchWalker, StackWalker, StdFileSystem};
     let f = Fixture::new();
     for a in 0..6 {
         for b in 0..5 {
@@ -256,6 +256,18 @@ fn prefetching_walker_visits_in_stack_order_and_honors_skip_and_stop() {
     assert_eq!(seen, expected);
     assert!(!seen.iter().any(|p| p.contains("/skip/")));
     assert_eq!(walk(&prefetch, 7), expected[..7]);
+    for threads in [0, 1, 3] {
+        let parallel = ParallelWalker {
+            fs: files.clone(),
+            threads,
+            // Small, so listing threads also pause and resume.
+            ahead: 4,
+            // Always list in parallel, so that path is the one compared.
+            slow_listing: std::time::Duration::ZERO,
+        };
+        assert_eq!(walk(&parallel, usize::MAX), expected, "{threads} threads");
+        assert_eq!(walk(&parallel, 7), expected[..7]);
+    }
 }
 
 #[test]

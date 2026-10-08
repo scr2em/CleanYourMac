@@ -5,7 +5,11 @@
 ~~~
 cargo run --release --bin cym-bench            # 1M rows, 5 runs, median
 cargo run --release --bin cym-bench -- --rows 200000 --runs 3
+cargo run --release --bin cym-bench -- --walkers-only            # walker comparison, warm
+sudo cargo run --release --bin cym-bench -- --walkers-only --cold # also with the cache dropped
 ~~~
+
+`--cold` drops the file system cache before every run (`purge` on macOS, `/proc/sys/vm/drop_caches` on Linux), so it needs root. `CYM_WALK_THREADS=N` sets the parallel walker's listing threads.
 
 The fixture (`.bench-fixture/`, git-ignored, about 122,000 entries) is generated once:
 - 200 JavaScript projects with installed dependencies, half of them Next.js apps;
@@ -61,3 +65,32 @@ Each change has an equivalence test against the previous implementation:
 - `fast_analytics_matches_the_reference_totals`
 - `keyed_sorting_matches_the_reference_comparator`
 - `prefetching_walker_visits_in_stack_order_and_honors_skip_and_stop`
+
+## Parallel walker
+
+`ParallelWalker` replaced `PrefetchWalker` as the default. Visiting stays on the calling thread in the same depth-first order, so no scan module changed. What runs in parallel is the folder listing: while listings wait on the disk, a few threads (cores minus one, at most seven) list the folders already queued, nearest the top of the stack first. The calling thread lists the folder it needs next itself, unless a listing thread is already reading it. Skipped folders are never queued, so no listing is wasted, and at most 200,000 entries are listed ahead of the walk.
+
+Linux VM, 4 vCPUs, 3 listing threads. Same fixture, 152,716 entries. Medians of five runs. Cold runs drop the page cache before every run.
+
+| Walk | Stack | Read-ahead (before) | Parallel | Parallel vs stack |
+| --- | ---: | ---: | ---: | --- |
+| Listing only, warm | 523 ms | 523 ms | 506 ms | — |
+| With scope checks, warm | 618 ms | 612 ms | 576 ms | — |
+| Large Files scan, warm | 628 ms | 664 ms | 647 ms | — |
+| Listing only, cold | 4,252 ms | 3,402 ms | 2,933 ms | 1.45× |
+| With scope checks, cold | 4,175 ms | 3,883 ms | 3,280 ms | 1.27× |
+| Large Files scan, cold | 4,207 ms | 3,725 ms | 3,175 ms | 1.33× |
+
+Warm differences are within run-to-run noise. Listing threads on a cold cache, listing only (three runs each):
+
+| Listing threads | 1 | 3 | 7 | 15 |
+| --- | ---: | ---: | ---: | ---: |
+| Cold listing | 3,765 ms | 2,701 ms | 3,269 ms | 3,528 ms |
+
+What we learned:
+
+- **Parallel listing with a warm cache was 1.8× slower** than the stack (1,013 ms against 556 ms) in the first version. A cached folder lists in microseconds, less than waking another thread costs. Like `PrefetchWalker`, the walker now times its own listings and offers folders to other threads only while they average over 50 µs. Warm walks then match the stack, and the threads never start.
+- **More threads than cores did not help** in this VM. Listing a cold folder also costs kernel CPU time, so the 4 vCPUs were the limit beyond three listing threads. On a Mac with an NVMe disk and more cores the best count may differ: compare with `CYM_WALK_THREADS` and `--cold`.
+- **The rest of a cold walk is order-bound.** The visitor decides whether to enter each folder, so only folders it already chose can be listed ahead. Listing deeper speculatively would also list folders the scan skips, such as `node_modules`.
+
+Equivalence: `prefetching_walker_visits_in_stack_order_and_honors_skip_and_stop` compares the visit order with `StackWalker` for 0, 1 and 3 listing threads, with stopping early and with a read-ahead limit small enough that the threads pause and resume. The same comparison on the 152,716-entry fixture, with 1 to 15 threads and parallel listing forced on, matched in every run.
