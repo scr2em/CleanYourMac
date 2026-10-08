@@ -605,3 +605,21 @@ fn sizes_read_the_same_everywhere() {
     assert_eq!(format_bytes(1_234_000_000), "1.2 GB");
     assert_eq!(format_bytes(5_000_000_000_000_000), "5000.0 TB");
 }
+
+/// A file read whole is all or nothing: a cut-off start could parse as something else.
+#[test]
+fn whole_reads_never_return_a_prefix() {
+    let f = Fixture::new();
+    let s = services(&f);
+    let small = f.write("small.toml", "default = \"stable\"\n");
+    let large = f.write("large.json", &"x".repeat(300 * 1024));
+    assert_eq!(
+        s.read_text(&small).as_deref(),
+        Some("default = \"stable\"\n")
+    );
+    assert_eq!(s.read_text(&large), None);
+    assert_eq!(s.read_whole(&small, 19).map(|d| d.len()), Some(19));
+    assert_eq!(s.read_whole(&small, 18), None);
+    // A prefix is still available on purpose, for the start of a long log.
+    assert_eq!(s.fs.read(&large, 10).unwrap().len(), 10);
+}

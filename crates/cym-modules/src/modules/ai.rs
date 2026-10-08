@@ -125,19 +125,13 @@ impl AiTool {
     /// The home-relative folders this tool's items come from, up to the first `*`: its
     /// fixed data folders and home locations. Other tools leave them to AI Tools.
     pub fn home_folders(&self) -> Vec<String> {
-        let fixed = |path: &str| -> String {
-            path.split('/')
-                .take_while(|p| !p.contains('*'))
-                .collect::<Vec<_>>()
-                .join("/")
-        };
         self.roots
             .iter()
             .filter_map(|r| match r {
                 Root::Home(name) if !name.contains('*') => Some(name.clone()),
                 _ => None,
             })
-            .chain(self.home_locations.iter().map(|l| fixed(l.path)))
+            .chain(self.home_locations.iter().map(|l| fixed_prefix(l.path)))
             .filter(|f| !f.is_empty())
             .collect()
     }
@@ -313,12 +307,6 @@ fn empty(s: &Services, path: &str) -> bool {
     s.children(path, &mut vec![])
         .iter()
         .all(|e| e.name() == ".DS_Store")
-}
-
-fn now() -> f64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0.0, |d| d.as_secs_f64())
 }
 
 /// The part of a location's path before its first pattern component.

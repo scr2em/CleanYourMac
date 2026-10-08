@@ -111,11 +111,17 @@ impl Services {
         self.entry(path).is_ok_and(|e| e.directory)
     }
     /// A small text file such as a tool's settings, or `None` when it is missing or unreadable.
+    /// A whole text file of at most 256 KB, for settings and JSON a module parses. A larger
+    /// file gives `None`, never a cut-off start a parser could misread; read a prefix on
+    /// purpose with `fs.read`.
     pub fn read_text(&self, path: &str) -> Option<String> {
-        self.fs
-            .read(path, 256 * 1024)
-            .ok()
+        self.read_whole(path, 256 * 1024)
             .map(|data| String::from_utf8_lossy(&data).into_owned())
+    }
+    /// A whole regular file of at most `limit` bytes; `None` when larger or unreadable.
+    pub fn read_whole(&self, path: &str, limit: u64) -> Option<Vec<u8>> {
+        let data = self.fs.read(path, limit + 1).ok()?;
+        (data.len() as u64 <= limit).then_some(data)
     }
 
     /// The context with every root and exclusion also spelled the way the disk resolves it,

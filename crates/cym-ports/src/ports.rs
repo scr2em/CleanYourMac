@@ -102,7 +102,8 @@ pub trait FileSystem: Send + Sync {
     fn children(&self, path: &str) -> Result<Vec<Result<Entry>>>;
     /// The physical path with symbolic links resolved, if it exists.
     fn resolve(&self, path: &str) -> Option<String>;
-    /// The first `limit` bytes of a regular file. A symbolic link is an error.
+    /// The first `limit` bytes of a regular file: a prefix when the file is larger (see
+    /// `Services::read_whole` for all or nothing). A symbolic link is an error.
     fn read(&self, path: &str, limit: u64) -> Result<Vec<u8>>;
     fn remove(&self, path: &str) -> Result<()>;
     fn rename(&self, from: &str, to: &str) -> Result<()>;
