@@ -1,6 +1,6 @@
 //! Git worktree inspection and removal through the `CommandRunner` port.
 use crate::{model::*, ports::*, services::Services};
-use std::{path::Path, time::Duration};
+use std::time::Duration;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Worktree {
@@ -20,6 +20,21 @@ pub struct Safety {
     pub upstream: String,
     /// Ignored files and folders that removal deletes, as Git lists them.
     pub ignored: Vec<String>,
+}
+/// What `Git::inspect` found in a working tree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Inspection {
+    /// Nothing Git cannot give back. Ignored files go with the folder; a detached HEAD's
+    /// commit is kept on `kept_on`.
+    Clean {
+        ignored: Vec<String>,
+        kept_on: Option<String>,
+    },
+    /// Why the folder must stay, and a short status for it.
+    Keep {
+        reason: String,
+        status: &'static str,
+    },
 }
 impl Safety {
     pub fn blocked(reason: &str, status: &str, upstream: &str) -> Self {
@@ -123,14 +138,9 @@ impl Git<'_> {
         }
         parse(&out.data)
     }
-    /// Whether removing a linked worktree loses anything Git cannot give back.
-    ///
-    /// `git worktree remove` deletes the folder but keeps the branch, its commits and the
-    /// repository's stashes. What it cannot keep is uncommitted work, files that were never
-    /// added, and commits reachable only from a detached HEAD, so only those block removal.
-    /// Ignored files (dependencies, build output, local settings) are deleted with the folder
-    /// and listed for review.
-    pub fn safety(&self, record: &Worktree, control: &ScanControl) -> Result<Safety> {
+    /// Whether removing a linked worktree loses anything Git cannot give back. Main, bare,
+    /// locked and stale registrations stay; the folder itself is checked by `inspect`.
+    pub fn safety(&self, s: &Services, record: &Worktree, control: &ScanControl) -> Result<Safety> {
         if record.main || record.bare {
             return Ok(Safety::blocked(
                 "Main and bare repositories are protected.",
@@ -152,23 +162,82 @@ impl Git<'_> {
                 "Unknown",
             ));
         }
-        if Path::new(&record.path).join(".gitmodules").exists() {
-            return Ok(Safety::blocked(
-                "Worktrees with submodules need manual inspection.",
-                "Submodules",
-                "Unknown",
-            ));
+        let (ignored, kept_on) =
+            match self.inspect(s, &record.path, Some(&record.branch), control)? {
+                Inspection::Keep { reason, status } => {
+                    let upstream = match status {
+                        "Detached" => "None",
+                        "Local changes" => "Not checked",
+                        _ => "Unknown",
+                    };
+                    return Ok(Safety::blocked(&reason, status, upstream));
+                }
+                Inspection::Clean { ignored, kept_on } => (ignored, kept_on),
+            };
+        let kept = match kept_on {
+            Some(reference) => format!("its commit is kept on {reference}"),
+            None => format!(
+                "branch {} and its commits stay in the repository",
+                record.branch
+            ),
+        };
+        let upstream = self.upstream(record, control);
+        let mut reason =
+            format!("No uncommitted or untracked work. Removing deletes the folder; {kept}.");
+        if !ignored.is_empty() {
+            reason += &format!(" Ignored files are deleted too: {}.", sample(&ignored, 4));
         }
-        if let Some(key) = self.risky_config(&record.path, control)? {
-            return Ok(Safety::blocked(
-                &format!("This repository's own Git settings run a program ({key}). Inspect it manually."),
-                "Inspect",
-                "Unknown",
-            ));
+        Ok(Safety {
+            eligible: true,
+            reason,
+            status: "Clean".into(),
+            upstream,
+            ignored,
+        })
+    }
+    /// What removing the working tree at `path` would lose that Git cannot give back. Git
+    /// Worktrees and AI Tools both ask here, so a worktree an agent made is held to the same
+    /// rules as any other.
+    ///
+    /// Deleting the folder keeps the branch, its commits and the repository's stashes. What
+    /// it cannot keep is uncommitted work, files that were never added, work in submodules or
+    /// in a repository kept inside an ignored folder, and commits reachable only from a
+    /// detached HEAD. Settings that make Git run a program stop the check before `status`.
+    /// `branch` is the checked-out branch when the caller knows it (empty when detached);
+    /// `None` asks Git.
+    pub fn inspect(
+        &self,
+        s: &Services,
+        path: &str,
+        branch: Option<&str>,
+        control: &ScanControl,
+    ) -> Result<Inspection> {
+        let keep = |reason: String, status| Ok(Inspection::Keep { reason, status });
+        if s.exists(&format!("{path}/.gitmodules")) {
+            return keep(
+                "Worktrees with submodules need manual inspection.".into(),
+                "Submodules",
+            );
+        }
+        match self.risky_config(path, control)? {
+            None => {}
+            // A nested repository's work is invisible to the status below.
+            Some(key) if key.starts_with("nested repository") => {
+                return keep(
+                    format!("This worktree contains a {key}, whose work is not checked here. Inspect it manually."),
+                    "Inspect",
+                )
+            }
+            Some(key) => {
+                return keep(
+                    format!("This repository's own Git settings run a program ({key}). Inspect it manually."),
+                    "Inspect",
+                )
+            }
         }
         // Untracked and ignored folders are reported once, not file by file.
         let state = self.run(
-            &record.path,
+            path,
             &[
                 "status",
                 "--porcelain=v1",
@@ -190,7 +259,7 @@ impl Git<'_> {
                 continue;
             }
             match &entry[..2] {
-                "!!" => ignored.push(entry[3..].trim_end_matches('/').to_owned()),
+                "!!" => ignored.push(entry[3..].to_owned()),
                 "??" => untracked += 1,
                 code => {
                     changed += 1;
@@ -209,57 +278,84 @@ impl Git<'_> {
             if untracked > 0 {
                 parts.push(format!("{untracked} untracked item{}", plural(untracked)));
             }
-            return Ok(Safety::blocked(
-                &format!(
+            return keep(
+                format!(
                     "Has {}. Commit, stash or delete them first; removal would lose them.",
                     parts.join(" and ")
                 ),
                 "Local changes",
-                "Not checked",
-            ));
+            );
         }
-        let kept = if record.branch.is_empty() {
-            // A detached HEAD's commits survive only if a branch or tag also reaches them.
-            let refs = self.run(
-                &record.path,
-                &[
-                    "for-each-ref",
-                    "--count=1",
-                    "--contains=HEAD",
-                    "--format=%(refname:short)",
-                    "refs/heads",
-                    "refs/remotes",
-                    "refs/tags",
-                ],
-                control,
-            )?;
-            let reference = refs.text().trim().to_owned();
-            if refs.status != 0 || reference.is_empty() {
-                return Ok(Safety::blocked(
-                    "Detached HEAD has commits no branch or tag contains. Create a branch to keep them before removing.",
-                    "Detached",
-                    "None",
-                ));
+        // A repository kept in an ignored folder is invisible to `status`; one at the top of
+        // an ignored folder, or a folder below it, blocks.
+        for folder in ignored.iter().filter(|e| e.ends_with('/')) {
+            let folder = format!("{path}/{}", folder.trim_end_matches('/'));
+            let mut warnings = vec![];
+            let below = s.children(&folder, &mut warnings);
+            if !warnings.is_empty() || below.len() > 4_096 {
+                return Err("Git could not inspect an ignored folder.".into());
             }
-            format!("its commit is kept on {reference}")
-        } else {
-            format!(
-                "branch {} and its commits stay in the repository",
-                record.branch
-            )
-        };
-        let upstream = self.upstream(record, control);
-        let mut reason =
-            format!("No uncommitted or untracked work. Removing deletes the folder; {kept}.");
-        if !ignored.is_empty() {
-            reason += &format!(" Ignored files are deleted too: {}.", sample(&ignored, 4));
+            let nested = std::iter::once(folder.clone())
+                .chain(
+                    below
+                        .iter()
+                        .filter(|e| e.directory)
+                        .map(|e| e.path().to_owned()),
+                )
+                .find(|d| crate::modules::checkout(s, d).is_some());
+            if let Some(nested) = nested {
+                let relative = nested.strip_prefix(&format!("{path}/")).unwrap_or(&nested);
+                return keep(
+                    format!("This worktree keeps another repository in an ignored folder ({relative}). Inspect it manually."),
+                    "Inspect",
+                );
+            }
         }
-        Ok(Safety {
-            eligible: true,
-            reason,
-            status: "Clean".into(),
-            upstream,
+        let ignored: Vec<String> = ignored
+            .into_iter()
+            .map(|e| e.trim_end_matches('/').to_owned())
+            .collect();
+        let detached = match branch {
+            Some(branch) => branch.is_empty(),
+            None => {
+                let head = self.run(path, &["symbolic-ref", "-q", "HEAD"], control)?;
+                match head.status {
+                    0 => false,
+                    1 => true,
+                    _ => return Err("Git could not read HEAD.".into()),
+                }
+            }
+        };
+        if !detached {
+            return Ok(Inspection::Clean {
+                ignored,
+                kept_on: None,
+            });
+        }
+        // A detached HEAD's commits survive only if a branch or tag also reaches them.
+        let refs = self.run(
+            path,
+            &[
+                "for-each-ref",
+                "--count=1",
+                "--contains=HEAD",
+                "--format=%(refname:short)",
+                "refs/heads",
+                "refs/remotes",
+                "refs/tags",
+            ],
+            control,
+        )?;
+        let reference = refs.text().trim().to_owned();
+        if refs.status != 0 || reference.is_empty() {
+            return keep(
+                "Detached HEAD has commits no branch or tag contains. Create a branch to keep them before removing.".into(),
+                "Detached",
+            );
+        }
+        Ok(Inspection::Clean {
             ignored,
+            kept_on: Some(reference),
         })
     }
     /// The branch's upstream and how far ahead it is, for information only: removing a
@@ -339,7 +435,7 @@ pub fn remove(
         .into_iter()
         .find(|w| w.path == file.path && w.head == head)
         .ok_or("Worktree registration or HEAD changed.")?;
-    let state = git.safety(&current, control)?;
+    let state = git.safety(services, &current, control)?;
     if !state.eligible {
         return Err(state.reason);
     }

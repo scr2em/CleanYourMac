@@ -625,6 +625,26 @@ fn an_ai_worktree_with_work_in_it_stays() {
         0
     );
     commit(&with_ignored);
+    // Agents often work on a detached HEAD: a commit no branch holds would be lost, while
+    // a detached checkout of a branch's commit loses nothing.
+    let detached = f.dir("home/.codex/worktrees/task-6");
+    let at_branch = f.dir("home/.codex/worktrees/task-7");
+    for repo in [&detached, &at_branch] {
+        assert_eq!(
+            git.run(repo, &["init", "-q", "-b", "main"], &k)
+                .unwrap()
+                .status,
+            0
+        );
+        commit(repo);
+        assert_eq!(
+            git.run(repo, &["checkout", "-q", "--detach"], &k)
+                .unwrap()
+                .status,
+            0
+        );
+    }
+    commit(&detached);
     let engine = Engine::new(services(&f), builtin(&f));
     let findings = scan(&engine, &f, "ai", vec![f.at("home")]);
     let dirty = findings
@@ -639,7 +659,7 @@ fn an_ai_worktree_with_work_in_it_stays() {
         .blocked_reason
         .as_deref()
         .unwrap()
-        .contains("uncommitted or untracked"));
+        .contains("1 untracked item"));
     let plain = findings
         .iter()
         .find(|r| {
@@ -661,7 +681,7 @@ fn an_ai_worktree_with_work_in_it_stays() {
         .blocked_reason
         .as_deref()
         .unwrap()
-        .contains("uncommitted or untracked"));
+        .contains("1 untracked item"));
     let reason = |end: &str| {
         findings
             .iter()
@@ -679,4 +699,18 @@ fn an_ai_worktree_with_work_in_it_stays() {
         "{}",
         reason("worktrees/task-5")
     );
+    assert!(
+        reason("worktrees/task-6").contains("Detached HEAD"),
+        "{}",
+        reason("worktrees/task-6")
+    );
+    let kept = findings
+        .iter()
+        .find(|r| {
+            r.resource
+                .path()
+                .is_some_and(|p| p.ends_with("worktrees/task-7"))
+        })
+        .unwrap();
+    assert_eq!(kept.blocked_reason, None);
 }

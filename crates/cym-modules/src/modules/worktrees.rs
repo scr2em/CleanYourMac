@@ -74,7 +74,7 @@ impl WorktreeModule {
                 .any(|root| policy::contains(&record.path, root))
                 && !policy::protected(&record.path);
             let state = if in_scope {
-                git.safety(&record, k)?
+                git.safety(s, &record, k)?
             } else {
                 Safety::blocked(
                     "Registered outside the chosen roots. Add its parent as a root to inspect it.",

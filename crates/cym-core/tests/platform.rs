@@ -39,13 +39,15 @@ fn ignored_files_are_listed_but_do_not_block_removal() {
         output("!! .env\0!! node_modules/\0", 0),
         output("", 128),
     ]);
+    let f = Fixture::new();
+    f.dir("worktree/node_modules/left-pad");
     let record = Worktree {
-        path: "/fixture/worktree".into(),
+        path: f.at("worktree"),
         branch: "feature".into(),
         ..Default::default()
     };
     let safety = Git(runner.as_ref())
-        .safety(&record, &ScanControl::default())
+        .safety(&services(&f), &record, &ScanControl::default())
         .unwrap();
     assert!(safety.eligible, "{}", safety.reason);
     assert_eq!(safety.ignored, [".env", "node_modules"]);
@@ -58,13 +60,14 @@ fn ignored_files_are_listed_but_do_not_block_removal() {
 #[test]
 fn a_repository_whose_settings_run_programs_is_left_to_inspect() {
     let runner = StubRunner::new(vec![output("local\0filter.x.clean\nsh -c evil\0", 0)]);
+    let f = Fixture::new();
     let record = Worktree {
-        path: "/fixture/worktree".into(),
+        path: f.dir("worktree"),
         branch: "feature".into(),
         ..Default::default()
     };
     let safety = Git(runner.as_ref())
-        .safety(&record, &ScanControl::default())
+        .safety(&services(&f), &record, &ScanControl::default())
         .unwrap();
     assert!(!safety.eligible);
     assert!(safety.reason.contains("filter.x.clean"));
@@ -73,15 +76,16 @@ fn a_repository_whose_settings_run_programs_is_left_to_inspect() {
 
 #[test]
 fn uncommitted_and_untracked_work_blocks_removal() {
+    let f = Fixture::new();
     let record = Worktree {
-        path: "/fixture/worktree".into(),
+        path: f.dir("worktree"),
         branch: "feature".into(),
         ..Default::default()
     };
     let safety = |status: &str| {
         let runner = StubRunner::new(vec![output("", 0), output("", 0), output(status, 0)]);
         Git(runner.as_ref())
-            .safety(&record, &ScanControl::default())
+            .safety(&services(&f), &record, &ScanControl::default())
             .unwrap()
     };
     let both = safety(" M src/a.rs\0?? new.txt\0!! target/\0");
@@ -160,7 +164,7 @@ fn real_git_worktree_rejects_late_changes_and_removes_only_an_eligible_tree() {
         .into_iter()
         .find(|w| w.path == linked)
         .unwrap();
-    assert!(git.safety(&record, &k).unwrap().eligible);
+    assert!(git.safety(&s, &record, &k).unwrap().eligible);
 
     // Only the linked tree is listed; the main checkout is not a cleanup candidate.
     let scan =

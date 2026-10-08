@@ -1005,8 +1005,8 @@ fn worktree_blocker(
         .then(|| git_blocker(s, path, k))
         .flatten()
 }
-/// Why a Git worktree must stay: uncommitted or untracked work, settings that run programs,
-/// or a state Git cannot report. `None` for a folder that is not a worktree.
+/// Why a Git worktree must stay: anything `Git::inspect` finds, a checkout of another
+/// system, or a state Git cannot report. `None` for a folder that is not a worktree.
 fn git_blocker(s: &Services, path: &str, k: &ScanControl) -> Option<String> {
     // A tool may keep the repository a folder or two below the matched one (Codex uses
     // `worktrees/<id>/<repo>`), so every repository down to that depth is checked; a folder
@@ -1048,87 +1048,14 @@ fn git_blocker(s: &Services, path: &str, k: &ScanControl) -> Option<String> {
     }
     repos.iter().find_map(|repo| repo_blocker(s, repo, k))
 }
-/// Why one Git repository must stay; see `git_blocker`.
+/// Why one Git repository must stay: the same check Git Worktrees makes, so a detached
+/// commit no branch holds, submodules or a repository in an ignored folder keep it too.
 fn repo_blocker(s: &Services, path: &str, k: &ScanControl) -> Option<String> {
-    let git = crate::git::Git(s.commands.as_ref());
-    match git.risky_config(path, k) {
-        Ok(None) => {}
-        // A submodule's work is invisible to the status below, so it always blocks.
-        Ok(Some(key)) if key.starts_with("nested repository") => {
-            return Some(format!(
-            "This worktree contains a {key}, whose work is not checked here. Inspect it manually."
-        ))
-        }
-        Ok(Some(key)) => {
-            return Some(format!(
-                "This worktree's own Git settings run a program ({key}). Inspect it manually."
-            ))
-        }
-        Err(_) => return Some(UNREADABLE.into()),
+    match crate::git::Git(s.commands.as_ref()).inspect(s, path, None, k) {
+        Ok(crate::git::Inspection::Clean { .. }) => None,
+        Ok(crate::git::Inspection::Keep { reason, .. }) => Some(reason),
+        Err(_) => Some(UNREADABLE.into()),
     }
-    match git.run(
-        path,
-        &[
-            "status",
-            "--porcelain=v1",
-            "-z",
-            "--untracked-files=normal",
-            "--ignore-submodules=all",
-        ],
-        k,
-    ) {
-        Ok(out) if out.status == 0 && out.data.is_empty() => {}
-        Ok(out) if out.status == 0 => {
-            return Some(
-                "This worktree has uncommitted or untracked work. Commit or discard it first."
-                    .into(),
-            )
-        }
-        _ => return Some(UNREADABLE.into()),
-    }
-    // A repository kept in an ignored folder is invisible to `status` too; one at the top of
-    // an ignored folder, or a folder below it, blocks.
-    let ignored = match git.run(
-        path,
-        &[
-            "ls-files",
-            "--others",
-            "--ignored",
-            "--exclude-standard",
-            "--directory",
-            "-z",
-        ],
-        k,
-    ) {
-        Ok(out) if out.status == 0 => out.data,
-        _ => return Some(UNREADABLE.into()),
-    };
-    for dir in ignored.split(|b| *b == 0).filter(|e| e.ends_with(b"/")) {
-        let Ok(dir) = std::str::from_utf8(dir) else {
-            return Some(UNREADABLE.into());
-        };
-        let dir = format!("{path}/{}", dir.trim_end_matches('/'));
-        let mut warnings = vec![];
-        let below = s.children(&dir, &mut warnings);
-        if !warnings.is_empty() || below.len() > 4_096 {
-            return Some(UNREADABLE.into());
-        }
-        let nested = std::iter::once(dir.clone())
-            .chain(
-                below
-                    .iter()
-                    .filter(|e| e.directory)
-                    .map(|e| e.path().to_owned()),
-            )
-            .find(|d| super::checkout(s, d).is_some());
-        if let Some(nested) = nested {
-            return Some(format!(
-                "This worktree keeps another repository in an ignored folder ({}). Inspect it manually.",
-                nested.strip_prefix(&format!("{path}/")).unwrap_or(&nested)
-            ));
-        }
-    }
-    None
 }
 const UNREADABLE: &str = "Git could not inspect this worktree. Check it yourself.";
 
