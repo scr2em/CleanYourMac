@@ -798,3 +798,28 @@ fn idle_fixes_wait_for_a_known_old_date() {
     let xcode = fixes.iter().find(|r| r.id == "xcode-build-data").unwrap();
     assert_eq!(xcode.ids, vec!["xcode:old".to_string()]);
 }
+
+/// Data nothing can make again is removed only after the user confirms losing it.
+#[test]
+fn irreplaceable_data_needs_confirmation() {
+    let f = Fixture::new();
+    f.write(
+        "home/Library/Application Support/MobileSync/Backup/00008030-ABC/Info.plist",
+        "x",
+    );
+    f.write(
+        "home/Library/Containers/com.apple.mail/Data/Library/Mail Downloads/A/report.docx",
+        "x",
+    );
+    let engine = Engine::new(services(&f), builtin(&f));
+    let findings = scan(&engine, &f, "caches", vec![f.at("home")]);
+    for title in ["Device backup · 00008030-ABC", "Mail downloads"] {
+        let row = findings
+            .iter()
+            .find(|r| r.title == title)
+            .unwrap_or_else(|| panic!("{title}"));
+        assert!(row.actions.is_empty(), "{title}");
+        assert_eq!(row.acknowledged_actions, vec![ActionKind::Trash], "{title}");
+        assert!(row.acknowledgement.is_some(), "{title}");
+    }
+}

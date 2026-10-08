@@ -165,24 +165,23 @@ pub fn claude() -> AiTool {
         // Claude Code's own cleanup treats these as removable (code.claude.com/docs/en/claude-directory).
         locations: vec![
             at("downloads", "Installer downloads", Tier::Safe, "Downloaded installers of the claude binary."),
-            at("local", "Old local installation", Tier::Safe, "An earlier per-user npm installation of Claude Code; reinstall it if you still run it."),
+            at("local", "Old local installation", Tier::Review, "An earlier per-user npm installation of Claude Code. A shell alias can still run it; check where `claude` points before removing it."),
             at("cache", "Cache", Tier::Safe, "Rebuilt when needed."),
-            at("plugins/cache", "Plugin cache", Tier::Safe, "Plugins are downloaded again from their marketplaces."),
+            at("plugins/cache", "Installed plugins", Tier::Review, "Plugins installed from marketplaces live here; they stop working until you install them again."),
             at("plugins/.trash", "Removed plugins", Tier::Safe, "Plugins you already uninstalled."),
             at("skills/.trash", "Removed skills", Tier::Safe, "Skills you already deleted."),
-            at("paste-cache", "Paste cache", Tier::Safe, "Large pastes; recalled prompts lose their pasted text."),
+            at("paste-cache", "Paste cache", Tier::Review, "Large pastes; recalled prompts lose their pasted text."),
             at("image-cache", "Image cache", Tier::Safe, "Pasted images of older versions."),
-            at("uploads", "Uploads", Tier::Safe, "Files attached to past sessions."),
-            at("backups", "Settings backups", Tier::Review, "Automatic backups of .claude.json, which can hold MCP server tokens; the current file stays."),
+            at("uploads", "Uploads", Tier::Review, "Files attached to past sessions; the copy here may be the only one left."),
             at("shell-snapshots", "Shell snapshots", Tier::Safe, "Shell environment captured at session start; made again for each session."),
             at("session-env", "Session environments", Tier::Safe, "Per-session environment of past sessions."),
             at("usage-data", "Usage data", Tier::Safe, "Usage records of past sessions."),
             at("feedback-bundles", "Feedback bundles", Tier::Safe, "Bundles prepared for feedback reports."),
             at("statsig", "Feature-flag cache", Tier::Safe, "No longer written by current versions."),
             at("todos", "Old todo lists", Tier::Safe, "No longer written by current versions."),
-            at("logs", "Old logs", Tier::Safe, "No longer written by current versions."),
+            at("logs", "Old logs", Tier::Review, "No longer written by current versions; logs are never made again."),
             at("telemetry", "Telemetry", Tier::Safe, "Usage events waiting to be sent again."),
-            at("debug", "Debug logs", Tier::Safe, "Logs of past sessions."),
+            at("debug", "Debug logs", Tier::Review, "Logs of past sessions; they can help diagnose a problem."),
             at("plans", "Plans", Tier::Review, "Plans written in plan mode."),
             at("tasks", "Task lists", Tier::Review, "Task lists a resumed session picks up again."),
             at("file-history", "Edit checkpoints", Tier::Caution, "Earlier versions of files Claude edited. Removing them ends /rewind file restores for those sessions."),
@@ -985,11 +984,19 @@ impl ScanModule for AiToolsModule {
 }
 
 /// Shows each finding's tier as its badge, so the list can be filtered and totalled by tier.
+/// A Caution item (a transcript, prompt history, edit checkpoints) exists nowhere else, so it
+/// is removed only after the user confirms losing it, as an archive or a device backup is.
 struct Tiered<'a>(&'a mut dyn Sink);
 impl Sink for Tiered<'_> {
     fn finding(&mut self, mut finding: Finding) {
         if let Some(tier) = finding.value("Tier") {
             finding.badge = Some(tier.to_owned());
+        }
+        if finding.value("Tier") == Some(Tier::Caution.label()) {
+            super::confirm_first(
+                &mut finding,
+                "Conversations, prompts or file history you may want again; no tool can make them again.",
+            );
         }
         self.0.finding(finding);
     }

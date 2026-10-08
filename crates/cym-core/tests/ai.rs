@@ -133,7 +133,8 @@ fn transcripts_show_their_project_prompt_and_whether_the_project_still_exists() 
         .unwrap()
         .contains("memory"));
 
-    assert!(find("plugins/cache").is_some_and(|r| tier(r) == "Safe"));
+    // Installed plugins live here, so removing them is not free.
+    assert!(find("plugins/cache").is_some_and(|r| tier(r) == "Review"));
     assert!(find("shell-snapshots").is_some());
     let job = find("jobs/j1/tmp").unwrap();
     assert_eq!(job.value("Open tasks"), Some("1"));
@@ -341,6 +342,9 @@ fn codex_gemini_and_cli_sessions_show_their_project() {
     assert_eq!(copilot.title, "Session · Add login page");
     assert_eq!(copilot.value("Project"), Some("~/projects/live"));
     assert_eq!(copilot.value("Session"), Some("s1"));
+    // A session exists nowhere else, so it goes only after the user confirms losing it.
+    assert!(copilot.actions.is_empty());
+    assert_eq!(copilot.acknowledged_actions, vec![ActionKind::Trash]);
     // The summary in its title never reaches the local history.
     let engine = Engine::new(services(&f), builtin(&f));
     let result = engine
@@ -352,7 +356,7 @@ fn codex_gemini_and_cli_sessions_show_their_project() {
                     roots: vec![f.at("home")],
                     ..Default::default()
                 },
-                acknowledged: vec![],
+                acknowledged: vec![copilot.id.clone()],
                 force: false,
             },
             &ScanControl::default(),

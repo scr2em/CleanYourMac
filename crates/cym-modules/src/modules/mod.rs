@@ -254,6 +254,7 @@ impl Sink for Guard<'_> {
                 crate::policy::Verdict::Keep => {}
             }
         }
+        settle(&mut finding);
         if finding.brand.is_none() {
             finding.brand = crate::brand::of(&finding).map(Into::into);
         }
@@ -272,6 +273,34 @@ impl Sink for Guard<'_> {
     }
     fn progress(&mut self, message: String) {
         self.inner.progress(message);
+    }
+}
+
+/// Risk rules that hold for every tool, applied to each finding after its module labelled
+/// it, so no tool can label the same thing differently.
+///
+/// Permanent means what is removed does not go through the Trash and cannot be restored:
+/// a tool's own cleanup command (`docker builder prune`, `brew cleanup`), removing a
+/// worktree, resetting a simulator, quitting a process or emptying the Trash. Whether the
+/// tool rebuilds it says nothing about whether you can undo it.
+fn settle(finding: &mut Finding) {
+    let mut offered = finding
+        .actions
+        .iter()
+        .chain(&finding.acknowledged_actions)
+        .peekable();
+    if offered.peek().is_some()
+        && offered.all(|a| !matches!(a, ActionKind::Trash | ActionKind::Archive))
+    {
+        finding.risk = Risk::Permanent;
+    }
+}
+
+/// `Candidate::irreplaceable` for a finding a module builds itself, such as a command.
+pub(crate) fn confirm_first(finding: &mut Finding, loss: &str) {
+    if !finding.actions.is_empty() {
+        finding.acknowledged_actions = std::mem::take(&mut finding.actions);
+        finding.acknowledgement = Some(loss.into());
     }
 }
 
@@ -387,6 +416,15 @@ impl Candidate {
         self
     }
     /// Protected, but removable once the user confirms they accept `loss`.
+    /// Data nothing can make again (a device backup, an archive, a transcript): its actions
+    /// are offered only after the user confirms losing it. The same rule in every tool.
+    pub fn irreplaceable(mut self, loss: &str) -> Self {
+        if !self.actions.is_empty() {
+            let actions = std::mem::take(&mut self.actions);
+            self.acknowledge = Some((loss.into(), actions));
+        }
+        self
+    }
     pub fn acknowledge(mut self, loss: &str, actions: Vec<ActionKind>) -> Self {
         self.acknowledge = Some((loss.into(), actions));
         self

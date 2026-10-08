@@ -17,6 +17,8 @@ pub struct JunkLocation {
     /// The first `*` names an app's folder in Application Support rather than a bundle
     /// identifier; the app is matched by name.
     pub app_folder: bool,
+    /// What is lost for good, when nothing can make it again; the user confirms it first.
+    pub irreplaceable: Option<&'static str>,
 }
 
 /// A folder is an Electron or Chromium app's when it holds one of these.
@@ -48,6 +50,7 @@ impl Default for MacJunk {
                     risk: Risk::Rebuild,
                     per_app: true,
                     app_folder: false,
+                    irreplaceable: None,
                 },
                 JunkLocation {
                     name: "Sandboxed app cache",
@@ -56,6 +59,7 @@ impl Default for MacJunk {
                     risk: Risk::Rebuild,
                     per_app: true,
                     app_folder: false,
+                    irreplaceable: None,
                 },
                 JunkLocation {
                     name: "Saved window state",
@@ -64,6 +68,7 @@ impl Default for MacJunk {
                     risk: Risk::Review,
                     per_app: true,
                     app_folder: false,
+                    irreplaceable: None,
                 },
                 JunkLocation {
                     name: "Mail downloads",
@@ -72,6 +77,7 @@ impl Default for MacJunk {
                     risk: Risk::Review,
                     per_app: false,
                     app_folder: false,
+                    irreplaceable: Some("Attachments you edited after opening them from Mail are saved only here."),
                 },
                 JunkLocation {
                     name: "iPhone software updates",
@@ -80,6 +86,7 @@ impl Default for MacJunk {
                     risk: Risk::Review,
                     per_app: false,
                     app_folder: false,
+                    irreplaceable: None,
                 },
                 JunkLocation {
                     name: "iPad software updates",
@@ -88,6 +95,7 @@ impl Default for MacJunk {
                     risk: Risk::Review,
                     per_app: false,
                     app_folder: false,
+                    irreplaceable: None,
                 },
                 JunkLocation {
                     name: "Device backup",
@@ -96,6 +104,7 @@ impl Default for MacJunk {
                     risk: Risk::Review,
                     per_app: false,
                     app_folder: false,
+                    irreplaceable: Some("This can be the only backup of the device. A backup in iCloud or a newer one here does not bring back what only this one holds."),
                 },
             ];
         locations.extend(Self::web_caches());
@@ -116,6 +125,7 @@ impl MacJunk {
                 risk: Risk::Rebuild,
                 per_app: true,
                 app_folder: true,
+                irreplaceable: None,
             })
             .collect()
     }
@@ -271,11 +281,13 @@ impl MacJunk {
                 } else {
                     location.risk
                 };
-                candidates.push(
-                    Candidate::new(e, &reason, vec![ActionKind::Trash], risk)
-                        .title(title)
-                        .details(details),
-                );
+                let candidate = Candidate::new(e, &reason, vec![ActionKind::Trash], risk)
+                    .title(title)
+                    .details(details);
+                candidates.push(match location.irreplaceable {
+                    Some(loss) => candidate.irreplaceable(loss),
+                    None => candidate,
+                });
             }
         }
         Ok(candidates)

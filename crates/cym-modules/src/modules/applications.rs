@@ -126,19 +126,28 @@ impl ScanModule for ApplicationsModule {
                         continue;
                     };
                     let title = format!("{} · {}", app.name(), e.name());
+                    // An app's cache comes back like any app cache; its Application Support
+                    // folder can hold what you made in the app.
+                    let cache = path.contains("/Library/Caches/");
+                    let support = path.contains("/Library/Application Support/");
+                    let candidate = Candidate::new(
+                        e,
+                        "Precisely named related data. May contain preferences or user documents; review it separately.",
+                        vec![ActionKind::Trash],
+                        if cache { Risk::Rebuild } else { Risk::Review },
+                    )
+                    .title(title)
+                    .details(vec![
+                        detail("Application path", app_path.clone()),
+                        detail("Bundle identifier", id.clone()),
+                    ]);
+                    let candidate = if support {
+                        candidate.irreplaceable("An app's Application Support folder can hold documents, libraries or settings you made in the app, which exist nowhere else.")
+                    } else {
+                        candidate
+                    };
                     candidates.push(
-                        Candidate::new(
-                            e,
-                            "Precisely named related data. May contain preferences or user documents; review it separately.",
-                            vec![ActionKind::Trash],
-                            Risk::Review,
-                        )
-                        .title(title)
-                        .details(vec![
-                            detail("Application path", app_path.clone()),
-                            detail("Bundle identifier", id.clone()),
-                        ])
-                        .blocked(running.then_some("Quit the owning application first.")),
+                        candidate.blocked(running.then_some("Quit the owning application first.")),
                     );
                 }
             }

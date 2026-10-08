@@ -324,9 +324,9 @@ AI Tools reads the data folders of AI coding tools and local model stores. Each 
 
 | Tier | Badge | Examples | What you lose |
 | --- | --- | --- | --- |
-| **Safe** | *Rebuild* | Caches, logs, telemetry, plugin downloads, shell snapshots, old Claude Code versions | Nothing. The tool makes the item again. |
-| **Review** | *Review* | Subagent transcripts, saved tool output, job scratch files, worktrees of agents, downloaded models | Examine the item first. You download a model again to use it. |
-| **Caution** | *Review* | Session transcripts, chats, prompt history, edit checkpoints | You cannot resume the session again. |
+| **Safe** | *Rebuild* | Caches, telemetry, shell snapshots, old Claude Code versions | Nothing you need. The tool makes the item again, or only the tool reads it. |
+| **Review** | *Review* | Logs, uploads, installed plugins, subagent transcripts, saved tool output, job scratch files, worktrees of agents, downloaded models | Examine the item first. You download a model or install a plugin again to use it. |
+| **Caution** | *Review* | Session transcripts, chats, prompt history, edit checkpoints | You cannot resume the session again. The app asks you to confirm before it moves one. |
 
 The app never shows settings, credentials, instructions (`CLAUDE.md`, `AGENTS.md`), skills, agents, commands, plugins, marketplaces or memory.
 

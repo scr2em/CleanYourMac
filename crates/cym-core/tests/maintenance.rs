@@ -18,14 +18,16 @@ fn now() -> f64 {
         .unwrap()
         .as_secs_f64()
 }
+/// Runs `kind` on a finding, confirming its stated loss as the user would.
 fn run(engine: &Engine, finding: &Finding, kind: ActionKind, context: ScanContext) -> ActionResult {
+    let confirmed = finding.acknowledged_actions.contains(&kind);
     engine
         .execute(
             &ActionRequest {
                 findings: vec![finding.clone()],
                 kind,
                 context,
-                acknowledged: vec![],
+                acknowledged: confirmed.then(|| finding.id.clone()).into_iter().collect(),
                 force: false,
             },
             &ScanControl::default(),
@@ -103,7 +105,10 @@ fn system_data_thins_local_snapshots_and_only_describes_system_folders() {
         .iter()
         .find(|r| r.title == "Time Machine local snapshots")
         .unwrap();
-    assert_eq!(snapshots.actions, [ActionKind::RunCommand]);
+    // Changes made while the backup disk was away may exist only here: confirmed first.
+    assert!(snapshots.actions.is_empty());
+    assert_eq!(snapshots.acknowledged_actions, [ActionKind::RunCommand]);
+    assert!(snapshots.acknowledgement.is_some());
     assert_eq!(snapshots.risk, Risk::Permanent);
     assert_eq!(snapshots.value("Snapshots"), Some("2"));
     assert_eq!(snapshots.value("Oldest"), Some("2026-09-30 10:10:10"));

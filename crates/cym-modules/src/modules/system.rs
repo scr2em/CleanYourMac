@@ -181,7 +181,7 @@ impl ScanModule for SystemModule {
                         tool: "tmutil".into(),
                         task: "thin-local-snapshots".into(),
                     },
-                    "Backups Time Machine keeps on this disk while its backup disk is not connected. macOS counts them as System Data and removes them by itself when space runs low, but not always soon enough for a large copy or install. Removing them leaves your Time Machine disk's backups as they are.",
+                    "Backups Time Machine keeps on this disk while its backup disk is not connected. macOS counts them as System Data and removes them by itself when space runs low, but not always soon enough for a large copy or install. Removing them leaves your Time Machine disk's backups as they are, but changes made while that disk was away exist only in these snapshots.",
                 );
                 f.subtitle = format!(
                     "{} {} on the startup disk",
@@ -201,6 +201,7 @@ impl ScanModule for SystemModule {
                     detail("Command", format!("tmutil thinlocalsnapshots / {THIN_ALL} 4")),
                 ];
                 f.actions = vec![ActionKind::RunCommand];
+                super::confirm_first(&mut f, "Changes made while your Time Machine disk was not connected may exist only in these snapshots, and removing them cannot be undone.");
                 sink.finding(f);
             }
             Ok(_) => {}

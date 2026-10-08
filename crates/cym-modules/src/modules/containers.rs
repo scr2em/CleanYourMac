@@ -602,6 +602,10 @@ impl ScanModule for ContainersModule {
                         f.details
                             .push(detail("Command", format!("{tool} {}", args.join(" "))));
                         f.actions = vec![ActionKind::RunCommand];
+                        // Changes made inside a container, outside a volume, exist nowhere else.
+                        if task.ends_with("container-prune") {
+                            super::confirm_first(&mut f, "Files changed inside these stopped containers, outside a volume, are deleted for good.");
+                        }
                     }
                     None => {
                         f.blocked_reason = Some(format!("Check volumes with `{tool} volume ls` and remove the ones you no longer need there. The app never removes volumes."));
