@@ -35,6 +35,7 @@ fn native_trash_round_trip() {
                 kind: ActionKind::Trash,
                 context: f.context(),
                 acknowledged: vec![],
+                force: false,
             },
             &k,
         )

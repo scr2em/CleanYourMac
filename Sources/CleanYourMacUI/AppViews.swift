@@ -32,6 +32,10 @@ public struct WorkspaceView: View {
         .alert("Attention needed", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             Button("OK") { store.error = nil }
         } message: { Text(store.error ?? "") }
+        .alert("In use", isPresented: Binding(get: { store.inUse != nil && store.error == nil }, set: { if !$0 { store.inUse = nil } })) {
+            Button("\(store.inUse?.kind.label ?? "Continue") Anyway", role: .destructive) { Task { await store.forceInUse() } }
+            Button("Cancel", role: .cancel) { store.inUse = nil }
+        } message: { Text(store.inUse?.message ?? "") }
         .task { if !store.demo { await store.loadHistory() }; await store.refreshOverview() }
         // Things listed may have been deleted while the app was in the background.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in

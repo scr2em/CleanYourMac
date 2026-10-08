@@ -258,6 +258,33 @@ pub fn active_tools(services: &Services, directory: Option<&str>) -> Vec<String>
                         .is_some_and(|cwd| policy::contains(cwd, root))
                 })
         })
-        .map(|p| format!("{} (PID {})", p.name, p.identity.pid))
+        .map(|p| describe(&p))
         .collect()
+}
+/// `node (PID 42489) in ~/projects/app · /opt/homebrew/bin/node`: enough to tell which
+/// project or tool a process belongs to.
+fn describe(p: &Snapshot) -> String {
+    let home = policy::home();
+    let tilde = |path: &str| match path.strip_prefix(&home) {
+        Some(rest) if !home.is_empty() && (rest.is_empty() || rest.starts_with('/')) => {
+            format!("~{rest}")
+        }
+        _ => path.to_owned(),
+    };
+    let mut text = format!("{} (PID {})", p.name, p.identity.pid);
+    if let Some(cwd) = p.cwd.as_deref().filter(|c| !c.is_empty() && *c != "/") {
+        text += &format!(" in {}", tilde(cwd));
+    }
+    if !p.identity.executable.is_empty() {
+        text += &format!(" · {}", tilde(&p.identity.executable));
+    }
+    text
+}
+/// A bulleted list of up to eight processes, then how many more.
+pub fn list(tools: &[String]) -> String {
+    let mut text: String = tools.iter().take(8).map(|t| format!("\n• {t}")).collect();
+    if tools.len() > 8 {
+        text += &format!("\n• and {} more", tools.len() - 8);
+    }
+    text
 }

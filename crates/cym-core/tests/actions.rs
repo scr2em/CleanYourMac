@@ -1,7 +1,7 @@
 mod common;
 use common::*;
-use cym_core::{analytics::analytics, model::*, modules, ports::*, Engine};
-use std::fs;
+use cym_core::{analytics::analytics, model::*, modules, ports::*, Engine, Services};
+use std::{fs, sync::Arc};
 
 fn engine(f: &Fixture) -> Engine {
     Engine::new(services(f), modules::builtin())
@@ -14,6 +14,7 @@ fn trash(f: &Fixture, finding: &Finding, context: ScanContext) -> ActionResult {
                 kind: ActionKind::Trash,
                 context,
                 acknowledged: vec![],
+                force: false,
             },
             &ScanControl::default(),
         )
@@ -63,6 +64,7 @@ fn reviewed_trash_and_restore_use_exact_resources() {
                 kind: ActionKind::Trash,
                 context: f.context(),
                 acknowledged: vec![],
+                force: false,
             },
             &ScanControl::default(),
         )
@@ -94,6 +96,7 @@ fn restoring_a_changed_trash_folder_is_rejected() {
                 kind: ActionKind::Trash,
                 context: f.context(),
                 acknowledged: vec![],
+                force: false,
             },
             &ScanControl::default(),
         )
@@ -120,6 +123,7 @@ fn changed_folder_is_not_moved() {
                 kind: ActionKind::Trash,
                 context: f.context(),
                 acknowledged: vec![],
+                force: false,
             },
             &ScanControl::default(),
         )
@@ -333,6 +337,7 @@ fn protected_items_move_to_trash_only_once_acknowledged() {
                     kind,
                     context: f.context(),
                     acknowledged,
+                    force: false,
                 },
                 &ScanControl::default(),
             )
@@ -359,4 +364,59 @@ fn protected_items_move_to_trash_only_once_acknowledged() {
     let done = run(&archive, ActionKind::Trash, vec![archive.id.clone()]);
     assert_eq!(done.outcome, Outcome::Applied, "{}", done.message);
     assert!(fs::metadata(&folder).is_err());
+}
+
+#[test]
+fn items_in_use_fail_as_overridable_and_move_when_forced() {
+    let f = Fixture::new();
+    let processes = Arc::new(FakeProcesses::default());
+    let mut node = process(
+        "/opt/homebrew/bin/node",
+        1,
+        FakeProcesses::default().current_uid(),
+    );
+    node.cwd = Some(f.at("app"));
+    processes.rows.lock().unwrap().push(node);
+    let s = Services {
+        processes,
+        ..services(&f)
+    };
+    f.write("app/package.json", "{}");
+    f.write("app/node_modules/x/index.js", "x");
+    let engine = Engine::new(s, modules::builtin());
+    let report = engine.scan_report(&["node".into()], &f.context(), &ScanControl::default());
+    let finding = report.findings[0].clone();
+    let run = |force: bool| {
+        engine
+            .execute(
+                &ActionRequest {
+                    findings: vec![finding.clone()],
+                    kind: ActionKind::Trash,
+                    context: f.context(),
+                    acknowledged: vec![],
+                    force,
+                },
+                &ScanControl::default(),
+            )
+            .remove(0)
+    };
+    let blocked = run(false);
+    assert_eq!(blocked.outcome, Outcome::Failed);
+    assert!(blocked.overridable);
+    // Names the process, where it runs and what it is.
+    assert!(
+        blocked.message.contains("node (PID 42)"),
+        "{}",
+        blocked.message
+    );
+    assert!(
+        blocked.message.contains("/opt/homebrew/bin/node"),
+        "{}",
+        blocked.message
+    );
+    assert!(fs::metadata(f.at("app/node_modules")).is_ok());
+    let forced = run(true);
+    assert_eq!(forced.outcome, Outcome::Applied, "{}", forced.message);
+    assert!(!forced.overridable);
+    assert!(fs::metadata(f.at("app/node_modules")).is_err());
 }

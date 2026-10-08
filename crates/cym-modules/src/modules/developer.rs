@@ -16,16 +16,14 @@ fn name(path: &str) -> &str {
         .and_then(|p| p.to_str())
         .unwrap_or(path)
 }
-fn active_project_tools(s: &Services, project: &str) -> Result<()> {
+fn active_project_tools(s: &Services, project: &str) -> Option<String> {
     let active = orphans::active_tools(s, Some(project));
-    if active.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
-            "Close active project tools first: {}",
-            active[..active.len().min(3)].join(", ")
-        ))
-    }
+    (!active.is_empty()).then(|| {
+        format!(
+            "Tools are running in this project:{}",
+            orphans::list(&active)
+        )
+    })
 }
 /// Refuses to move generated output that Git tracks inside its repository.
 fn untracked(s: &Services, path: &str, k: &ScanControl) -> Result<()> {
@@ -180,10 +178,12 @@ impl ScanModule for NodeModule {
             .collect();
         add_files(s, sink, "node", candidates, k)
     }
+    fn in_use(&self, s: &Services, f: &Finding, _: ActionKind) -> Option<String> {
+        active_project_tools(s, &parent(f.resource.path()?))
+    }
     fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, k: &ScanControl) -> Result<()> {
         let path = f.resource.path().ok_or("Missing path")?;
         let project = parent(path);
-        active_project_tools(s, &project)?;
         if !s.is_file(&format!("{project}/package.json")) {
             return Err("The owning package.json is no longer available.".into());
         }
@@ -837,13 +837,16 @@ impl ScanModule for ArtifactsModule {
         walked?;
         add_files(s, sink, "artifacts", candidates, k)
     }
+    fn in_use(&self, s: &Services, f: &Finding, _: ActionKind) -> Option<String> {
+        let m = self.matches(s, f.resource.path()?)?;
+        owners_closed(s, m.rule.apps)
+            .err()
+            .or_else(|| active_project_tools(s, &m.project))
+    }
     fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, k: &ScanControl) -> Result<()> {
         let path = f.resource.path().ok_or("Missing path")?;
-        let m = self
-            .matches(s, path)
+        self.matches(s, path)
             .ok_or("The owning project's evidence is no longer available.")?;
-        owners_closed(s, m.rule.apps)?;
-        active_project_tools(s, &m.project)?;
         untracked(s, path, k)
     }
 }
@@ -925,19 +928,25 @@ impl ScanModule for XcodeModule {
         flush(sink, &mut warnings);
         add_files(s, sink, "xcode", candidates, k)
     }
-    fn preflight(&self, s: &Services, _: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
-        let running = s
+    fn in_use(&self, s: &Services, _: &Finding, _: ActionKind) -> Option<String> {
+        let xcode = s
             .apps
-            .running()?
-            .iter()
-            .any(|a| a.bundle_id == "com.apple.dt.Xcode");
-        let building = orphans::active_tools(s, None)
-            .iter()
-            .any(|t| t.starts_with("xcodebuild ") || t.starts_with("swift-frontend "));
-        if running || building {
-            return Err("Quit Xcode and stop builds before removing its data.".into());
-        }
-        Ok(())
+            .running()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|a| a.bundle_id == "com.apple.dt.Xcode")
+            .map(|a| format!("Xcode (PID {})", a.pid));
+        let building: Vec<String> = orphans::active_tools(s, None)
+            .into_iter()
+            .filter(|t| t.starts_with("xcodebuild ") || t.starts_with("swift-frontend "))
+            .chain(xcode)
+            .collect();
+        (!building.is_empty()).then(|| {
+            format!(
+                "Quit Xcode and stop builds before removing its data:{}",
+                orphans::list(&building)
+            )
+        })
     }
 }
 
@@ -1340,26 +1349,31 @@ impl ScanModule for CachesModule {
         }
         add_files(s, sink, "caches", candidates, k)
     }
-    fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
-        let path = f.resource.path().ok_or("Missing path")?;
+    fn in_use(&self, s: &Services, f: &Finding, _: ActionKind) -> Option<String> {
+        let path = f.resource.path()?;
         // A macOS leftover only needs its app closed; developer tools are irrelevant to it.
         if let Some(result) = self.mac.preflight(s, &self.home(), path) {
-            return result;
+            return result.err();
         }
-        if let Some(location) = self.location(path) {
-            if let Some(reason) = location.blocked {
-                return Err(reason.into());
-            }
-            owners_closed(s, location.apps)?;
+        if let Some(reason) = self
+            .location(path)
+            .and_then(|l| owners_closed(s, l.apps).err())
+        {
+            return Some(reason);
         }
         let active = orphans::active_tools(s, None);
-        if active.is_empty() {
-            Ok(())
-        } else {
-            Err(format!(
-                "Close active developer tools before clearing shared caches: {}",
-                active[..active.len().min(3)].join(", ")
-            ))
+        (!active.is_empty()).then(|| {
+            format!(
+                "Developer tools are running that may be using shared caches:{}",
+                orphans::list(&active)
+            )
+        })
+    }
+    fn preflight(&self, _: &Services, f: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
+        let path = f.resource.path().ok_or("Missing path")?;
+        if let Some(reason) = self.location(path).and_then(|l| l.blocked) {
+            return Err(reason.into());
         }
+        Ok(())
     }
 }

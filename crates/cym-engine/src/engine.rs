@@ -171,7 +171,7 @@ impl Engine {
         context: &ScanContext,
         control: &ScanControl,
     ) -> Vec<ActionResult> {
-        self.execute_acknowledged(ids, kind, context, &[], control)
+        self.execute_acknowledged(ids, kind, context, &[], false, control)
     }
     /// `execute_ids`, also allowing protected findings the user confirmed removing.
     pub fn execute_acknowledged(
@@ -180,6 +180,7 @@ impl Engine {
         kind: ActionKind,
         context: &ScanContext,
         acknowledged: &[String],
+        force: bool,
         control: &ScanControl,
     ) -> Vec<ActionResult> {
         let request = ActionRequest {
@@ -187,6 +188,7 @@ impl Engine {
             kind,
             context: context.clone(),
             acknowledged: acknowledged.to_vec(),
+            force,
         };
         let results = self.execute(&request, control);
         let done: Vec<String> = results

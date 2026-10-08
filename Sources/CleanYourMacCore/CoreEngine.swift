@@ -91,9 +91,10 @@ public final class CoreEngine: @unchecked Sendable {
         return (try? await detached { try self.value("selection", Params(ids: ids, preview: preview), as: SelectionSummary.self) }) ?? .empty
     }
     /// `acknowledged` names protected items the user confirmed removing.
-    public func executeSelection(_ ids: [String], kind: ActionKind, context: ScanContext, acknowledged: [String] = []) async throws -> [ActionResult] {
-        struct Params: Encodable { let ids: [String]; let kind: ActionKind; let context: ScanContext; let acknowledged: [String] }
-        return try await detached { try self.value("executeSelection", Params(ids: ids, kind: kind, context: context, acknowledged: acknowledged), as: [ActionResult].self) }
+    /// `force` proceeds even though a running tool or app uses an item; every other check still applies.
+    public func executeSelection(_ ids: [String], kind: ActionKind, context: ScanContext, acknowledged: [String] = [], force: Bool = false) async throws -> [ActionResult] {
+        struct Params: Encodable { let ids: [String]; let kind: ActionKind; let context: ScanContext; let acknowledged: [String]; let force: Bool }
+        return try await detached { try self.value("executeSelection", Params(ids: ids, kind: kind, context: context, acknowledged: acknowledged, force: force), as: [ActionResult].self) }
     }
     public func removeResults(_ ids: [String]) async {
         _ = try? await detached { try self.call("removeResults", ["ids": ids], as: Int.self) }

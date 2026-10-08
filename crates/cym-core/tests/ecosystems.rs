@@ -286,6 +286,7 @@ fn artifact_actions_recheck_project_evidence() {
             kind: ActionKind::Trash,
             context: f.context(),
             acknowledged: vec![],
+            force: false,
         },
         &ScanControl::default(),
     );
@@ -425,6 +426,7 @@ fn caches_block_go_modules_expand_ide_versions_and_wait_for_owning_apps() {
         .unwrap();
     let k = ScanControl::default();
     assert!(module.preflight(&s, vscode, ActionKind::Trash, &k).is_ok());
+    assert!(module.in_use(&s, vscode, ActionKind::Trash).is_none());
     let running = Services {
         apps: Arc::new(FakeApps(vec![RunningApp {
             pid: 7,
@@ -433,9 +435,11 @@ fn caches_block_go_modules_expand_ide_versions_and_wait_for_owning_apps() {
         }])),
         ..s
     };
-    let error = module
+    // A running owner is an overridable "in use" reason, not a hard refusal.
+    assert!(module
         .preflight(&running, vscode, ActionKind::Trash, &k)
-        .unwrap_err();
+        .is_ok());
+    let error = module.in_use(&running, vscode, ActionKind::Trash).unwrap();
     assert!(error.contains("Visual Studio Code"), "{error}");
 }
 
@@ -697,6 +701,7 @@ fn toolchain_actions_refuse_running_and_default_versions() {
             kind: ActionKind::Trash,
             context: f.context(),
             acknowledged: vec![],
+            force: false,
         },
         &k,
     );
@@ -783,6 +788,7 @@ fn caches_include_mac_leftovers_without_repeating_developer_caches() {
     assert_eq!(editor.value("Ecosystem"), Some("macOS"));
     let k = ScanControl::default();
     assert!(module.preflight(&s, editor, ActionKind::Trash, &k).is_ok());
+    assert!(module.in_use(&s, editor, ActionKind::Trash).is_none());
     let running = Services {
         apps: Arc::new(FakeApps(vec![RunningApp {
             pid: 9,
@@ -791,8 +797,10 @@ fn caches_include_mac_leftovers_without_repeating_developer_caches() {
         }])),
         ..s
     };
-    let error = module
+    // A running owner is an overridable "in use" reason, not a hard refusal.
+    assert!(module
         .preflight(&running, editor, ActionKind::Trash, &k)
-        .unwrap_err();
+        .is_ok());
+    let error = module.in_use(&running, editor, ActionKind::Trash).unwrap();
     assert!(error.contains("Quit Editor"), "{error}");
 }

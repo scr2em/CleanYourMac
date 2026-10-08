@@ -108,6 +108,7 @@ fn duplicates_preserve_an_original_skip_dependency_stores_and_revalidate() {
             kind: ActionKind::Trash,
             context: f.context(),
             acknowledged: vec![],
+            force: false,
         },
         &ScanControl::default(),
     );

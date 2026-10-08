@@ -231,6 +231,10 @@ pub struct ActionRequest {
     /// become eligible. Blocked findings stay ineligible.
     #[serde(default)]
     pub acknowledged: Vec<String>,
+    /// Proceed even though a running tool or app is using an item (`in_use`); every other
+    /// check still applies.
+    #[serde(default)]
+    pub force: bool,
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -254,6 +258,9 @@ pub struct ActionResult {
     pub finding_id: Option<String>,
     pub trash_identity: Option<FileIdentity>,
     pub journal_warning: Option<String>,
+    /// Failed only because the item is in use; the user may force it.
+    #[serde(default)]
+    pub overridable: bool,
 }
 pub fn now() -> f64 {
     std::time::SystemTime::now()

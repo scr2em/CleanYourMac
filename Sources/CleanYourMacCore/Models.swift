@@ -215,8 +215,10 @@ public struct ActionResult: Identifiable, Codable, Sendable {
     public let findingID: String?
     public let trashIdentity: FileIdentity?
     public var journalWarning: String?
+    /// Failed only because the item is in use; the user may force it.
+    public var overridable: Bool?
     private enum CodingKeys: String, CodingKey {
-        case id, date, title, originalPath, action, outcome, message, trashPath, findingID = "findingId", trashIdentity, journalWarning
+        case id, date, title, originalPath, action, outcome, message, trashPath, findingID = "findingId", trashIdentity, journalWarning, overridable
     }
 }
 

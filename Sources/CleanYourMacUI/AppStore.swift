@@ -11,6 +11,16 @@ public struct ReviewDraft: Identifiable {
     public let selection: SelectionSummary
     /// Protected items among `ids` the user confirmed removing.
     public var acknowledged: [String] = []
+    /// Proceed even though running tools or apps use some items.
+    public var force = false
+}
+/// Items an action skipped because something is using them, offered to force.
+public struct InUseDraft: Identifiable {
+    public let id = UUID()
+    public let ids: [String]
+    public let kind: ActionKind
+    public let acknowledged: [String]
+    public let message: String
 }
 public enum SortOrder: String, CaseIterable {
     case size = "Size", name = "Name", lastUsed = "Last used", cpu = "CPU"
@@ -126,6 +136,8 @@ public final class AppStore {
     public var warnings: [String] = []
     public var history: [ActionResult] = []
     public var review: ReviewDraft?
+    /// Items the last action left alone because they are in use; the app offers to force them.
+    public var inUse: InUseDraft?
     public var error: String?
     public var showInspector = true
     public var menuBarEnabled = false { didSet { persist(); configureMonitor() } }
@@ -243,6 +255,12 @@ public final class AppStore {
         guard !row.eligible else { return nil }
         if row.acknowledgeable { return "Protected. Open it in the inspector to move it to Trash anyway." }
         return row.blockedReason ?? "Listed for information; nothing can be done with it here."
+    }
+    /// Repeats an action on items that were in use, after the user chose to force it.
+    public func forceInUse() async {
+        guard let draft = inUse, !isApplying else { return }
+        inUse = nil
+        await apply(ReviewDraft(ids: draft.ids, kind: draft.kind, selection: .empty, acknowledged: draft.acknowledged, force: true))
     }
     /// Moves one protected item the user explicitly confirmed losing.
     public func applyAcknowledged(_ finding: Finding, kind: ActionKind) async {
@@ -501,7 +519,7 @@ public final class AppStore {
         guard !demo else { error = "Demo mode cannot modify files or processes."; return }
         isApplying = true
         let results: [ActionResult]
-        do { results = try await core.executeSelection(draft.ids, kind: draft.kind, context: context, acknowledged: draft.acknowledged) }
+        do { results = try await core.executeSelection(draft.ids, kind: draft.kind, context: context, acknowledged: draft.acknowledged, force: draft.force) }
         catch { self.error = error.localizedDescription; isApplying = false; return }
         for result in results {
             guard let id = result.findingID else { continue }
@@ -512,8 +530,20 @@ public final class AppStore {
         isApplying = false; review = nil
         resultsChanged()
         await refreshOverview()
-        if let failed = results.first(where: { $0.outcome == .failed }) { error = failed.message }
-        else if let warning = results.compactMap(\.journalWarning).first { error = warning }
+        // Items skipped only because something uses them can be forced; other failures are final.
+        let busy = results.filter { $0.outcome == .failed && $0.overridable == true }
+        if !busy.isEmpty, !draft.force {
+            var reasons: [String] = []
+            for message in busy.map(\.message) where !reasons.contains(message) { reasons.append(message) }
+            let count = busy.count == 1 ? "This item is" : "\(busy.count) items are"
+            inUse = InUseDraft(
+                ids: busy.compactMap(\.findingID), kind: draft.kind, acknowledged: draft.acknowledged,
+                message: "\(count) in use.\n\n" + reasons.joined(separator: "\n\n")
+                    + (draft.kind == .trash ? "\n\nForcing it can disrupt the programs using it. Items moved to the Trash can be restored from Activity." : "")
+            )
+        }
+        if let failed = results.first(where: { $0.outcome == .failed && $0.overridable != true }) { error = failed.message }
+        else if let warning = results.compactMap(\.journalWarning).first, inUse == nil { error = warning }
     }
     private func mergeHistory(_ rows: [ActionResult]) {
         var seen = Set<UUID>()

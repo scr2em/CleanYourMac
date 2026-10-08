@@ -17,18 +17,25 @@ pub fn execute(
         if control.is_cancelled() {
             break;
         }
-        let mut result = check(&finding, request)
-            .and_then(|_| apply(services, registry, &finding, request, control))
-            .unwrap_or_else(|message| {
-                row(
-                    &finding,
-                    request.kind,
-                    Outcome::Failed,
-                    &message,
-                    None,
-                    None,
-                )
-            });
+        let failed =
+            |message: &str| row(&finding, request.kind, Outcome::Failed, message, None, None);
+        // Eligibility and scope first; then whether something is using the item, which the
+        // user may override; then the module's own checks and fresh validation in `apply`.
+        let in_use = (!request.force)
+            .then(|| registry.get(&finding.module_id))
+            .flatten()
+            .and_then(|module| module.in_use(services, &finding, request.kind));
+        let mut result = match check(&finding, request) {
+            Err(message) => failed(&message),
+            Ok(()) => match in_use {
+                Some(reason) => ActionResult {
+                    overridable: true,
+                    ..failed(&reason)
+                },
+                None => apply(services, registry, &finding, request, control)
+                    .unwrap_or_else(|message| failed(&message)),
+            },
+        };
         // Persist after each item so an interrupted batch keeps its completed outcomes.
         if let Err(e) = services.journal.append(std::slice::from_ref(&result)) {
             result.journal_warning = Some(format!(
@@ -171,6 +178,7 @@ fn row(
         finding_id: Some(f.id.clone()),
         trash_identity,
         journal_warning: None,
+        overridable: false,
     }
 }
 

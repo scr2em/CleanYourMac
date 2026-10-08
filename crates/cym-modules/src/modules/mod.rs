@@ -26,6 +26,17 @@ pub trait ScanModule: Send + Sync {
     fn action_roots(&self) -> Vec<String> {
         vec![]
     }
+    /// Why the item is in use right now (a running tool or app), if it is. Unlike
+    /// `preflight`, the user may override this after confirming; everything else is still
+    /// checked.
+    fn in_use(
+        &self,
+        _services: &Services,
+        _finding: &Finding,
+        _kind: ActionKind,
+    ) -> Option<String> {
+        None
+    }
     /// Module-specific checks run immediately before a reviewed action on one of its findings.
     fn preflight(
         &self,

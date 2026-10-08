@@ -145,6 +145,7 @@ fn dispatch(engine: &Engine, method: &str, p: &Value) -> Result<Value> {
             param(p, "kind")?,
             &param(p, "context")?,
             &param::<Option<Vec<String>>>(p, "acknowledged")?.unwrap_or_default(),
+            param::<Option<bool>>(p, "force")?.unwrap_or(false),
             &ScanControl::default(),
         )),
         "removeResults" => value(engine.results.remove(&param::<Vec<String>>(p, "ids")?)),
