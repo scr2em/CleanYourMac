@@ -116,7 +116,6 @@ When you move an item to the Trash, you can restore it. The disk space becomes f
 - Remove the dependencies and build output of projects that you did not use for 30 days or more.
 - Remove caches that the tools make again when necessary.
 - Remove Xcode build data.
-- Remove duplicate copies, after you scan for duplicates.
 - Empty the Trash.
 
 ### Rules for all tools
@@ -125,7 +124,7 @@ When you move an item to the Trash, you can restore it. The disk space becomes f
 - **The app never shows these locations as items:**
   - system folders;
   - your home, Library, Documents and Desktop folders, and the Applications folders;
-  - credentials, for example `~/.ssh`, `~/.aws`, `~/.gnupg` and Keychains;
+  - credentials, for example `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.config`, `~/.netrc`, `~/.npmrc` and Keychains;
   - iCloud Drive and other cloud folders;
   - all items in `.git` folders and all files with the name `.env`.
 
@@ -146,6 +145,8 @@ Storage Explorer shows each item directly in the folders that you select. For ea
 <summary><strong>Large Files</strong>: files of 100 MB or more</summary>
 
 Large Files finds files of 100 MB or more in the folders that you select. Filter by size, age and last use. Then move the files that you do not need to the Trash.
+
+Files in your Library folder and in hidden folders of your home folder belong to an app or a tool, for example a virtual machine disk, a model, a device backup or a database. Large Files shows them, but you cannot select them. Remove them with their app or tool.
 </details>
 
 <details>
@@ -156,9 +157,9 @@ Exact Duplicates compares files of 4 KB or more in three steps:
 2. It compares the first 64 KB.
 3. It compares the full contents.
 
-Hard links to one file count as one file. Each group keeps one original. The original is the first path in alphabetical order, and you cannot select it. Before the app moves a copy, it reads the copy and the original again. They must still be identical.
+Hard links to one file count as one file. Each group keeps one original, and you cannot select it. The original is the copy in the most deliberate place: Documents, Desktop, Pictures, Movies or Music first, then other folders, then Downloads. A copy in the Trash, a cache or a hidden folder is never the original. When every copy is in such a place, the app keeps them all. Before the app moves a copy, it reads the copy and the original again. They must still be identical, and Git must not track the copy.
 
-Exact Duplicates does not search version control, build output, dependency or package-cache folders. It is not part of the overview scan.
+Exact Duplicates does not search version control, build output, dependency or package-cache folders, hidden folders or Library folders. It is not part of the overview scan, and duplicates are never part of the one-click fixes on the overview.
 </details>
 
 <details>
@@ -201,7 +202,7 @@ Build Artifacts finds folders that a build makes. A project file must identify e
 - **Python:** test and tool caches, `__pycache__` and `*.egg-info`.
 - **Other languages:** Elixir `_build`, Haskell, Elm.
 
-The next build makes all of these folders again. The exception is the Unreal `Saved` folder (autosaves and crash logs), which has the *Review* badge. You must close the IDE of the project before an action. The app does not remove folders that contain files that Git tracks. If the tool has its own clean command, each item shows it.
+The next build makes all of these folders again. The exception is the Unreal `Saved` folder (autosaves and crash logs), which has the *Review* badge. A build folder that holds a shipped build or its crash symbols (an `.xcarchive`, `.dSYM`, `.ipa`, `.aab` or an Android `outputs/mapping` folder) is protected like an Xcode archive: you can remove it only from its details, after you confirm. You must close the IDE of the project before an action. The app does not remove folders that contain files that Git tracks. If the tool has its own clean command, each item shows it.
 </details>
 
 <details>
@@ -286,7 +287,7 @@ To free space inside a disk, the app uses the command of the engine. It asks the
 | Stopped containers | `docker container prune --force` | *Review* |
 | Unused volumes | None. Volumes can hold databases. Remove them in Docker. | For information only |
 
-Podman items use the same `podman` commands. Docker commands reach the engine that the current Docker context names (Docker Desktop, OrbStack, Colima or Rancher Desktop). Before a command runs, the app checks that the context did not change. The engine must run to measure and clean its data. The download caches of Lima and Colima go to the Trash.
+Podman items use the same `podman` commands. Docker commands reach the engine that the current Docker context names (Docker Desktop, OrbStack, Colima or Rancher Desktop). The app works only with an engine on this Mac: a context that points at a remote host is not listed. Before a command runs, the app checks that the context and its endpoint did not change, and measures again: when the command would now free clearly more than you reviewed, it does not run. The engine must run to measure and clean its data. The download caches of Lima and Colima go to the Trash.
 </details>
 
 <details>
@@ -308,7 +309,7 @@ AI Tools reads the data folders of AI coding tools and local model stores. Each 
 
 The app never shows settings, credentials, instructions (`CLAUDE.md`, `AGENTS.md`), skills, agents, commands, plugins, marketplaces or memory.
 
-**Sessions.** For each session, the app shows the project folder, the first prompt, the branch and the start date. When the project folder does not exist, the item has the label *Orphan*. Worktrees that agents made and removed are identified. For Claude Code, you can remove the `subagents` and `tool-results` folders of a session and keep its main transcript. The session continues to resume. When a background job is blocked and has open tasks, its scratch files show a warning.
+**Sessions.** For each session, the app shows the project folder, the first prompt, the branch and the start date. When the project folder does not exist, the item has the label *Orphan*. Worktrees that agents made and removed are identified. When a project folder cannot be read (no permission) or is on a drive that is not connected, its sessions are not labeled *Orphan*. Worktrees that AI tools made are checked with Git: a worktree with uncommitted or untracked work stays. For Claude Code, you can remove the `subagents` and `tool-results` folders of a session and keep its main transcript. The session continues to resume. When a background job is blocked and has open tasks, its scratch files show a warning.
 
 **Safety.** All actions move items to the Trash. The app does not move items while the tool runs. For Claude Code, the app reads `sessions/` and does not move the files of a running session, also when you continue the action. Each item shows the cleanup command or setting of the tool, if the tool has one (for example, `cleanupPeriodDays` of Claude Code). Each item shows its tier as its badge. Select a tier with the **Tier** filter: the totals then show how much space that tier frees, before you act.
 
@@ -348,6 +349,8 @@ Orphan Processes shows your processes whose parent stopped. It does not show:
 - apps and their helper processes;
 - system processes;
 - processes outside your folders, when you scan only the folders that you select.
+
+Programs that run detached by design are shown but you cannot select them: terminal sessions (tmux, screen, mosh), editor daemons, databases (PostgreSQL, MySQL, MongoDB, Redis) and local servers. Stop them with their own commands.
 
 Each item shows the CPU use, memory use, working folder and executable. **Quit** asks the process to stop. **Force Quit** becomes available only after Quit. Before each action, the app examines the identity of the process again.
 </details>

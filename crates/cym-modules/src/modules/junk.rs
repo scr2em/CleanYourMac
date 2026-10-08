@@ -94,8 +94,8 @@ impl Default for MacJunk {
                 JunkLocation {
                     name: "Mail downloads",
                     path: "Library/Containers/com.apple.mail/Data/Library/Mail Downloads",
-                    reason: "Copies of attachments you opened in Mail; the originals stay in your mail.",
-                    risk: Risk::Rebuild,
+                    reason: "Copies of attachments you opened in Mail; the originals stay in your mail. An attachment you edited in place is saved only here.",
+                    risk: Risk::Review,
                     per_app: false,
                     app_folder: false,
                 },

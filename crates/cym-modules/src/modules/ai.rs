@@ -157,7 +157,7 @@ pub fn claude() -> AiTool {
             at("paste-cache", "Paste cache", Tier::Safe, "Large pastes; recalled prompts lose their pasted text."),
             at("image-cache", "Image cache", Tier::Safe, "Pasted images of older versions."),
             at("uploads", "Uploads", Tier::Safe, "Files attached to past sessions."),
-            at("backups", "Settings backups", Tier::Safe, "Automatic backups of .claude.json; the current file stays."),
+            at("backups", "Settings backups", Tier::Review, "Automatic backups of .claude.json, which can hold MCP server tokens; the current file stays."),
             at("shell-snapshots", "Shell snapshots", Tier::Safe, "Shell environment captured at session start; made again for each session."),
             at("session-env", "Session environments", Tier::Safe, "Per-session environment of past sessions."),
             at("usage-data", "Usage data", Tier::Safe, "Usage records of past sessions."),
@@ -564,7 +564,7 @@ impl AiToolsModule {
                     .clone()
                     .unwrap_or_else(|| decode_project(project.name()));
                 project_cwd.get_or_insert_with(|| cwd.clone());
-                let gone = !s.exists(&cwd);
+                let gone = s.missing(&cwd);
                 let dead_worktree = gone && worktree(project.name(), Some(&cwd));
                 let running = live.sessions.contains(id);
                 let title = info
@@ -675,7 +675,7 @@ impl AiToolsModule {
             }
             // A whole project whose folder is gone, unless Claude keeps memory for it there.
             let cwd = project_cwd.unwrap_or_else(|| decode_project(project.name()));
-            if sessions > 0 && !s.exists(&cwd) {
+            if sessions > 0 && s.missing(&cwd) {
                 let memory = entries.iter().any(|e| e.name() == "memory");
                 let kind = if worktree(project.name(), Some(&cwd)) {
                     "worktree"
@@ -817,6 +817,7 @@ impl ScanModule for AiToolsModule {
                         continue;
                     }
                     let title = titled(location.title, &matched);
+                    let blocker = worktree_blocker(s, location, e.path(), k);
                     candidates.push(
                         Candidate::new(
                             e,
@@ -828,7 +829,8 @@ impl ScanModule for AiToolsModule {
                         .details(vec![
                             detail("Tool", tool.name),
                             detail("Tier", location.tier.label()),
-                        ]),
+                        ])
+                        .blocked(blocker.as_deref()),
                     );
                 }
             }
@@ -872,7 +874,13 @@ impl ScanModule for AiToolsModule {
                             .read
                             .map(|r| readers::read(s, r, e.path(), e.directory));
                         let candidate = match read {
-                            None => Some(self.plain(tool, &root, location, e, title)),
+                            None => {
+                                let blocker = worktree_blocker(s, location, e.path(), k);
+                                Some(
+                                    self.plain(tool, &root, location, e, title)
+                                        .blocked(blocker.as_deref()),
+                                )
+                            }
                             Some(Read::Skip) => None,
                             Some(Read::Named(name)) => {
                                 let mut c = self.plain(
@@ -886,7 +894,7 @@ impl ScanModule for AiToolsModule {
                                 Some(c)
                             }
                             Some(Read::Session(info)) => {
-                                let gone = info.cwd.as_deref().is_some_and(|cwd| !s.exists(cwd));
+                                let gone = info.cwd.as_deref().is_some_and(|cwd| s.missing(cwd));
                                 Some(self.session(tool, &root, location, e, title, info, gone))
                             }
                             Some(Read::OrphanWorkspace { folder, chats }) => {
@@ -938,8 +946,12 @@ impl ScanModule for AiToolsModule {
             .collect();
         (!running.is_empty()).then(|| format!("{} is running:\n{}", tool.name, running.join("\n")))
     }
-    fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
+    fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, k: &ScanControl) -> Result<()> {
         let path = f.resource.path().ok_or("Missing path")?;
+        // A worktree's state is checked again: work may have started since the scan.
+        if let Some(reason) = git_blocker(s, path, k) {
+            return Err(reason);
+        }
         let (tool, root) = self
             .owner(s, path)
             .ok_or("This item is no longer inside an AI tool's data folder.")?;
@@ -968,6 +980,48 @@ impl Sink for Tiered<'_> {
     }
     fn progress(&mut self, message: String) {
         self.0.progress(message);
+    }
+}
+
+/// Why a worktree an AI tool made must stay, for locations that hold worktrees.
+fn worktree_blocker(
+    s: &Services,
+    location: &AiLocation,
+    path: &str,
+    k: &ScanControl,
+) -> Option<String> {
+    location
+        .path
+        .contains("worktree")
+        .then(|| git_blocker(s, path, k))
+        .flatten()
+}
+/// Why a Git worktree must stay: uncommitted or untracked work, settings that run programs,
+/// or a state Git cannot report. `None` for a folder that is not a worktree.
+fn git_blocker(s: &Services, path: &str, k: &ScanControl) -> Option<String> {
+    if !s.exists(&format!("{path}/.git")) {
+        return None;
+    }
+    let git = crate::git::Git(s.commands.as_ref());
+    match git.risky_config(path, k) {
+        Ok(None) => {}
+        Ok(Some(key)) => {
+            return Some(format!(
+                "This worktree's own Git settings run a program ({key}). Inspect it manually."
+            ))
+        }
+        Err(_) => return Some("Git could not inspect this worktree. Check it yourself.".into()),
+    }
+    match git.run(
+        path,
+        &["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+        k,
+    ) {
+        Ok(out) if out.status == 0 && out.data.is_empty() => None,
+        Ok(out) if out.status == 0 => Some(
+            "This worktree has uncommitted or untracked work. Commit or discard it first.".into(),
+        ),
+        _ => Some("Git could not inspect this worktree. Check it yourself.".into()),
     }
 }
 

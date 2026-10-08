@@ -106,6 +106,24 @@ fn sensitive(path: &str) -> bool {
         .any(|r| contains_folded(path, &(h.clone() + r)))
         || sensitive_name(path)
 }
+/// Folder and file names that hold sign-in tokens, keys or passwords for command-line
+/// tools: never listed, never entered.
+const CREDENTIALS: &[&str] = &[
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".kube",
+    ".docker",
+    ".netrc",
+    ".config",
+    ".npmrc",
+    ".pypirc",
+    ".password-store",
+    ".azure",
+    ".terraform.d",
+    ".vault-token",
+    ".git-credentials",
+];
 /// Whether the path holds Git metadata, an environment file, or credentials and synced
 /// files in any user's home folder (`.ssh`, `.aws`, `.gnupg`, `Library/Keychains`,
 /// `Library/Mobile Documents`, `Library/CloudStorage`), whatever the letter case.
@@ -119,9 +137,7 @@ fn sensitive_name(path: &str) -> bool {
             let hit = named(".git")
                 || named(".env")
                 || c.get(..5).is_some_and(|p| p.eq_ignore_ascii_case(".env."))
-                || named(".ssh")
-                || named(".aws")
-                || named(".gnupg")
+                || CREDENTIALS.iter().any(|n| named(n))
                 || (previous.eq_ignore_ascii_case("Library")
                     && (named("Keychains") || named("Mobile Documents") || named("CloudStorage")));
             previous = c;
@@ -172,6 +188,10 @@ pub fn protected(path: &str) -> bool {
         &(h.clone() + "/Documents"),
         &(h.clone() + "/Desktop"),
         &(h.clone() + "/Downloads"),
+        &(h.clone() + "/.Trash"),
+        &(h.clone() + "/Movies"),
+        &(h.clone() + "/Music"),
+        &(h.clone() + "/Pictures"),
         "/Applications",
         &(h.clone() + "/Applications"),
     ]
@@ -360,6 +380,8 @@ fn ancestors(path: &str) -> impl Iterator<Item = &str> {
 pub const PACKAGE_EXTENSIONS: &[&str] = &[
     "app",
     "appex",
+    "avd",
+    "band",
     "bundle",
     "docset",
     "fcpbundle",
@@ -368,16 +390,23 @@ pub const PACKAGE_EXTENSIONS: &[&str] = &[
     "kext",
     "key",
     "logicx",
+    "lrdata",
     "musiclibrary",
     "numbers",
     "pages",
+    "pvm",
     "photolibrary",
     "photoslibrary",
     "playground",
     "plugin",
     "rtfd",
+    "scriv",
     "sparsebundle",
+    "utm",
+    "vmwarevm",
     "xcarchive",
+    "xcodeproj",
+    "xcworkspace",
     "xpc",
 ];
 pub fn package(path: &str) -> bool {

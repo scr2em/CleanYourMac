@@ -526,6 +526,26 @@ impl ScanModule for ContainersModule {
                 return Err("Docker no longer points at an engine on this Mac.".into());
             }
         }
+        // The command removes what exists when it runs, so it must still match what was
+        // reviewed: refuse when it would now free clearly more.
+        let kind = match task.as_str() {
+            "builder-prune" => "Build Cache",
+            "image-prune" => "Images",
+            _ => "Containers",
+        };
+        let reviewed = f.bytes.unwrap_or(0);
+        let now = self
+            .usage(s, &exe, k)?
+            .into_iter()
+            .find(|u| u.kind == kind)
+            .map_or(0, |u| u.reclaimable);
+        if now > reviewed + reviewed / 10 + 100_000_000 {
+            return Err(format!(
+                "{tool} can now free {:.1} GB, more than the {:.1} GB you reviewed. Scan again to review what changed.",
+                now as f64 / 1e9,
+                reviewed as f64 / 1e9
+            ));
+        }
         let out = self.run_tool(s, &exe, args, 900, k)?;
         if out.status != 0 {
             return Err(out.error.trim().chars().take(400).collect());

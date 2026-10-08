@@ -81,16 +81,7 @@ pub const RULES: &[Rule] = &[
         idle_days: None,
         project_only: false,
     },
-    Rule {
-        id: "duplicate-copies",
-        module: "duplicates",
-        title: "Duplicate copies",
-        detail: "Exact copies of files you keep elsewhere. One original of each stays, and every file is verified again before removal.",
-        action: ActionKind::Trash,
-        risks: &[Risk::Review, Risk::Rebuild],
-        idle_days: None,
-        project_only: false,
-    },
+    // Duplicate copies are never a one-click fix: which copy matters is the user's call.
     Rule {
         id: "empty-trash",
         module: "trash",

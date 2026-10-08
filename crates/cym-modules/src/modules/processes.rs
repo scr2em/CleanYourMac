@@ -1,6 +1,58 @@
 use super::{descriptor, ScanModule};
 use crate::{model::*, orphans, ports::*, services::Services};
 
+/// Programs meant to outlive the terminal or app that started them: terminal multiplexers,
+/// editor daemons, databases and local servers. Ending them loses sessions or data.
+const DETACHED: &[&str] = &[
+    "tmux",
+    "screen",
+    "mosh-server",
+    "emacs",
+    "nvim",
+    "postgres",
+    "postmaster",
+    "mongod",
+    "mongos",
+    "redis-server",
+    "valkey-server",
+    "mysqld",
+    "mariadbd",
+    "memcached",
+    "nginx",
+    "httpd",
+    "caddy",
+    "beam.smp",
+    "elasticsearch",
+    "opensearch",
+    "clickhouse",
+    "etcd",
+    "dockerd",
+    "containerd",
+    "colima",
+    "limactl",
+    "qemu-system-aarch64",
+    "qemu-system-x86_64",
+    "ollama",
+    "syncthing",
+    "tailscaled",
+    "code-server",
+    "jupyter",
+    "jupyter-lab",
+    "ssh-agent",
+    "gpg-agent",
+];
+/// Whether a process name is one of `DETACHED`, ignoring case and a version suffix
+/// (`postgres: checkpointer`, `Emacs-arm64-11`).
+pub fn detached_by_design(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    DETACHED.iter().any(|d| {
+        name == *d
+            || name
+                .strip_prefix(d)
+                .is_some_and(|rest| rest.starts_with([':', '-', ' ', '.']))
+    })
+}
+
 pub struct OrphanModule;
 impl ScanModule for OrphanModule {
     fn descriptor(&self) -> ModuleDescriptor {
@@ -33,8 +85,15 @@ impl ScanModule for OrphanModule {
             f.subtitle = p.cwd.clone().unwrap_or(p.identity.executable.clone());
             f.cpu_percent = cpu;
             f.memory_bytes = p.memory;
-            f.actions = vec![ActionKind::Terminate, ActionKind::ForceQuit];
             f.risk = Risk::Permanent;
+            if detached_by_design(&p.name) {
+                f.blocked_reason = Some(format!(
+                    "{} runs detached by design: terminal sessions, servers and databases keep running after the app that started them. Stop it with its own command.",
+                    p.name
+                ));
+            } else {
+                f.actions = vec![ActionKind::Terminate, ActionKind::ForceQuit];
+            }
             f.details = vec![
                 detail("PID", p.identity.pid.to_string()),
                 detail("Working folder", p.cwd.unwrap_or("Unavailable".into())),

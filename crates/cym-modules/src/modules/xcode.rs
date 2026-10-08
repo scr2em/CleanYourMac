@@ -359,7 +359,17 @@ impl ScanModule for XcodeModule {
             )
         })
     }
-    fn preflight(&self, _: &Services, f: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
+    fn preflight(
+        &self,
+        s: &Services,
+        f: &Finding,
+        kind: ActionKind,
+        _: &ScanControl,
+    ) -> Result<()> {
+        // Xcode, Simulator and builds use this data while they run; this is never overridden.
+        if let Some(reason) = self.in_use(s, f, kind) {
+            return Err(reason);
+        }
         let Some(path) = f.resource.path() else {
             return Ok(());
         };

@@ -55,9 +55,10 @@ fn containers_list_their_disks_and_offer_only_their_own_cleanup() {
         output("desktop-linux\n", 0),
         output(socket, 0),
         output(&df, 0),
-        // The action checks the context and its endpoint again, then prunes.
+        // The action checks the context and its endpoint again, measures again, then prunes.
         output("desktop-linux\n", 0),
         output(socket, 0),
+        output(&df, 0),
         output(
             "Deleted build cache objects:\nabc\n\nTotal reclaimed space: 3.5GB\n",
             0,
@@ -380,4 +381,40 @@ fn a_remote_docker_engine_is_never_cleaned() {
         .iter()
         .any(|w| w.contains("not an engine on this Mac")));
     assert_eq!(runner.calls().len(), 2, "system df never ran");
+}
+
+#[test]
+fn docker_cleanup_stops_when_it_would_free_more_than_reviewed() {
+    let f = Fixture::new();
+    f.write("home/.docker/bin/docker", "#!/bin/sh");
+    let socket = "unix:///Users/me/.docker/run/docker.sock\n";
+    let grown = r#"{"Active":"0","Reclaimable":"9.5GB","Size":"9.5GB","TotalCount":"80","Type":"Build Cache"}"#;
+    let runner = StubRunner::new(vec![
+        output("desktop-linux\n", 0),
+        output(socket, 0),
+        output(grown, 0),
+    ]);
+    let mut s = services(&f);
+    s.commands = runner.clone();
+    let engine = Engine::new(s, builtin(&f));
+    let mut finding = Finding::new(
+        "containers",
+        "docker:desktop-linux:builder-prune",
+        "Docker build cache",
+        Resource::Command {
+            tool: "docker".into(),
+            task: "builder-prune".into(),
+        },
+        "fixture",
+    );
+    finding.bytes = Some(3_500_000_000);
+    finding.actions = vec![ActionKind::RunCommand];
+    finding.details = vec![
+        detail("Context", "desktop-linux"),
+        detail("Endpoint", "unix:///Users/me/.docker/run/docker.sock"),
+    ];
+    let result = run(&engine, &f, &finding, ActionKind::RunCommand);
+    assert_eq!(result.outcome, Outcome::Failed);
+    assert!(result.message.contains("more than"), "{}", result.message);
+    assert_eq!(runner.calls().len(), 3, "prune never ran");
 }

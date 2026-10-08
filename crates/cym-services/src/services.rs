@@ -89,6 +89,21 @@ impl Services {
     pub fn exists(&self, path: &str) -> bool {
         self.fs.inspect(path, true).is_ok()
     }
+    /// Whether a path is known to be gone: the system reports "no such file" on a volume
+    /// that is mounted. A folder that cannot be read for lack of permission, or one on a
+    /// drive that is not connected, is not missing.
+    pub fn missing(&self, path: &str) -> bool {
+        if let Some(rest) = path.strip_prefix("/Volumes/") {
+            let volume = rest.split('/').next().unwrap_or_default();
+            if std::fs::symlink_metadata(format!("/Volumes/{volume}")).is_err() {
+                return false;
+            }
+        }
+        matches!(
+            std::fs::symlink_metadata(path),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound
+        )
+    }
     pub fn is_file(&self, path: &str) -> bool {
         self.entry(path).is_ok_and(|e| e.regular)
     }

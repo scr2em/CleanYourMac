@@ -113,7 +113,7 @@ impl ScanModule for InstallersModule {
                     candidates.push(
                         Candidate::new(
                             e,
-                            "An installer or disk image. Download it again from its publisher if you need it.",
+                            "An installer or disk image. Installers download again from their publisher; a disk image you made yourself, such as an encrypted one, exists nowhere else.",
                             vec![ActionKind::Trash],
                             Risk::Review,
                         )

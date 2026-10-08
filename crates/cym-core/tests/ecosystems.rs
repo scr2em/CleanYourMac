@@ -940,7 +940,7 @@ fn caches_include_mac_leftovers_without_repeating_developer_caches() {
             ("App cache · Editor", Risk::Rebuild),
             ("App cache · Safari", Risk::Review),
             ("Device backup · 00008030-ABC", Risk::Review),
-            ("Mail downloads", Risk::Rebuild),
+            ("Mail downloads", Risk::Review),
             ("Poetry cache", Risk::Rebuild),
             ("Sandboxed app cache · Notes", Risk::Rebuild),
             ("Saved window state · Editor", Risk::Rebuild),

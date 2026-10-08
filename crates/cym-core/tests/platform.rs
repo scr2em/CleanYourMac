@@ -535,3 +535,48 @@ fn process_identity_includes_subsecond_start_time() {
     assert_ne!(a, b);
     assert_ne!(a.key(), b.key());
 }
+
+#[test]
+fn a_duplicate_that_git_tracks_stays() {
+    if !git_available() {
+        return;
+    }
+    let f = Fixture::new();
+    let s = services(&f);
+    let k = ScanControl::default();
+    let body = "same logo ".repeat(600);
+    let repository = f.dir("site");
+    f.write("site/logo.png", &body);
+    f.write("other/logo.png", &body);
+    let git = Git(s.commands.as_ref());
+    for args in [&["init", "-b", "main"][..], &["add", "logo.png"][..]] {
+        assert_eq!(git.run(&repository, args, &k).unwrap().status, 0);
+    }
+    let engine = cym_core::Engine::new(services(&f), builtin(&f));
+    let findings = engine
+        .scan_report(&["duplicates".into()], &f.context(), &k)
+        .findings;
+    let copy = findings
+        .iter()
+        .find(|r| r.blocked_reason.is_none())
+        .expect("one removable copy");
+    // Whichever copy is offered, a tracked one is refused when the action runs.
+    let result = engine.execute(
+        &ActionRequest {
+            findings: vec![copy.clone()],
+            kind: ActionKind::Trash,
+            context: f.context(),
+            acknowledged: vec![],
+            force: true,
+        },
+        &k,
+    );
+    let tracked = copy.resource.path().unwrap().ends_with("site/logo.png");
+    assert_eq!(
+        result[0].outcome == Outcome::Failed,
+        tracked,
+        "{}",
+        result[0].message
+    );
+    assert!(fs::metadata(f.at("site/logo.png")).is_ok());
+}

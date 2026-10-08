@@ -25,14 +25,42 @@ fn active_project_tools(s: &Services, project: &str) -> Option<String> {
         )
     })
 }
-/// Refuses to move generated output that Git tracks inside its repository.
-fn untracked(s: &Services, path: &str, k: &ScanControl) -> Result<()> {
+/// The first shipped-build output inside a build folder: an Xcode archive, debug symbols,
+/// an app package for a store, or an Android shrinker mapping. Searched breadth-first with
+/// bounds, so a huge build folder cannot stall the scan.
+pub(crate) fn shipped_outputs(s: &Services, folder: &str) -> Option<String> {
+    let mut queue = std::collections::VecDeque::from([(folder.to_owned(), 0)]);
+    let mut seen = 0;
+    while let Some((dir, depth)) = queue.pop_front() {
+        for e in s.children(&dir, &mut vec![]) {
+            seen += 1;
+            if seen > 20_000 {
+                return None;
+            }
+            let name = e.name().to_ascii_lowercase();
+            if [".xcarchive", ".dsym", ".ipa", ".aab"]
+                .iter()
+                .any(|x| name.ends_with(x))
+                || (name == "mapping" && dir.ends_with("/outputs"))
+            {
+                return Some(e.name().to_owned());
+            }
+            if e.directory && !e.symlink && depth < 6 {
+                queue.push_back((e.path().to_owned(), depth + 1));
+            }
+        }
+    }
+    None
+}
+
+/// Refuses to move an item that Git tracks inside its repository.
+pub(crate) fn untracked(s: &Services, path: &str, k: &ScanControl) -> Result<()> {
     let directory = parent(path);
     let mut ancestor = Some(Path::new(&directory));
     while let Some(folder) = ancestor {
         if s.exists(&folder.join(".git").to_string_lossy()) {
             if Git(s.commands.as_ref()).tracks(&directory, path, k)? {
-                return Err("Artifact contains tracked files.".into());
+                return Err("Git tracks this item in its repository.".into());
             }
             return Ok(());
         }
@@ -605,8 +633,23 @@ impl ScanModule for ArtifactsModule {
                         reason += &format!(" Official command: `{command}`.");
                         details.push(detail("Official command", command));
                     }
+                    let candidate = match shipped_outputs(s, e.path()) {
+                        // A release archive, crash symbols or a shrinker mapping cannot be
+                        // rebuilt for a build already shipped.
+                        Some(found) => Candidate::new(
+                            e.clone(),
+                            &format!("{reason} It holds {found}, which a rebuild cannot recreate for a build you already shipped."),
+                            vec![],
+                            Risk::Review,
+                        )
+                        .acknowledge(
+                            &format!("This build output holds {found}: a shipped build or the symbols needed to read its crash reports."),
+                            vec![ActionKind::Trash],
+                        ),
+                        None => Candidate::new(e.clone(), &reason, vec![ActionKind::Trash], rule.risk),
+                    };
                     candidates.push(
-                        Candidate::new(e.clone(), &reason, vec![ActionKind::Trash], rule.risk)
+                        candidate
                             .title(m.relative)
                             .details(details)
                             .last_used(LastUsed::Project { folder: project }),
@@ -1236,7 +1279,8 @@ impl Default for CachesModule {
                 cache("Kotlin", "Kotlin/Native toolchains", ".konan").apps(owners::ANDROID),
                 cache("Maven", "Maven repository", ".m2/repository").package_store()
                     .note("Artifacts installed locally with mvn install exist nowhere else.")
-                    .apps(owners::ANDROID),
+                    .apps(owners::ANDROID)
+                    .risk(Risk::Review),
                 cache("Ivy", "Ivy cache", ".ivy2/cache").package_store(),
                 cache("Scala", "Coursier cache", "Library/Caches/Coursier/v1").package_store(),
                 cache("Android", "Android Studio caches", "Library/Caches/Google/AndroidStudio*")

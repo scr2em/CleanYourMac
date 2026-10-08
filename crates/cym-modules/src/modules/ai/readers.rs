@@ -49,7 +49,7 @@ pub fn read(s: &Services, reader: Reader, path: &str, directory: bool) -> Read {
         Reader::ExtensionTask => Read::Session(extension_task(s, path)),
         Reader::Meta(file) => Read::Session(meta(s, path, directory, file)),
         Reader::Workspace => match workspace_folder(s, &format!("{path}/workspace.json")) {
-            Some(folder) if !s.exists(&folder) => Read::OrphanWorkspace {
+            Some(folder) if s.missing(&folder) => Read::OrphanWorkspace {
                 chats: s.is_dir(&format!("{path}/chatSessions")),
                 folder,
             },

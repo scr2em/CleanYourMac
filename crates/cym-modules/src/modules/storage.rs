@@ -96,7 +96,9 @@ impl ScanModule for LargeFilesModule {
                 f.allocated_bytes = Some(e.allocated);
                 f.modified_at = Some(e.modified());
                 f.last_used_at = s.usage.last_used(e.path());
-                if !policy::protected(e.path()) {
+                if app_data(e.path(), &policy::home()) {
+                    f.blocked_reason = Some("Part of an app's or developer tool's data, such as a virtual machine disk, a model, a backup or a database. Remove it with that app or tool.".into());
+                } else if !policy::protected(e.path()) {
                     f.actions.push(ActionKind::Trash);
                 }
                 sink.finding(f);
@@ -194,7 +196,12 @@ impl ScanModule for DuplicatesModule {
             if e.directory {
                 // Roots were checked in full above, and an ignored folder is never entered,
                 // so only the new folder's own name needs checking.
-                return Ok(!policy::duplicate_ignored_name(e.name()));
+                // Hidden folders (the Trash, tool data, settings) and Library folders hold
+                // app and system data, not documents the user manages.
+                let name = e.name();
+                return Ok(!(policy::duplicate_ignored_name(name)
+                    || name.starts_with('.')
+                    || name.eq_ignore_ascii_case("Library")));
             }
             if e.regular && e.bytes >= self.minimum_bytes {
                 sizes.push((e.bytes, e.clone()));
@@ -228,12 +235,18 @@ impl ScanModule for DuplicatesModule {
         let count: usize = groups.iter().map(Vec::len).sum();
         sink.progress(format!("Verifying {count} files"));
         let mut groups = Self::stage(&s.io, sink, k, groups, |e| s.verified_hash(e.path(), k))?;
+        // The copy kept is the one in the most deliberate place: Documents, Desktop or a
+        // media folder before other folders, Downloads, and last caches or the Trash.
+        let home = policy::home();
         for (_, group) in &mut groups {
-            group.sort_by(|a, b| a.path().cmp(b.path()));
+            group.sort_by(|a, b| {
+                (keep_rank(a.path(), &home), a.path()).cmp(&(keep_rank(b.path(), &home), b.path()))
+            });
         }
         groups.sort_by(|a, b| a.1[0].path().cmp(b.1[0].path()));
         for (hash, group) in groups {
             let original = group[0].path().to_owned();
+            let disposable = keep_rank(&original, &home) == DISPOSABLE;
             let count = group.len();
             for e in group {
                 let preserved = e.path() == original;
@@ -265,6 +278,9 @@ impl ScanModule for DuplicatesModule {
                 if preserved {
                     f.blocked_reason = Some("One original is preserved in each group.".into());
                     f.badge = Some("Original".into());
+                } else if disposable {
+                    f.blocked_reason = Some(KEPT_IN_DISPOSABLE.into());
+                    f.badge = Some("Duplicate".into());
                 } else {
                     f.actions.push(ActionKind::Trash);
                     f.badge = Some("Duplicate".into());
@@ -282,11 +298,57 @@ impl ScanModule for DuplicatesModule {
         if original == path || expected.is_empty() {
             return Err(changed());
         }
+        if keep_rank(original, &policy::home()) == DISPOSABLE {
+            return Err(KEPT_IN_DISPOSABLE.into());
+        }
+        // A copy that Git tracks is part of a project, whatever else matches it.
+        super::developer::untracked(s, path, k)?;
         let (a, b) = rayon::join(|| s.verified_hash(original, k), || s.verified_hash(path, k));
         if a.ok().as_deref() != Some(expected) || b.ok().as_deref() != Some(expected) {
             return Err(changed());
         }
         Ok(())
+    }
+}
+
+/// Whether a file belongs to an app or tool: anything in the Library folder or in a hidden
+/// folder of the home folder (`~/.ollama`, `~/.colima`, `~/.android`, …).
+pub fn app_data(path: &str, home: &str) -> bool {
+    path.strip_prefix(home).is_some_and(|rest| {
+        let mut parts = rest.split('/').filter(|c| !c.is_empty());
+        let first = parts.next().unwrap_or_default();
+        first.eq_ignore_ascii_case("Library")
+            || rest.split('/').any(|c| c.len() > 1 && c.starts_with('.'))
+    })
+}
+const DISPOSABLE: u8 = 3;
+const KEPT_IN_DISPOSABLE: &str =
+    "The kept copy is in the Trash or a cache, where other actions can remove it. Keep this copy.";
+/// How deliberately a path is kept; lower ranks are kept over higher ones.
+pub fn keep_rank(path: &str, home: &str) -> u8 {
+    let lower = path.to_ascii_lowercase();
+    // Hidden folders in the home folder hold tool data and settings.
+    let hidden = path
+        .strip_prefix(home)
+        .is_some_and(|rest| rest.split('/').any(|c| c.len() > 1 && c.starts_with('.')));
+    if hidden
+        || lower.contains("/caches/")
+        || lower.contains("/cache/")
+        || lower.contains("/tmp/")
+        || lower.contains("/.trash")
+    {
+        return DISPOSABLE;
+    }
+    let under = |folder: &str| policy::contains_folded(path, &format!("{home}/{folder}"));
+    if ["Documents", "Desktop", "Pictures", "Movies", "Music"]
+        .iter()
+        .any(|f| under(f))
+    {
+        0
+    } else if under("Downloads") {
+        2
+    } else {
+        1
     }
 }
 
@@ -365,5 +427,31 @@ impl ScanModule for FolderModule {
             .collect();
         flush(sink, &mut warnings);
         add_files(s, sink, &self.descriptor.id, candidates, k)
+    }
+}
+
+#[cfg(test)]
+mod keep_tests {
+    use super::*;
+
+    #[test]
+    fn the_deliberate_copy_is_kept() {
+        let home = "/Users/me";
+        let rank = |p: &str| keep_rank(p, home);
+        assert_eq!(rank("/Users/me/Documents/Tax.pdf"), 0);
+        assert_eq!(rank("/Users/me/Projects/site/logo.png"), 1);
+        assert_eq!(rank("/Users/me/Downloads/Tax.pdf"), 2);
+        for disposable in [
+            "/Users/me/.Trash/Tax.pdf",
+            "/Users/me/Library/Caches/app/holiday.jpg",
+            "/Users/me/.cache/x/model.bin",
+            "/Volumes/Disk/.Trashes/501/a.pdf",
+        ] {
+            assert_eq!(rank(disposable), DISPOSABLE, "{disposable}");
+        }
+        // Alphabetical order no longer decides: ~/.Trash sorts first but is never kept.
+        let mut group = ["/Users/me/.Trash/Tax.pdf", "/Users/me/Documents/Tax.pdf"];
+        group.sort_by_key(|p| (rank(p), *p));
+        assert_eq!(group[0], "/Users/me/Documents/Tax.pdf");
     }
 }
