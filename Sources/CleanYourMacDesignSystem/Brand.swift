@@ -3,7 +3,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Ecosystem logos: the single-colour SVGs in the bundled `BrandIcons` folder, named by slug,
-/// with the brand colour as each file's `fill`. Read and parsed once, on first use.
+/// with the light-appearance colour as each file's `fill` and the dark one as its
+/// `data-fill-dark`. Read and parsed once, on first use.
 public enum BrandCatalog {
     /// Inside the app's Resources when packaged; SwiftPM's resource bundle when run from a build.
     static let folder: URL? = {
@@ -30,7 +31,11 @@ public enum BrandCatalog {
     /// Whether a logo exists for `slug`.
     public static func contains(_ slug: String) -> Bool { icons[slug] != nil }
     public static func name(_ slug: String) -> String? { icons[slug]?.title }
-    static func hex(_ slug: String) -> UInt32? { icons[slug]?.fill }
+    /// The logo's colour in light or dark appearance.
+    static func hex(_ slug: String, dark: Bool) -> UInt32? {
+        guard let icon = icons[slug] else { return nil }
+        return dark ? icon.darkFill ?? icon.fill : icon.fill
+    }
 
     static func path(_ icon: SVGIcon) -> Path {
         var path = Path()
@@ -50,8 +55,8 @@ public enum BrandCatalog {
     }
 }
 
-/// An ecosystem's logo filled with its brand colour. Near-black and near-white marks use the
-/// ink colour instead, so they stay visible in light and dark appearances.
+/// An ecosystem's logo in its brand colour for the current appearance: each file sets a light
+/// and a dark colour that stay readable on every theme (see scripts/update-brand-icons.py).
 public struct BrandIcon: View {
     private let slug: String
     @Environment(\.colorScheme) private var scheme
@@ -66,12 +71,8 @@ public struct BrandIcon: View {
             .accessibilityLabel(BrandCatalog.name(slug) ?? slug)
     }
     private var color: Color {
-        guard let hex = BrandCatalog.hex(slug) else { return Palette.ink }
-        let red = Double((hex >> 16) & 0xFF) / 255, green = Double((hex >> 8) & 0xFF) / 255, blue = Double(hex & 0xFF) / 255
-        let luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
-        let unreadable = scheme == .dark ? luminance < 0.22 : luminance > 0.88
-        if unreadable || luminance < 0.08 || luminance > 0.95 { return Palette.ink }
-        return Color(.sRGB, red: red, green: green, blue: blue)
+        guard let hex = BrandCatalog.hex(slug, dark: scheme == .dark) else { return Palette.ink }
+        return Color(.sRGB, red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255, blue: Double(hex & 0xFF) / 255)
     }
 }
 

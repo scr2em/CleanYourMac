@@ -13,8 +13,10 @@ public enum SVGCommand: Equatable, Sendable {
 /// A single-colour SVG icon: its title, fill colour and every path, in its view box.
 public struct SVGIcon: Sendable {
     public let title: String?
-    /// `0xRRGGBB`, from the root element's `fill`.
+    /// `0xRRGGBB`, from the root element's `fill`: the colour in light appearance.
     public let fill: UInt32?
+    /// `0xRRGGBB`, from the root element's `data-fill-dark`: the colour in dark appearance.
+    public let darkFill: UInt32?
     public let viewBox: (x: Double, y: Double, width: Double, height: Double)
     public let commands: [SVGCommand]
 
@@ -26,9 +28,11 @@ public struct SVGIcon: Sendable {
             .split(whereSeparator: { $0 == " " || $0 == "," })
             .compactMap { Double($0) } ?? []
         viewBox = box.count == 4 ? (box[0], box[1], box[2], box[3]) : (0, 0, 24, 24)
-        fill = SVGIcon.attribute("fill", in: element).flatMap { value in
+        let hex = { (value: String) -> UInt32? in
             value.hasPrefix("#") && value.count == 7 ? UInt32(value.dropFirst(), radix: 16) : nil
         }
+        fill = SVGIcon.attribute("fill", in: element).flatMap(hex)
+        darkFill = SVGIcon.attribute("data-fill-dark", in: element).flatMap(hex)
         if let start = svg.range(of: "<title>"), let end = svg.range(of: "</title>", range: start.upperBound..<svg.endIndex) {
             title = String(svg[start.upperBound..<end.lowerBound])
         } else {

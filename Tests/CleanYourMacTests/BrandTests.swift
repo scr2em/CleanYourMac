@@ -22,6 +22,12 @@ import Testing
     let svg = ##"<svg fill="#61DAFB" role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>React</title><path d="M0 0h24v24H0z"/></svg>"##
     let icon = try #require(SVGIcon(svg: svg))
     #expect(icon.fill == 0x61DAFB)
+    #expect(icon.darkFill == nil)
     #expect(icon.title == "React")
     #expect(icon.commands.count == 5)
+    // Dark marks carry a light colour for dark appearance.
+    let next = try #require(SVGIcon(svg: ##"<svg fill="#000000" data-fill-dark="#EDEDED" viewBox="0 0 24 24"><path d="M0 0h1z"/></svg>"##))
+    #expect(next.fill == 0x000000 && next.darkFill == 0xEDEDED)
+    #expect(BrandCatalog.hex("nextdotjs", dark: true) == 0xEDEDED)
+    #expect(BrandCatalog.hex("nextdotjs", dark: false) == 0x000000)
 }
