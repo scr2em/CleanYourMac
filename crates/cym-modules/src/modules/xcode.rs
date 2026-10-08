@@ -68,6 +68,12 @@ const WHOLE: &[(&str, &str, &str, Risk)] = &[
         "Shared caches of the simulators; made again when a simulator starts.",
         Risk::Rebuild,
     ),
+    (
+        "Library/Developer/XCTestDevices",
+        "Test simulator clones",
+        "Simulator copies Xcode makes to run tests in parallel; made again when tests run.",
+        Risk::Rebuild,
+    ),
 ];
 /// Containers of apps removed from a simulator that the simulator did not clean up.
 const DEAD: &str =

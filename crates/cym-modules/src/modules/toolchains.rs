@@ -201,6 +201,51 @@ impl Default for ToolchainsModule {
                 .in_use(&[InUse::VersionFile(".pyenv/version")])
                 .command("pyenv uninstall {name}"),
                 versions(
+                    "Python",
+                    "Python",
+                    "uv",
+                    ".local/share/uv/python/*",
+                    "uv downloads it again when a project needs it; environments made from it stop working until they are made again.",
+                )
+                .command("uv python uninstall {name}")
+                .risk(Risk::Review),
+                versions(
+                    "Python",
+                    "Conda environment",
+                    "Miniconda",
+                    "miniconda3/envs/*",
+                    "Packages installed into it are lost; make it again from its environment.yml.",
+                )
+                .command("conda env remove -n {name}")
+                .risk(Risk::Review),
+                versions(
+                    "Python",
+                    "Conda environment",
+                    "Anaconda",
+                    "anaconda3/envs/*",
+                    "Packages installed into it are lost; make it again from its environment.yml.",
+                )
+                .command("conda env remove -n {name}")
+                .risk(Risk::Review),
+                versions(
+                    "Python",
+                    "Conda environment",
+                    "Miniforge",
+                    "miniforge3/envs/*",
+                    "Packages installed into it are lost; make it again from its environment.yml.",
+                )
+                .command("conda env remove -n {name}")
+                .risk(Risk::Review),
+                versions(
+                    "Java",
+                    "JDK",
+                    "an IDE's JDK download",
+                    "Library/Java/JavaVirtualMachines/*",
+                    "Download it again in the IDE's Project Structure › SDKs if a project needs it.",
+                )
+                .apps(owners::JETBRAINS)
+                .risk(Risk::Review),
+                versions(
                     "Ruby",
                     "Ruby",
                     "rbenv",

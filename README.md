@@ -28,7 +28,7 @@ CleanYourMac finds items that use disk space on your Mac. Examples are large dow
 | **Project dependencies and build output** | See the projects that have large dependency folders (`node_modules`, Python environments, Pods, `vendor` and more) and generated files. The search stops at each dependency folder. |
 | **Git worktrees** | See the branch, local changes, locks and size of each worktree. A badge shows registrations that have no folder. |
 | **Simulators and Xcode data** | See simulator app data, runtimes, DerivedData, device support, preview simulators and extra Xcode installs. Xcode archives are protected. |
-| **Containers and virtual machines** | See the real size of the disks of Docker, OrbStack, Colima, Lima and Podman. Free space inside them with their own cleanup commands. |
+| **Containers and virtual machines** | See the real size of the disks of Docker, OrbStack, Colima, Lima and Podman, and of UTM, Parallels, VMware Fusion, VirtualBox and Tart virtual machines. Free space inside the engines with their own cleanup commands. |
 | **Installers** | Find macOS installers, Xcode archives, disk images and packages that you already installed from. |
 | **Toolchains, SDKs and caches** | Find installed language versions, SDK components, virtual devices, package caches and logs. |
 | **AI tools** | Find the caches, session transcripts and downloaded models of Claude Code, Codex, Gemini CLI, Cursor, Ollama and other AI tools. Each item has a risk tier. |
@@ -248,7 +248,10 @@ Archives are protected. An archive can be the only copy of a build that you ship
 <details>
 <summary><strong>Caches & Logs</strong>: caches, logs and Mac leftovers</summary>
 
-- **Developer caches:** JavaScript, Python, Apple, Flutter, JVM and Android, .NET, Rust, Go, PHP, Ruby, Elixir, Homebrew, JetBrains, VS Code and Unity. Each item shows the cost of its removal and the clean command of the tool.
+- **Developer caches:** JavaScript (also Puppeteer browsers), Python (also uv and pre-commit), Apple (also CocoaPods spec repos), Flutter, JVM and Android (also Gradle JDKs), .NET, Rust, C and C++ (ccache, Bazel), Go, PHP, Ruby, Elixir, Homebrew, JetBrains, VS Code, Unity, and the image caches of Tart, Vagrant and minikube. Each item shows the cost of its removal and the clean command of the tool.
+- **Browser caches:** the script, GPU and offline caches of each Chrome, Edge and Brave profile, and the on-device AI model of Chrome. History, cookies, passwords and local storage stay.
+- **App caches:** the Steam shader and web caches and unfinished downloads, and the Adobe media cache.
+- **For information only:** the iCloud Drive sync cache, the Google Drive offline files and cache, and Messages attachments. The app shows their size and tells you how to free space in their app. It does not remove them, because they can hold changes that are not uploaded, or leave broken messages.
 - **`~/.cache`:** one item with the *Review* badge. It shows what the folder contains. It shows a warning when the folder contains a Hugging Face sign-in token.
 - **`~/Library/Logs`:** the logs of each app, with the *Review* badge.
 - **Mac leftovers:**
@@ -267,6 +270,8 @@ Archives are protected. An archive can be the only copy of a build that you ship
 
 Toolchains & SDKs shows each installed version, with its size and the uninstall command of its manager:
 - **Language version managers:** rustup, nvm, fnm, Volta, pyenv, rbenv and FVM.
+- **Python:** versions that uv installed, and conda environments (Miniconda, Anaconda, Miniforge).
+- **Java:** JDKs that an IDE downloaded to `~/Library/Java/JavaVirtualMachines`.
 - **Swift toolchains.**
 - **Managers for many tools:** SDKMAN, asdf and mise.
 - **Android:** system images, NDK, build tools and virtual devices.
@@ -275,7 +280,7 @@ You cannot select a version that is in use. A version is in use when it is the d
 </details>
 
 <details>
-<summary><strong>Containers & VMs</strong>: Docker, OrbStack, Colima, Lima and Podman</summary>
+<summary><strong>Containers & VMs</strong>: Docker, OrbStack, Colima, Lima, Podman and virtual machines</summary>
 
 Container engines keep all images, containers and volumes in one virtual disk. The app shows the real size of each disk. The file reports a larger size, because it is sparse. A disk never goes to the Trash, because that deletes all its contents.
 
@@ -289,6 +294,8 @@ To free space inside a disk, the app uses the command of the engine. It asks the
 | Unused volumes | None. Volumes can hold databases. Remove them in Docker. | For information only |
 
 Podman items use the same `podman` commands. Docker commands reach the engine that the current Docker context names (Docker Desktop, OrbStack, Colima or Rancher Desktop). The app works only with an engine on this Mac: a context that points at a remote host is not listed. Before a command runs, the app checks that the context and its endpoint did not change, and measures again: when the command would now free clearly more than you reviewed, it does not run. The engine must run to measure and clean its data. The download caches of Lima and Colima go to the Trash.
+
+The app also shows each virtual machine of UTM, Parallels Desktop, VMware Fusion, VirtualBox and Tart, with its size and the date of its last change. A virtual machine never goes to the Trash. Remove it in its app, which also forgets it. The item tells you how.
 </details>
 
 <details>

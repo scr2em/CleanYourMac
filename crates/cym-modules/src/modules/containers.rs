@@ -1,5 +1,6 @@
 //! Container engines and the Linux virtual machines they run in: Docker Desktop, OrbStack,
-//! Colima, Lima, Podman, Rancher Desktop and Apple's `container`.
+//! Colima, Lima, Podman, Rancher Desktop and Apple's `container`; and the machines of
+//! desktop virtualization apps: UTM, Parallels Desktop, VMware Fusion, VirtualBox and Tart.
 //!
 //! Each engine keeps every image, container and volume in one virtual disk. The disk never
 //! goes to the Trash: that would delete all of them. It is listed so its real size shows (the
@@ -81,6 +82,33 @@ const ENGINES: &[Engine] = &[
         cleanup: "container image prune --all removes unused images.",
         ecosystem: "",
     },
+];
+
+/// Desktop virtual machine apps: (app, home-relative pattern of one machine, how to remove
+/// one). A machine is one bundle or folder holding its disks, snapshots and settings, so it
+/// is listed for its size and removed in its app, which also forgets it.
+const MACHINES: &[(&str, &str, &str)] = &[
+    (
+        "UTM",
+        "Library/Containers/com.utmapp.UTM/Data/Documents/*.utm",
+        "In UTM, select the machine and choose Delete.",
+    ),
+    (
+        "Parallels Desktop",
+        "Parallels/*.pvm",
+        "In Parallels Desktop's Control Center, right-click the machine and choose Remove.",
+    ),
+    (
+        "VMware Fusion",
+        "Virtual Machines.localized/*.vmwarevm",
+        "In VMware Fusion's Virtual Machine Library, choose Virtual Machine › Delete.",
+    ),
+    (
+        "VirtualBox",
+        "VirtualBox VMs/*",
+        "In VirtualBox, choose Machine › Remove, then Delete all files.",
+    ),
+    ("Tart", ".tart/vms/*", "tart delete <name>"),
 ];
 
 /// Downloaded VM images the tools fetch again.
@@ -353,7 +381,7 @@ impl ScanModule for ContainersModule {
             "Containers & VMs",
             "Developer",
             "shippingbox.circle",
-            "Docker, OrbStack, Colima, Lima and Podman: their real disk size, and their own cleanup.",
+            "Docker, OrbStack, Colima, Lima, Podman and virtual machine apps: their real disk size, and their own cleanup.",
             false,
         )
     }
@@ -405,6 +433,36 @@ impl ScanModule for ContainersModule {
                     .details(details)
                     .last_used(LastUsed::At(modified))
                     .blocked(Some(&blocked)),
+                );
+            }
+        }
+        for (app, pattern, remove) in MACHINES {
+            k.check()?;
+            for e in matches(s, &home, pattern) {
+                if !e.directory || !c.allows(e.path()) {
+                    continue;
+                }
+                let name = std::path::Path::new(e.name())
+                    .file_stem()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(e.name())
+                    .to_owned();
+                let modified = e.modified();
+                candidates.push(
+                    Candidate::new(
+                        e,
+                        &format!("A {app} virtual machine: its disks, snapshots and settings. It never goes to the Trash here; remove it in {app}, which also forgets it."),
+                        vec![],
+                        Risk::Review,
+                    )
+                    .title(format!("{app} virtual machine · {name}"))
+                    .details(vec![
+                        detail("Engine", *app),
+                        detail("Kind", "Virtual machine"),
+                        detail("Official cleanup", *remove),
+                    ])
+                    .last_used(LastUsed::At(modified))
+                    .blocked(Some(&format!("Remove the machine in {app}: {remove}"))),
                 );
             }
         }
