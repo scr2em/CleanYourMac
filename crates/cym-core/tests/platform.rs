@@ -4,7 +4,7 @@ use cym_core::{
     adapters::command::SystemRunner,
     git::{self, Git, Worktree},
     model::*,
-    modules, orphans,
+    orphans,
     ports::*,
     simulator::Simctl,
     Engine, Services,
@@ -145,13 +145,8 @@ fn real_git_worktree_rejects_late_changes_and_removes_only_an_eligible_tree() {
     assert!(git.safety(&record, &k).unwrap().eligible);
 
     // Only the linked tree is listed; the main checkout is not a cleanup candidate.
-    let scan = || {
-        Engine::new(s.clone(), modules::builtin()).scan_report(
-            &["worktrees".into()],
-            &f.context(),
-            &k,
-        )
-    };
+    let scan =
+        || Engine::new(s.clone(), builtin(&f)).scan_report(&["worktrees".into()], &f.context(), &k);
     let report = scan();
     assert_eq!(report.findings.len(), 1, "{:?}", report.findings);
     let linked_row = &report.findings[0];
@@ -288,8 +283,7 @@ fn missing_worktree_folder_is_badged_orphaned_and_inspection_only() {
         0
     );
     fs::remove_dir_all(&linked).unwrap();
-    let report =
-        Engine::new(s, modules::builtin()).scan_report(&["worktrees".into()], &f.context(), &k);
+    let report = Engine::new(s, builtin(&f)).scan_report(&["worktrees".into()], &f.context(), &k);
     let row = report.findings.iter().find(|r| r.title == "gone").unwrap();
     assert_eq!(row.badge.as_deref(), Some("Orphaned"));
     assert!(row.actions.is_empty());
@@ -469,7 +463,7 @@ fn orphan_module_and_termination_use_the_exact_instance() {
     let f = Fixture::new();
     let (s, processes, _) = orphan_services(&f, vec![launchctl(), launchctl(), launchctl()]);
     let k = ScanControl::default();
-    let engine = Engine::new(s.clone(), modules::builtin());
+    let engine = Engine::new(s.clone(), builtin(&f));
     let report = engine.scan_report(&["orphans".into()], &ScanContext::default(), &k);
     assert_eq!(report.findings.len(), 1, "{:?}", report.warnings);
     let row = report.findings[0].clone();

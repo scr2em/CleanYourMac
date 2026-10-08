@@ -173,6 +173,27 @@ pub fn process(path: &str, parent: i32, uid: u32) -> Snapshot {
     }
 }
 
+/// The built-in modules, with every module that reads fixed home-folder locations (shared
+/// package stores, caches, toolchains) pointed at `fixture/home`. Tests never see, and so can
+/// never act on, the real home folder.
+pub fn builtin(fixture: &Fixture) -> cym_core::modules::Registry {
+    use cym_core::modules::{developer, toolchains};
+    let home = Some(fixture.at("home"));
+    cym_core::modules::builtin()
+        .register(Arc::new(developer::DependenciesModule {
+            home: home.clone(),
+            ..Default::default()
+        }))
+        .register(Arc::new(developer::CachesModule {
+            home: home.clone(),
+            ..Default::default()
+        }))
+        .register(Arc::new(toolchains::ToolchainsModule {
+            home,
+            ..Default::default()
+        }))
+}
+
 /// Native filesystem adapters with fixture Trash and an in-memory journal.
 pub fn services(fixture: &Fixture) -> Services {
     Services {

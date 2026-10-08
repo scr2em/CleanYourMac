@@ -9,7 +9,7 @@ use cym_core::{
 use std::{fs, sync::Arc};
 
 fn scan(f: &Fixture, id: &str) -> ScanReport {
-    Engine::new(services(f), modules::builtin()).scan_report(
+    Engine::new(services(f), builtin(f)).scan_report(
         &[id.into()],
         &f.context(),
         &ScanControl::default(),
@@ -51,7 +51,7 @@ fn node_finder_lists_projects_and_skips_package_manager_folders() {
         home: Some(f.path()),
         ..Default::default()
     };
-    let engine = Engine::new(services(&f), modules::builtin().register(Arc::new(node)));
+    let engine = Engine::new(services(&f), builtin(&f).register(Arc::new(node)));
     let report = engine.scan_report(&["node".into()], &f.context(), &ScanControl::default());
     let titles: Vec<_> = report.findings.iter().map(|f| f.title.as_str()).collect();
     assert_eq!(titles, ["app"], "{:?}", report.warnings);
@@ -101,7 +101,7 @@ fn duplicates_preserve_an_original_skip_dependency_stores_and_revalidate() {
         .unwrap();
     let original = candidate.value("Preserved original").unwrap();
     fs::write(original, "changed").unwrap();
-    let engine = Engine::new(services(&f), modules::builtin());
+    let engine = Engine::new(services(&f), builtin(&f));
     let results = engine.execute(
         &ActionRequest {
             findings: vec![candidate.clone()],

@@ -1,12 +1,10 @@
 mod common;
 use common::*;
-use cym_core::{
-    analytics::analytics, model::*, modules, modules::ScanModule, ports::*, Engine, Services,
-};
+use cym_core::{analytics::analytics, model::*, modules::ScanModule, ports::*, Engine, Services};
 use std::{fs, sync::Arc};
 
 fn engine(f: &Fixture) -> Engine {
-    Engine::new(services(f), modules::builtin())
+    Engine::new(services(f), builtin(f))
 }
 fn trash(f: &Fixture, finding: &Finding, context: ScanContext) -> ActionResult {
     engine(f)
@@ -152,7 +150,7 @@ fn a_failure_in_the_middle_of_a_batch_does_not_stop_the_rest() {
     let f = Fixture::new();
     let e = Engine::new(
         services(&f),
-        modules::builtin().register(Arc::new(PanickingModule)),
+        builtin(&f).register(Arc::new(PanickingModule)),
     );
     for project in ["a", "b", "c"] {
         f.write(&format!("{project}/package.json"), "{}");
@@ -448,7 +446,7 @@ fn items_in_use_fail_as_overridable_and_move_when_forced() {
     };
     f.write("app/package.json", "{}");
     f.write("app/node_modules/x/index.js", "x");
-    let engine = Engine::new(s, modules::builtin());
+    let engine = Engine::new(s, builtin(&f));
     let report = engine.scan_report(&["node".into()], &f.context(), &ScanControl::default());
     let finding = report.findings[0].clone();
     let run = |force: bool| {

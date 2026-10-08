@@ -21,7 +21,7 @@ fn native_trash_round_trip() {
         &format!("CleanYourMac-native-test-{}.txt", uuid::Uuid::new_v4()),
         "Disposable native Trash fixture",
     );
-    let engine = Engine::new(native(), modules::builtin());
+    let engine = Engine::new(native(), builtin(&f));
     let k = ScanControl::default();
     let finding = file_finding(
         "native",

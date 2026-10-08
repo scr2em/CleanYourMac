@@ -34,6 +34,9 @@ pub struct Rule {
     pub risks: &'static [Risk],
     /// Only rows whose last use (or modification) is at least this many days old qualify.
     pub idle_days: Option<u32>,
+    /// Only rows that belong to a project qualify, which leaves out shared package stores
+    /// another rule already offers.
+    pub project_only: bool,
 }
 
 /// The default rules, in the order fixes are offered when sizes tie.
@@ -46,6 +49,7 @@ pub const RULES: &[Rule] = &[
         action: ActionKind::Trash,
         risks: &[Risk::Rebuild],
         idle_days: Some(30),
+        project_only: true,
     },
     Rule {
         id: "idle-build-output",
@@ -55,6 +59,7 @@ pub const RULES: &[Rule] = &[
         action: ActionKind::Trash,
         risks: &[Risk::Rebuild],
         idle_days: Some(30),
+        project_only: true,
     },
     Rule {
         id: "rebuildable-caches",
@@ -64,6 +69,7 @@ pub const RULES: &[Rule] = &[
         action: ActionKind::Trash,
         risks: &[Risk::Rebuild],
         idle_days: None,
+        project_only: false,
     },
     Rule {
         id: "xcode-build-data",
@@ -73,6 +79,7 @@ pub const RULES: &[Rule] = &[
         action: ActionKind::Trash,
         risks: &[Risk::Rebuild],
         idle_days: None,
+        project_only: false,
     },
     Rule {
         id: "duplicate-copies",
@@ -82,6 +89,7 @@ pub const RULES: &[Rule] = &[
         action: ActionKind::Trash,
         risks: &[Risk::Review, Risk::Rebuild],
         idle_days: None,
+        project_only: false,
     },
     Rule {
         id: "empty-trash",
@@ -91,6 +99,7 @@ pub const RULES: &[Rule] = &[
         action: ActionKind::EmptyTrash,
         risks: &[Risk::Permanent, Risk::Review],
         idle_days: None,
+        project_only: false,
     },
 ];
 
@@ -111,6 +120,7 @@ pub fn recommendations<'a>(
                     f.blocked_reason.is_none()
                         && f.actions.contains(&rule.action)
                         && rule.risks.contains(&f.risk)
+                        && (!rule.project_only || f.value("Project").is_some())
                         && rule.idle_days.is_none_or(|days| {
                             let last = f.last_used_at.or(f.modified_at);
                             last.is_none_or(|t| now - t >= f64::from(days) * 86_400.0)

@@ -200,7 +200,7 @@ fn artifact_scan_reports_ecosystems_and_skips_dependency_stores() {
     f.write("api/.venv/lib/site-packages/__pycache__/m.pyc", "x");
     f.write("game/Game.uproject", "{}");
     f.write("game/Saved/Autosaves/a.umap", "x");
-    let report = Engine::new(services(&f), modules::builtin()).scan_report(
+    let report = Engine::new(services(&f), builtin(&f)).scan_report(
         &["artifacts".into()],
         &f.context(),
         &ScanControl::default(),
@@ -251,9 +251,26 @@ fn dependencies_cover_every_ecosystem_once_and_without_descending() {
     f.write("site/vendor/pkg/composer.json", "{}");
     f.write("site/vendor/pkg/composer.lock", "{}");
     f.write("site/vendor/pkg/vendor/autoload.php", "<?php");
+    f.write("gosvc/go.mod", "module example.com/svc");
+    f.write("gosvc/vendor/modules.txt", "# example.com/dep v1.0.0");
+    f.write("crate/Cargo.toml", "[package]");
+    f.write("crate/Cargo.lock", "x");
+    f.write("crate/.cargo/config.toml", "[source.vendored-sources]");
+    f.write("crate/vendor/dep/.cargo-checksum.json", "{}");
+    f.write("kit/Package.swift", "// swift-tools-version:5.9");
+    f.write("kit/.build/checkouts/Dep/Package.swift", "x");
+    f.write("kit/.build/arm64-apple-macosx/debug/Kit.o", "x");
+    f.write("edge/deno.json", "{}");
+    f.write("edge/deno.lock", "{}");
+    f.write("edge/node_modules/.deno/x/index.js", "x");
     // A folder named like a dependency store without its project's evidence is left alone.
     f.write("notes/vendor/autoload.php", "<?php");
-    let engine = Engine::new(services(&f), modules::builtin());
+    f.write("plain/vendor/modules.txt", "x");
+    let dependencies = modules::developer::DependenciesModule {
+        home: Some(f.at("home")),
+        ..Default::default()
+    };
+    let engine = Engine::new(services(&f), builtin(&f).register(Arc::new(dependencies)));
     let report = engine.scan_report(&["node".into()], &f.context(), &ScanControl::default());
     let mut found: Vec<_> = report
         .findings
@@ -272,7 +289,11 @@ fn dependencies_cover_every_ecosystem_once_and_without_descending() {
         [
             ("app", ".venv", "python"),
             ("app", "node_modules", "yarn"),
+            ("crate", "vendor", "rust"),
+            ("edge", "node_modules", "deno"),
+            ("gosvc", "vendor", "go"),
             ("ios", "Pods", "cocoapods"),
+            ("kit", ".build/checkouts", "swift"),
             ("site", "vendor", "composer"),
         ],
         "{:?}",
@@ -286,9 +307,99 @@ fn dependencies_cover_every_ecosystem_once_and_without_descending() {
     // Build Artifacts neither lists nor searches inside installed dependencies.
     f.write("app/.venv/lib/__pycache__/m.pyc", "x");
     f.write("app/.venv/lib/m.py", "x");
+    // Build Artifacts lists SwiftPM's build output without the fetched packages beside it.
     let artifacts =
         engine.scan_report(&["artifacts".into()], &f.context(), &ScanControl::default());
-    assert!(artifacts.findings.is_empty(), "{:?}", artifacts.findings);
+    let titles: Vec<_> = artifacts
+        .findings
+        .iter()
+        .map(|r| r.title.as_str())
+        .collect();
+    assert_eq!(
+        titles,
+        [".build/arm64-apple-macosx"],
+        "{:?}",
+        artifacts.warnings
+    );
+}
+
+#[test]
+fn dependencies_list_shared_package_stores_and_never_search_them() {
+    let f = Fixture::new();
+    f.write("home/.cargo/registry/src/index/serde-1.0/Cargo.toml", "x");
+    f.write(
+        "home/.cargo/registry/src/index/serde-1.0/vendor/modules.txt",
+        "x",
+    );
+    f.write("home/.m2/repository/org/x.jar", "x");
+    f.write("home/go/pkg/mod/example.com/m@v1/go.mod", "module m");
+    f.write("home/go/pkg/mod/example.com/m@v1/vendor/modules.txt", "x");
+    f.write("home/.npm/_cacache/index", "x");
+    let dependencies = modules::developer::DependenciesModule {
+        home: Some(f.at("home")),
+        ..Default::default()
+    };
+    let engine = Engine::new(services(&f), builtin(&f).register(Arc::new(dependencies)));
+    let report = engine.scan_report(&["node".into()], &f.context(), &ScanControl::default());
+    let mut found: Vec<_> = report
+        .findings
+        .iter()
+        .map(|r| (r.title.as_str(), r.value("Scope"), r.actions.is_empty()))
+        .collect();
+    found.sort();
+    let shared = Some("Shared by all projects");
+    assert_eq!(
+        found,
+        [
+            ("Cargo registry sources", shared, false),
+            // Go makes its module cache read-only; only `go clean -modcache` removes it.
+            ("Go module cache", shared, true),
+            ("Maven repository", shared, false),
+            ("npm cache", shared, false),
+        ],
+        "{:?}",
+        report.warnings
+    );
+    let npm = report
+        .findings
+        .iter()
+        .find(|r| r.title == "npm cache")
+        .unwrap();
+    assert_eq!(npm.brand.as_deref(), Some("npm"));
+    assert!(npm.reason.contains("npm cache clean --force"));
+}
+
+#[test]
+fn committed_vendor_folders_are_left_out() {
+    let f = Fixture::new();
+    let s = services(&f);
+    let k = ScanControl::default();
+    let git = cym_core::git::Git(s.commands.as_ref());
+    if git
+        .run(&f.path(), &["--version"], &k)
+        .map(|o| o.status)
+        .ok()
+        != Some(0)
+    {
+        return;
+    }
+    f.write("svc/go.mod", "module example.com/svc");
+    f.write("svc/vendor/modules.txt", "# example.com/dep v1.0.0");
+    let scan = || {
+        let dependencies = modules::developer::DependenciesModule {
+            home: Some(f.at("home")),
+            ..Default::default()
+        };
+        Engine::new(services(&f), builtin(&f).register(Arc::new(dependencies)))
+            .scan_report(&["node".into()], &f.context(), &ScanControl::default())
+            .findings
+            .len()
+    };
+    assert_eq!(scan(), 1);
+    for args in [&["init", "-q"][..], &["add", "vendor/modules.txt"]] {
+        assert_eq!(git.run(&f.at("svc"), args, &k).unwrap().status, 0);
+    }
+    assert_eq!(scan(), 0);
 }
 
 #[test]
@@ -332,7 +443,7 @@ fn artifact_actions_recheck_project_evidence() {
         commands: StubRunner::new(vec![output("", 0)]),
         ..services(&f)
     };
-    let engine = Engine::new(s, modules::builtin());
+    let engine = Engine::new(s, builtin(&f));
     let report = engine.scan_report(&["artifacts".into()], &f.context(), &ScanControl::default());
     assert_eq!(report.findings.len(), 2);
     assert!(report
@@ -393,7 +504,7 @@ fn caches_report_known_locations_with_an_ecosystem() {
             .collect();
         assert!(roots.contains(&format!("{home}/{}", fixed.join("/"))));
     }
-    let registry = modules::builtin().register(Arc::new(module));
+    let registry = builtin(&f).register(Arc::new(module));
     let report = Engine::new(services(&f), registry).scan_report(
         &["caches".into()],
         &f.context(),
@@ -452,7 +563,7 @@ fn caches_block_go_modules_expand_ide_versions_and_wait_for_owning_apps() {
         ..Default::default()
     });
     let s = services(&f);
-    let report = Engine::new(s.clone(), modules::builtin().register(module.clone())).scan_report(
+    let report = Engine::new(s.clone(), builtin(&f).register(module.clone())).scan_report(
         &["caches".into()],
         &f.context(),
         &ScanControl::default(),
@@ -571,7 +682,7 @@ fn toolchains_list_versions_and_block_the_ones_in_use() {
     assert!(module
         .action_roots()
         .contains(&format!("{home}/.android/avd")));
-    let registry = modules::builtin().register(Arc::new(module));
+    let registry = builtin(&f).register(Arc::new(module));
     let report = Engine::new(services(&f), registry).scan_report(
         &["toolchains".into()],
         &f.context(),
@@ -682,7 +793,7 @@ fn virtual_devices_are_blocked_while_an_emulator_runs() {
         home: Some(home),
         ..Default::default()
     };
-    let report = Engine::new(s, modules::builtin().register(Arc::new(module))).scan_report(
+    let report = Engine::new(s, builtin(&f).register(Arc::new(module))).scan_report(
         &["toolchains".into()],
         &f.context(),
         &ScanControl::default(),
@@ -724,7 +835,7 @@ fn toolchain_actions_refuse_running_and_default_versions() {
         processes: processes.clone(),
         ..services(&f)
     };
-    let engine = Engine::new(s.clone(), modules::builtin().register(module.clone()));
+    let engine = Engine::new(s.clone(), builtin(&f).register(module.clone()));
     let report = engine.scan_report(
         &["toolchains".into()],
         &f.context(),
@@ -812,7 +923,7 @@ fn caches_include_mac_leftovers_without_repeating_developer_caches() {
         ..Default::default()
     });
     let s = services(&f);
-    let report = Engine::new(s.clone(), modules::builtin().register(module.clone())).scan_report(
+    let report = Engine::new(s.clone(), builtin(&f).register(module.clone())).scan_report(
         &["caches".into()],
         &f.context(),
         &ScanControl::default(),

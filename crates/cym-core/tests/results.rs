@@ -2,7 +2,6 @@ mod common;
 use common::*;
 use cym_core::{
     model::*,
-    modules,
     ports::ScanControl,
     results::{natural, synthetic, Query, ResultStore, SortKey},
     Engine,
@@ -109,7 +108,7 @@ fn stored_scans_replace_module_rows_and_act_by_id() {
     let f = Fixture::new();
     f.write("app/package.json", "{}");
     f.write("app/node_modules/x/index.js", "x");
-    let engine = Engine::new(services(&f), modules::builtin());
+    let engine = Engine::new(services(&f), builtin(&f));
     engine.results.insert(synthetic(10));
     let events = Mutex::new(vec![]);
     let k = ScanControl::default();
@@ -234,7 +233,7 @@ fn node_findings_report_project_activity_as_last_used() {
     let f = Fixture::new();
     f.write("app/package.json", "{}");
     f.write("app/node_modules/x/index.js", "x");
-    let report = Engine::new(services(&f), modules::builtin()).scan_report(
+    let report = Engine::new(services(&f), builtin(&f)).scan_report(
         &["node".into()],
         &f.context(),
         &ScanControl::default(),
@@ -476,6 +475,9 @@ fn recommendations_offer_conservative_one_click_fixes() {
         f.last_used_at = last_used;
         f.modified_at = Some(now);
         f.brand = (module == "node").then(|| "pnpm".into());
+        if matches!(module, "node" | "artifacts") {
+            f.details = vec![detail("Project", key.trim_end_matches("/node_modules"))];
+        }
         f
     };
     let mut blocked = row(
@@ -495,7 +497,18 @@ fn recommendations_offer_conservative_one_click_fixes() {
         None,
     );
     never.modified_at = Some(now - 200.0 * day);
+    // A shared package store belongs to no project, so only the cache rule may offer it.
+    let mut store = row(
+        "node",
+        "/h/.cargo/registry/src",
+        5_000_000_000,
+        Risk::Rebuild,
+        None,
+    );
+    store.details.clear();
+    store.modified_at = Some(now - 200.0 * day);
     let rows = vec![
+        store,
         row(
             "node",
             "/p/old/node_modules",
@@ -587,7 +600,7 @@ fn returning_to_the_app_drops_results_deleted_elsewhere() {
     let f = Fixture::new();
     f.write("keep.bin", "x");
     f.write("gone.bin", "x");
-    let engine = Engine::new(services(&f), modules::builtin());
+    let engine = Engine::new(services(&f), builtin(&f));
     let file = |name: &str| {
         let path = f.at(name);
         let identity = engine.services.entry(&path).unwrap().identity;

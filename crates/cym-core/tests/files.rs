@@ -170,7 +170,7 @@ fn walker_can_be_replaced_without_changing_modules() {
         walker: walker.clone(),
         ..base
     };
-    let engine = cym_core::Engine::new(s, cym_core::modules::builtin());
+    let engine = cym_core::Engine::new(s, builtin(&f));
     let report = engine.scan_report(&["node".into()], &f.context(), &ScanControl::default());
     assert_eq!(report.findings.len(), 1);
     assert_eq!(*walker.1.lock().unwrap(), vec![f.path()]);
