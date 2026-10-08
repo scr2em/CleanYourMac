@@ -2,6 +2,26 @@
 
 The Comfy design system lives in Figma: https://www.figma.com/design/LwVoq8tzYDa6dqRG6dm1m4
 
+It follows the app's Soft Studio identity:
+- **Type:** rounded type for titles, labels and figures.
+- **Shape:** 20-point cards and a 22-point page sheet floating on the sidebar colour; pill buttons and chips; icon tiles.
+- **Depth:** a two-layer soft shadow.
+
+## Fonts
+
+The app uses SF Pro Rounded for titles, labels and figures, and SF Pro for running text. Figma cannot render SF Pro in the plugin API, so the text styles use stand-ins:
+
+| Role | App | Figma |
+| --- | --- | --- |
+| Titles, labels, figures | SF Pro Rounded | Nunito |
+| Running text | SF Pro | Inter |
+
+The `Comfy · Typography` collection has a mode for each:
+- **Figma (Nunito + Inter):** the default.
+- **Apple (SF Pro Rounded + SF Pro):** switch to it on a Mac that has the fonts installed.
+
+Each text style's description names the SwiftUI font it stands for.
+
 The file is still named "Untitled" because the plugin API cannot rename documents. Rename it by hand.
 
 | Page | Node | Contents |
@@ -9,7 +29,7 @@ The file is still named "Untitled" because the plugin API cannot rename document
 | 00 · Cover | `0:1` (cover frame `33:641`) | Cover |
 | 01 · Foundations | `14:2` (frame `31:2`) | Light and dark palettes, TypeStyle, space, radius, elevation, layout, sizes, brand |
 | 02 · Components | `14:3` | Icons, BrandIcon, controls, finder pieces, sidebar, window chrome, Settings controls |
-| 03 · App screens | `14:4` | Build Artifacts finder (light and dark), Overview, Settings (General, Appearance) |
+| 03 · App screens | `14:4` | Dependencies tool page (light `79:864`, dark `79:1131`), Overview (`80:1426`), Settings (General, Appearance). Screens from before Soft Studio are kept under "Archive · before Soft Studio". |
 
 ## Components
 
@@ -20,10 +40,10 @@ Every component is built with auto layout, and every fill, stroke, radius, paddi
 | Icon/* | `20:5` (grid) | `Image(systemName:)` | One 16 pt component per SF Symbol, named after the symbol |
 | BrandIcon/* | `58:6` (section) | `BrandIcon`, `RowIcon.brand` | nextdotjs, swift, react, flutter, rust, python, gradle, pnpm, git, xcode; 24 pt with a `Space.xxs` inset |
 | Divider | `60:11` | `Divider()` | orientation |
-| Checkbox | `60:29` | `.toggleStyle(.checkbox)` | state off / on / mixed × disabled |
-| ActionButton | `60:45` | `ActionButton` | kind primary / secondary / destructive × state enabled / disabled; Label |
+| Checkbox | `60:29` | `SoftCheckboxStyle` | state off / on / mixed × disabled; 20 pt, 6 pt corners |
+| ActionButton | `60:45` | `ActionButton` (`ComfyButtonStyle`) | kind primary / secondary / destructive × state enabled / disabled; Label. Pills 34 pt high with the soft shadow |
 | StatusBadge | `60:57` | `StatusBadge` | kind info / warning; Title |
-| SearchField | `60:65` | `TextField(...).textFieldStyle(.roundedBorder)` | state placeholder / filled |
+| SearchField | `60:65` | `SearchField` | state placeholder / filled; a pill with a magnifier |
 | PopupButton | `60:78` | `Picker` (menu style) | size regular / small; Label, Value, Show label |
 | StatChip | `60:88` | `StatChip` | emphasized; Value, Label |
 | PageHeader | `61:17` | `PageHeader` | Title, Subtitle |
@@ -31,12 +51,20 @@ Every component is built with auto layout, and every fill, stroke, radius, paddi
 | MetricTile | `61:27` | `MetricTile` | Title, Value, Detail |
 | KeyValueRow | `61:34` | `KeyValueRow` | Label, Value |
 | EmptyState | `61:40` | `EmptyState` | Symbol (swap), Title, Message |
-| FindingRow | `62:77` | `FindingRow` + `RowIconView` ("ResultRow" in older docs) | state default / active / checked / checkedActive / ineligible; Icon (instance swap: SF Symbol or BrandIcon), Title, Subtitle, Value, Badge |
+| FindingRow | `62:77` | `FindingRow` + `IconTile` + `Pill` | state default / active / checked / checkedActive / ineligible; Icon (instance swap: SF Symbol or BrandIcon), Title, Subtitle, Value, Badge |
 | SelectionBar | `62:103` | `SelectionBar` | state empty / partial / all; Title, Count |
 | SelectionFooter | `62:119` | `SelectionFooter` | state empty / selected; Count, Summary |
 | ScopeRow | `62:123` | `ScopeView` | Symbol, Scope, Choose folders |
-| SidebarRow | `63:43` | sidebar `Label` | state default / selected (accent fill, onAccent content); Icon, Label |
-| SidebarSectionHeader | `63:44` | sidebar `Section` header | Title |
+| SidebarRow | `63:43` | `SidebarItem` | state default / selected (sidebarSelection fill; the icon tile turns accent); Icon, Label |
+| SidebarSectionHeader | `63:44` | `SidebarHeading` | Title |
+| Chip | `78:54` | `ChipLabel`, `ChoiceChip` | state default / active; Label, Value |
+| PillSegments | `78:55` | `PillSegments` | Two options; the selected one is a raised pill |
+| Pill | `78:66` | `Pill` | tone neutral / warning / accent |
+| IconTile | `78:67` | `IconTile` | Icon (instance swap) on a 34 pt tile |
+| BrandMark | `78:71` | `BrandMark` | The leaf mark and name |
+| Callout | `78:78` | `Callout` | Warning tint; expands to details |
+| SummaryLine | `78:85` | `SummaryLine` | Figures separated by dots |
+| ToolHeader | `78:97` | `ToolHeader` | Icon tile, title, description, Scan button |
 | TrafficLights | `63:50` | window controls | |
 | ToolbarButton | `63:54` | toolbar `Button` | Symbol |
 | ModuleRow | `63:60` | Overview module button | Symbol, Name, Summary, Count |
