@@ -89,6 +89,42 @@ pub struct XcodeModule {
     pub developer_dir: Option<String>,
 }
 impl XcodeModule {
+    /// Xcode, Simulator or a build using this data. Never overridden, so it is checked in
+    /// `preflight` only; offering an override that the same check then refuses misleads.
+    fn busy(&self, s: &Services, f: &Finding) -> Option<String> {
+        // Not knowing which apps run is treated as Xcode running, as everywhere else.
+        let apps = match s.apps.running() {
+            Ok(apps) => apps,
+            Err(e) => return Some(format!("Cannot check whether Xcode is running: {e}")),
+        };
+        let simulator = f
+            .resource
+            .path()
+            .is_some_and(|p| p.contains("/Library/Developer/CoreSimulator/"));
+        let open: Vec<String> = apps
+            .iter()
+            .filter(|a| {
+                a.bundle_id == XCODE || (simulator && a.bundle_id == "com.apple.iphonesimulator")
+            })
+            .map(|a| {
+                let name = Path::new(&a.path)
+                    .file_stem()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("Xcode");
+                format!("{name} (PID {})", a.pid)
+            })
+            .collect();
+        let building: Vec<String> = orphans::running_list(s, &["xcodebuild", "swift-frontend"])
+            .into_iter()
+            .chain(open)
+            .collect();
+        (!building.is_empty()).then(|| {
+            format!(
+                "Quit Xcode and Simulator and stop builds before removing their data:{}",
+                orphans::list(&building)
+            )
+        })
+    }
     fn home(&self) -> String {
         self.home.clone().unwrap_or_else(policy::home)
     }
@@ -360,49 +396,10 @@ impl ScanModule for XcodeModule {
         }
         Ok(())
     }
-    fn in_use(&self, s: &Services, f: &Finding, _: ActionKind) -> Option<String> {
-        // Not knowing which apps run is treated as Xcode running, as everywhere else.
-        let apps = match s.apps.running() {
-            Ok(apps) => apps,
-            Err(e) => return Some(format!("Cannot check whether Xcode is running: {e}")),
-        };
-        let simulator = f
-            .resource
-            .path()
-            .is_some_and(|p| p.contains("/Library/Developer/CoreSimulator/"));
-        let open: Vec<String> = apps
-            .iter()
-            .filter(|a| {
-                a.bundle_id == XCODE || (simulator && a.bundle_id == "com.apple.iphonesimulator")
-            })
-            .map(|a| {
-                let name = Path::new(&a.path)
-                    .file_stem()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("Xcode");
-                format!("{name} (PID {})", a.pid)
-            })
-            .collect();
-        let building: Vec<String> = orphans::running_list(s, &["xcodebuild", "swift-frontend"])
-            .into_iter()
-            .chain(open)
-            .collect();
-        (!building.is_empty()).then(|| {
-            format!(
-                "Quit Xcode and Simulator and stop builds before removing their data:{}",
-                orphans::list(&building)
-            )
-        })
-    }
-    fn preflight(
-        &self,
-        s: &Services,
-        f: &Finding,
-        kind: ActionKind,
-        _: &ScanControl,
-    ) -> Result<()> {
+
+    fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
         // Xcode, Simulator and builds use this data while they run; this is never overridden.
-        if let Some(reason) = self.in_use(s, f, kind) {
+        if let Some(reason) = self.busy(s, f) {
             return Err(reason);
         }
         let Some(path) = f.resource.path() else {
