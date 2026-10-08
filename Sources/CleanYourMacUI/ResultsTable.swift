@@ -142,6 +142,8 @@ private struct ResultCell: View {
                 value: Display.value(row),
                 badge: [row.badge ?? (row.blocked ? "Inspect" : row.risk.rawValue), Display.lastUsed(row.lastUsedAt)].compactMap { $0 }.joined(separator: " · "),
                 icon: Display.icon(moduleID: row.moduleID, path: row.path, brand: row.brand, symbol: symbol),
+                tone: Display.tone(row.moduleID),
+                badgeTone: Display.riskTone(row.risk, blocked: row.blocked),
                 active: store.inspectedID == row.id,
                 eligible: row.eligible && !store.isApplying,
                 disabledReason: store.notSelectable(row),

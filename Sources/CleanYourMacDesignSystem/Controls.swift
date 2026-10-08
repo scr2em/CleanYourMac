@@ -124,16 +124,23 @@ public struct SearchField: View {
 
 /// A tool's title, with its icon in a tinted tile and a one-line description.
 public struct ToolHeader<Trailing: View>: View {
-    private let title: String, subtitle: String, symbol: String
+    private let title: String, subtitle: String, symbol: String, tone: IconTone?
     private let trailing: Trailing
-    public init(_ title: String, subtitle: String, symbol: String, @ViewBuilder trailing: () -> Trailing) {
-        self.title = title; self.subtitle = subtitle; self.symbol = symbol; self.trailing = trailing()
+    public init(_ title: String, subtitle: String, symbol: String, tone: IconTone? = nil, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title; self.subtitle = subtitle; self.symbol = symbol; self.tone = tone; self.trailing = trailing()
     }
-    public var body: some View {
-        HStack(alignment: .center, spacing: Space.md) {
+    @ViewBuilder private var tile: some View {
+        if let tone {
+            ToolIcon(symbol, tone: tone, size: .header)
+        } else {
             Image(systemName: symbol).font(TypeStyle.title).foregroundStyle(Palette.accentSymbol)
                 .frame(width: Layout.toolIcon, height: Layout.toolIcon)
                 .background(Palette.selection, in: RoundedRectangle(cornerRadius: Layout.controlRadius))
+        }
+    }
+    public var body: some View {
+        HStack(alignment: .center, spacing: Space.md) {
+            tile
             VStack(alignment: .leading, spacing: Space.xxs) {
                 Text(title).font(TypeStyle.pageTitle).foregroundStyle(Palette.ink)
                 Text(subtitle).font(TypeStyle.secondary).foregroundStyle(Palette.muted).lineLimit(1).truncationMode(.tail).help(subtitle)
@@ -189,14 +196,23 @@ public struct SoftCheckboxStyle: ToggleStyle {
     }
 }
 
-/// A row's icon on a soft tinted tile, so symbols, logos and file icons sit alike.
+/// A row's icon on a soft tinted tile, so symbols, logos and file icons sit alike. With a
+/// tone, a symbol takes its tool's color on a faint wash of it; logos and file icons keep
+/// their own colors on the neutral tile.
 public struct IconTile: View {
-    let icon: RowIcon
-    public init(icon: RowIcon) { self.icon = icon }
+    let icon: RowIcon, tone: IconTone?
+    public init(icon: RowIcon, tone: IconTone? = nil) { self.icon = icon; self.tone = tone }
+    private var symbolTone: IconTone? {
+        switch icon {
+        case .symbol: return tone
+        default: return nil
+        }
+    }
     public var body: some View {
-        RowIconView(icon: icon)
+        RowIconView(icon: icon, tint: symbolTone?.color)
             .frame(width: Layout.rowTile, height: Layout.rowTile)
-            .background(Palette.track, in: RoundedRectangle(cornerRadius: Layout.tileRadius, style: .continuous))
+            .background(symbolTone.map { $0.color.opacity(0.14) } ?? Palette.track,
+                        in: RoundedRectangle(cornerRadius: Layout.tileRadius, style: .continuous))
     }
 }
 
@@ -212,26 +228,75 @@ public struct Pill: View {
     }
 }
 
+/// A tool's symbol in white on a colored tile, as in the sidebar and tool headers.
+public struct ToolIcon: View {
+    public enum Size: Sendable { case small, row, header }
+    private let symbol: String, tone: IconTone, size: Size
+    public init(_ symbol: String, tone: IconTone, size: Size = .row) {
+        self.symbol = symbol; self.tone = tone; self.size = size
+    }
+    private var side: CGFloat {
+        switch size {
+        case .small: return Layout.sidebarTile
+        case .row: return Layout.rowTile
+        case .header: return Layout.toolIcon
+        }
+    }
+    private var font: Font {
+        switch size {
+        case .small: return .system(size: 12, weight: .semibold, design: .rounded)
+        case .row: return TypeStyle.headline
+        case .header: return TypeStyle.title
+        }
+    }
+    private var radius: CGFloat {
+        switch size {
+        case .small: return Layout.smallRadius
+        case .row: return Layout.tileRadius
+        case .header: return Layout.controlRadius
+        }
+    }
+    public var body: some View {
+        Image(systemName: symbol).font(font).foregroundStyle(.white)
+            .frame(width: side, height: side)
+            .background(tone.color, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .accessibilityHidden(true)
+    }
+}
+
 /// One destination in the sidebar: an icon tile and a name on a pill that fills when selected.
+/// With a tone the tile keeps its color when selected, and the pill marks the selection.
 public struct SidebarItem: View {
-    private let title: String, symbol: String, selected: Bool
+    private let title: String, symbol: String, selected: Bool, tone: IconTone?
     private let action: () -> Void
     @State private var hovered = false
-    public init(_ title: String, symbol: String, selected: Bool, action: @escaping () -> Void) {
-        self.title = title; self.symbol = symbol; self.selected = selected; self.action = action
+    public init(_ title: String, symbol: String, selected: Bool, tone: IconTone? = nil, action: @escaping () -> Void) {
+        self.title = title; self.symbol = symbol; self.selected = selected; self.tone = tone; self.action = action
+    }
+    @ViewBuilder private var tile: some View {
+        if let tone {
+            ToolIcon(symbol, tone: tone, size: .small)
+        } else {
+            Image(systemName: symbol).font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(selected ? Palette.onAccent : Palette.accentSymbol)
+                .frame(width: Layout.sidebarTile, height: Layout.sidebarTile)
+                .background(selected ? Palette.accent : Palette.track, in: RoundedRectangle(cornerRadius: Layout.smallRadius, style: .continuous))
+        }
+    }
+    /// The row's pill: a soft wash of the tool's color when it has one.
+    private var highlight: Color {
+        if let tone { return tone.color.opacity(selected ? 0.16 : 0.08) }
+        return selected ? Palette.sidebarSelection : Palette.sidebarSelection.opacity(0.5)
     }
     public var body: some View {
         Button(action: action) {
             HStack(spacing: Space.sm + Space.xxs) {
-                Image(systemName: symbol).font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(selected ? Palette.onAccent : Palette.accentSymbol)
-                    .frame(width: Layout.sidebarTile, height: Layout.sidebarTile)
-                    .background(selected ? Palette.accent : Palette.track, in: RoundedRectangle(cornerRadius: Layout.smallRadius, style: .continuous))
+                tile
                 Text(title).font(TypeStyle.label).foregroundStyle(Palette.ink).lineLimit(1)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, Space.xs + Space.xxs).frame(height: Layout.sidebarRow)
-            .background(selected ? Palette.sidebarSelection : (hovered ? Palette.sidebarSelection.opacity(0.5) : .clear),
+            .background(selected || hovered ? highlight : .clear,
                         in: RoundedRectangle(cornerRadius: Layout.rowRadius, style: .continuous))
             .contentShape(Rectangle())
         }

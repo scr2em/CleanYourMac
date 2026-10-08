@@ -3,6 +3,7 @@ import CleanYourMacCore
 import CleanYourMacDesignSystem
 import Foundation
 import Observation
+import SwiftUI
 
 public struct ReviewDraft: Identifiable {
     public let id = UUID()
@@ -732,6 +733,43 @@ public final class AppStore {
 }
 
 public enum Display {
+    /// Each tool's tile color: neighbors in the sidebar differ, and related tools share a
+    /// family (Apple developer tools in blues, storage in warm tones).
+    public static func tone(_ moduleID: String) -> IconTone {
+        switch moduleID {
+        case "storage": .blue
+        case "large": .orange
+        case "duplicates": .purple
+        case "downloads": .green
+        case "installers": .teal
+        case "trash": .gray
+        case "node": .brown
+        case "artifacts": .indigo
+        case "worktrees": .orange
+        case "simulators": .cyan
+        case "xcode": .blue
+        case "caches": .yellow
+        case "toolchains": .purple
+        case "containers": .teal
+        case "ai": .pink
+        case "applications": .blue
+        case "leftovers": .gray
+        case "orphans": .red
+        case "activity": .indigo
+        case "gallery": .mint
+        default: .gray
+        }
+    }
+    /// A calm meaning color for a row's badge: green when the item rebuilds itself, amber
+    /// when it needs a look, red when removal is permanent, muted when it is blocked.
+    public static func riskTone(_ risk: Risk, blocked: Bool = false) -> Color? {
+        if blocked { return nil }
+        switch risk {
+        case .rebuild: return Palette.success
+        case .review: return Palette.warning
+        case .permanent: return Palette.destructive
+        }
+    }
     /// Modules whose findings are plain files, folders or apps, shown with their Finder icons.
     static let fileModules: Set<String> = ["large", "duplicates", "downloads", "trash", "storage", "applications", "leftovers"]
     /// A finding's leading icon: its ecosystem's logo, its Finder icon, or the module's symbol.

@@ -13,6 +13,7 @@ public enum Layout {
     public static let iconSmall: CGFloat = 12, iconMedium: CGFloat = 16, iconLarge: CGFloat = 32, rowIcon: CGFloat = 24, rowTile: CGFloat = 34, checkbox: CGFloat = 20
     public static let sidebarRow: CGFloat = 36, sidebarTile: CGFloat = 26, controlHeight: CGFloat = 34
     public static let chipHeight: CGFloat = 30, toolIcon: CGFloat = 44, calloutMaxHeight: CGFloat = 180
+    public static let menuMinWidth: CGFloat = 240, menuMaxWidth: CGFloat = 360, searchMinWidth: CGFloat = 180, searchMaxWidth: CGFloat = 340
     public static let scanOrb: CGFloat = 200, scanOrbCompact: CGFloat = 64, diskBar: CGFloat = 24
 }
 /// Soft Studio type: SF Pro Rounded for titles, labels and figures, which carry the app's
@@ -159,6 +160,31 @@ public enum ComfyTheme: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Tile colors that tell tools apart at a glance, independent of the accent theme. Each keeps
+/// a white symbol at 3.5:1 contrast or more in light and dark mode.
+public enum IconTone: CaseIterable, Sendable {
+    case blue, teal, green, yellow, orange, red, pink, purple, indigo, brown, gray, cyan, mint
+
+    var hex: (light: UInt32, dark: UInt32) {
+        switch self {
+        case .blue: (0x3F74B8, 0x4D82C4)
+        case .teal: (0x2E7F7A, 0x3A8C86)
+        case .green: (0x3F8650, 0x4A925B)
+        case .yellow: (0xA8740F, 0xB27E18)
+        case .orange: (0xC0612A, 0xC86B33)
+        case .red: (0xBC4237, 0xC44D42)
+        case .pink: (0xB54A75, 0xBF5480)
+        case .purple: (0x8255B0, 0x8B5FB9)
+        case .indigo: (0x5459B8, 0x5E63C2)
+        case .brown: (0x82603F, 0x8C6A49)
+        case .gray: (0x6E6A64, 0x78746E)
+        case .cyan: (0x2A7EA3, 0x3489AE)
+        case .mint: (0x2F806A, 0x3A8B74)
+        }
+    }
+    public var color: Color { Palette.adaptive(hex) }
+}
+
 public enum Palette {
     enum Token: Sendable {
         case canvas, sidebar, sidebarSelection, surface, elevated, border, borderStrong, track
@@ -194,9 +220,17 @@ public enum Palette {
     private static func color(_ token: Token) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             let pair = ComfyTheme.current.hex(token)
-            let hex = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? pair.dark : pair.light
-            return NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+            return Palette.srgb(appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? pair.dark : pair.light)
         })
+    }
+    /// A color with fixed light and dark values, for roles the theme does not change.
+    static func adaptive(_ pair: (light: UInt32, dark: UInt32)) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            Palette.srgb(appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? pair.dark : pair.light)
+        })
+    }
+    private static func srgb(_ hex: UInt32) -> NSColor {
+        NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
     }
 }
 extension ComfyTheme {
@@ -348,12 +382,16 @@ public struct MetricTile: View {
 public struct StatusBadge: View {
     private let title: String
     private let warning: Bool
-    public init(_ title: String, warning: Bool = false) { self.title = title; self.warning = warning }
+    private let tone: Color?
+    public init(_ title: String, warning: Bool = false) { self.title = title; self.warning = warning; self.tone = nil }
+    /// A badge in a meaning color, such as `Palette.success` for an item that rebuilds itself.
+    public init(_ title: String, tone: Color, warning: Bool = false) { self.title = title; self.warning = warning; self.tone = tone }
+    private var color: Color { tone ?? (warning ? Palette.warning : Palette.accentText) }
     public var body: some View {
         Label(title, systemImage: warning ? "exclamationmark.circle.fill" : "info.circle.fill")
-            .font(TypeStyle.captionEmphasis).foregroundStyle(warning ? Palette.warning : Palette.accentText)
+            .font(TypeStyle.captionEmphasis).foregroundStyle(color)
             .padding(.horizontal, Space.sm).padding(.vertical, Space.xxs + 1)
-            .background((warning ? Palette.warning : Palette.accentSymbol).opacity(0.12), in: Capsule())
+            .background((tone ?? (warning ? Palette.warning : Palette.accentSymbol)).opacity(0.12), in: Capsule())
     }
 }
 
@@ -371,13 +409,16 @@ public struct EmptyState: View {
 
 public struct FindingRow: View {
     private let title: String, subtitle: String, value: String, badge: String, icon: RowIcon
+    private let tone: IconTone?, badgeTone: Color?
     private let active: Bool, eligible: Bool
     private let disabledReason: String?
     @Binding private var checked: Bool
     private let inspect: () -> Void
     /// `disabledReason` explains on hover why the checkbox cannot be ticked.
-    public init(title: String, subtitle: String, value: String, badge: String, icon: RowIcon, active: Bool, eligible: Bool, disabledReason: String? = nil, checked: Binding<Bool>, inspect: @escaping () -> Void) {
+    /// `tone` colors a symbol icon with its tool's color; `badgeTone` gives the badge a meaning color.
+    public init(title: String, subtitle: String, value: String, badge: String, icon: RowIcon, tone: IconTone? = nil, badgeTone: Color? = nil, active: Bool, eligible: Bool, disabledReason: String? = nil, checked: Binding<Bool>, inspect: @escaping () -> Void) {
         self.title = title; self.subtitle = subtitle; self.value = value; self.badge = badge; self.icon = icon
+        self.tone = tone; self.badgeTone = badgeTone
         self.active = active; self.eligible = eligible; self.disabledReason = disabledReason; _checked = checked; self.inspect = inspect
     }
     public init(title: String, subtitle: String, value: String, badge: String, symbol: String, active: Bool, eligible: Bool, checked: Binding<Bool>, inspect: @escaping () -> Void) {
@@ -389,7 +430,7 @@ public struct FindingRow: View {
                 .disabled(!eligible, because: disabledReason)
             Button(action: inspect) {
                 HStack(spacing: Space.md) {
-                    IconTile(icon: icon)
+                    IconTile(icon: icon, tone: tone)
                     VStack(alignment: .leading, spacing: Space.xxs) {
                         Text(title).font(TypeStyle.rowTitle).foregroundStyle(Palette.ink).lineLimit(1)
                         Text(subtitle).font(TypeStyle.caption).foregroundStyle(Palette.muted).lineLimit(1).truncationMode(.middle)
@@ -397,7 +438,7 @@ public struct FindingRow: View {
                     Spacer(minLength: Space.md)
                     VStack(alignment: .trailing, spacing: Space.xs) {
                         Text(value).font(TypeStyle.numeric).foregroundStyle(Palette.ink)
-                        if !badge.isEmpty { Pill(badge) }
+                        if !badge.isEmpty { Pill(badge, tone: badgeTone) }
                     }
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityLabel("Inspect \(title), \(value), \(badge)")
@@ -410,13 +451,13 @@ public struct FindingRow: View {
 
 /// A row's leading icon in a fixed square, so titles align whatever the icon kind.
 public struct RowIconView: View {
-    let icon: RowIcon
-    public init(icon: RowIcon) { self.icon = icon }
+    let icon: RowIcon, tint: Color?
+    public init(icon: RowIcon, tint: Color? = nil) { self.icon = icon; self.tint = tint }
     public var body: some View {
         Group {
             switch icon {
             case .symbol(let name):
-                Image(systemName: name).font(TypeStyle.headline).foregroundStyle(Palette.accentSymbol)
+                Image(systemName: name).font(TypeStyle.headline).foregroundStyle(tint ?? Palette.accentSymbol)
             case .brand(let slug):
                 if let brand = BrandIcon(slug) {
                     brand.padding(Space.xxs)
@@ -565,10 +606,13 @@ public struct ComponentGallery: View {
                 HStack(alignment: .top, spacing: Space.lg) {
                     VStack(alignment: .leading, spacing: Space.xxs) {
                         BrandMark().padding(.bottom, Space.sm)
-                        SidebarItem("Overview", symbol: "square.grid.2x2", selected: true) {}
+                        SidebarItem("Overview", symbol: "square.grid.2x2", selected: true, tone: .gray) {}
                         SidebarHeading("Developer")
-                        SidebarItem("Dependencies", symbol: "shippingbox", selected: false) {}
-                        SidebarItem("Build Artifacts", symbol: "hammer", selected: false) {}
+                        SidebarItem("Dependencies", symbol: "shippingbox", selected: false, tone: .brown) {}
+                        SidebarItem("Build Artifacts", symbol: "hammer", selected: false, tone: .indigo) {}
+                        HStack(spacing: Space.xs) {
+                            ForEach(IconTone.allCases, id: \.self) { tone in ToolIcon("circle.fill", tone: tone, size: .small) }
+                        }.padding(.top, Space.sm)
                     }
                     .padding(Space.sm).frame(width: Layout.sidebar).background(Palette.sidebar, in: RoundedRectangle(cornerRadius: Layout.panelRadius))
                     Callout("2 scan warnings · coverage may be incomplete", symbol: "exclamationmark.triangle.fill", tone: Palette.warning) {
@@ -601,8 +645,9 @@ public struct ComponentGallery: View {
                 Panel { StorageBar("Developer data", value: "12.4 GB", fraction: 0.6) }
                 Panel {
                     VStack(spacing: Space.xs) {
-                        FindingRow(title: "frontend", subtitle: "~/Projects/frontend/node_modules", value: "1.8 GB", badge: "Rebuild required", icon: .brand("pnpm"), active: false, eligible: true, checked: $checked) {}
-                        FindingRow(title: "node", subtitle: "~/Projects/frontend", value: "53% CPU · 240 MB", badge: "Review", symbol: "cpu", active: true, eligible: true, checked: $checked) {}
+                        FindingRow(title: "frontend", subtitle: "~/Projects/frontend/node_modules", value: "1.8 GB", badge: "Rebuild required", icon: .brand("pnpm"), badgeTone: Palette.success, active: false, eligible: true, checked: $checked) {}
+                        FindingRow(title: "Caches", subtitle: "~/Library/Caches/com.example.app", value: "640 MB", badge: "Review", icon: .symbol("archivebox"), tone: .yellow, badgeTone: Palette.warning, active: false, eligible: true, checked: $checked) {}
+                        FindingRow(title: "node", subtitle: "~/Projects/frontend", value: "53% CPU · 240 MB", badge: "Permanent", icon: .symbol("cpu"), tone: .red, badgeTone: Palette.destructive, active: true, eligible: true, checked: $checked) {}
                         FindingRow(title: "Main worktree", subtitle: "~/Projects/frontend", value: "2.1 GB", badge: "Protected", icon: .brand("git"), active: false, eligible: false, checked: .constant(false)) {}
                     }
                 }

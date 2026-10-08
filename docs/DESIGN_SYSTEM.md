@@ -6,7 +6,7 @@ The app uses a self-contained SwiftUI design system so its visual language remai
 
 ## Visual direction
 
-Use a calm, native macOS utility interface with clear typography, compact data tables, a familiar sidebar, and a persistent inspector. Give storage amounts, item ownership, and action consequences more prominence than decorative graphics. Use the system font, SF Symbols, native controls, and platform-aware surfaces. One restrained accent identifies primary actions and selection; warning and destructive colors have explicit semantic roles.
+Use a calm, native macOS utility interface with clear typography, compact data tables, a familiar sidebar, and a persistent inspector. Give storage amounts, item ownership, and action consequences more prominence than decorative graphics. Use the system font, SF Symbols, native controls, and platform-aware surfaces. One restrained accent identifies primary actions and selection; warning and destructive colors have explicit semantic roles. Color otherwise carries meaning only: each tool has its own tile color, and badges use calm meaning colors.
 
 Our interface and assets are independently designed. MacPaw's UI, artwork, components, and binaries are not inputs or dependencies. Apple platform guidance is a reference for familiar desktop behavior. [Apple macOS design guidance](https://developer.apple.com/design/human-interface-guidelines/designing-for-macos)
 
@@ -34,6 +34,19 @@ The implementation uses system colors and fonts, spacing 2/4/8/12/16/24/32, a 10
 | Motion | immediate, feedback, stateChange, panel | Immediate input feedback; proposed 120 ms feedback and 180 ms state changes. Use native panel transitions and centrally specified restrained springs only where movement aids orientation. Reduced motion replaces movement with a short fade or immediate change. |
 
 Keep storage units, date formatting, path shortening, and pluralization in shared presentation formatters. Display a consistent storage unit convention. Paths may shorten visually in the middle, while accessibility, copy, and reveal actions retain the full path. Separate logical size, allocated size, bytes moved to Trash, and measured free-space change.
+
+## Color for tools and states
+
+Surfaces, text and the accent theme stay calm; color appears only where it tells the user something.
+
+| Where | Rule | Implementation |
+| --- | --- | --- |
+| Tool icons | Each tool keeps one tile color everywhere it appears: sidebar, tool header, Overview cards, recommended fixes and Settings. A white symbol on the tile keeps 3.5:1 contrast or more in light and dark mode. Neighbors in the sidebar differ; related tools share a family (Xcode, Simulators and Containers in blues and teals). | `IconTone` (13 tones with fixed light and dark values, independent of the accent theme), `ToolIcon`, `Display.tone(moduleID)` |
+| Sidebar selection | The selected row's pill is a soft wash (16%) of its tool's color; hover is 8%. | `SidebarItem(tone:)` |
+| Row icons | A symbol takes its tool's color on a faint wash (14%). Brand logos and file icons keep their own colors on the neutral tile. | `IconTile(icon:tone:)`, `RowIconView(tint:)` |
+| Badges | Green when the item rebuilds itself, amber when it needs a look, red when removal is permanent, muted when it is blocked. Color always comes with the badge text. | `Display.riskTone`, `Pill(tone:)`, `StatusBadge(_:tone:)` |
+
+Never color large surfaces, body text or numbers by tool, and never add a tone that does not mean something.
 
 ## Component catalog
 

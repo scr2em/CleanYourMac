@@ -82,7 +82,7 @@ private struct SidebarView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xxs) {
                 BrandMark().padding(.horizontal, Space.sm).padding(.top, Space.xs).padding(.bottom, Space.md)
-                item("Overview", symbol: "square.grid.2x2", id: "overview")
+                item("Overview", symbol: "square.grid.2x2", id: "overview", tone: .gray)
                 ForEach(Category.allCases, id: \.self) { category in
                     let modules = store.enabledModules.filter { $0.category == category }
                     if !modules.isEmpty {
@@ -99,8 +99,8 @@ private struct SidebarView: View {
         .background(Palette.sidebar)
         .navigationTitle("CleanYourMac")
     }
-    private func item(_ title: String, symbol: String, id: String) -> some View {
-        SidebarItem(title, symbol: symbol, selected: (store.selectedModuleID ?? "overview") == id) { store.selectedModuleID = id }
+    private func item(_ title: String, symbol: String, id: String, tone: IconTone? = nil) -> some View {
+        SidebarItem(title, symbol: symbol, selected: (store.selectedModuleID ?? "overview") == id, tone: tone ?? Display.tone(id)) { store.selectedModuleID = id }
     }
 }
 
@@ -283,12 +283,12 @@ private struct RecommendationCard: View {
     var body: some View {
         Panel {
             HStack(alignment: .top, spacing: Space.lg) {
-                IconTile(icon: Display.icon(moduleID: fix.moduleID, path: nil, brand: fix.brand, symbol: store.modules.first { $0.id == fix.moduleID }?.symbol ?? "sparkles"))
+                IconTile(icon: Display.icon(moduleID: fix.moduleID, path: nil, brand: fix.brand, symbol: store.modules.first { $0.id == fix.moduleID }?.symbol ?? "sparkles"), tone: Display.tone(fix.moduleID))
                 VStack(alignment: .leading, spacing: Space.xs) {
                     Text(fix.title).font(TypeStyle.sectionTitle)
                     Text(fix.detail).font(TypeStyle.secondary).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: Space.sm) {
-                        StatusBadge(fix.risk.rawValue, warning: fix.risk == .permanent)
+                        StatusBadge(fix.risk.rawValue, tone: Display.riskTone(fix.risk) ?? Palette.muted, warning: fix.risk == .permanent)
                         Text(Display.items(fix.count)).font(TypeStyle.caption).foregroundStyle(Palette.muted)
                         TextAction("Show items") { store.selectedModuleID = fix.moduleID }
                     }
@@ -324,7 +324,7 @@ private struct AllToolsView: View {
                         Button { store.selectedModuleID = module.id; store.search = "" } label: {
                             Panel {
                                 HStack(spacing: Space.lg) {
-                                    Image(systemName: module.symbol).foregroundStyle(Palette.accentSymbol)
+                                    ToolIcon(module.symbol, tone: Display.tone(module.id))
                                     VStack(alignment: .leading, spacing: Space.xs) {
                                         Text(module.name).font(TypeStyle.sectionTitle)
                                         Text(module.summary).font(TypeStyle.secondary).foregroundStyle(Palette.muted)
@@ -381,7 +381,7 @@ private struct ScopeChip: View {
                     if store.chooseFolders(), store.selectedModuleID != nil, store.selectedModuleID != "overview" { store.scan() }
                 }
             }
-            .padding(Space.xs).frame(minWidth: 240, maxWidth: 360).background(Palette.elevated)
+            .padding(Space.xs).frame(minWidth: Layout.menuMinWidth, maxWidth: Layout.menuMaxWidth).background(Palette.elevated)
         }
     }
 }
@@ -391,7 +391,7 @@ private struct FinderView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: Space.md) {
-                ToolHeader(store.currentModule?.name ?? "Findings", subtitle: store.currentModule?.summary ?? "", symbol: store.currentModule?.symbol ?? "tray") {
+                ToolHeader(store.currentModule?.name ?? "Findings", subtitle: store.currentModule?.summary ?? "", symbol: store.currentModule?.symbol ?? "tray", tone: store.currentModule.map { Display.tone($0.id) }) {
                     if store.isScanning {
                         HStack(spacing: Space.sm) {
                             ProgressView().controlSize(.small)
@@ -411,7 +411,7 @@ private struct FinderView: View {
                     SearchSummary(store: store)
                 }
                 HStack(spacing: Space.sm) {
-                    SearchField("Search by name or path", text: $store.search).frame(minWidth: 180, maxWidth: 340)
+                    SearchField("Search by name or path", text: $store.search).frame(minWidth: Layout.searchMinWidth, maxWidth: Layout.searchMaxWidth)
                     // Processes have no file dates or disk size; every other tool can be filtered.
                     if store.selectedModuleID == "ai" {
                         ChoiceChip("Tier", selection: $store.tierFilter, neutral: .all, options: TierFilter.allCases.map { ChoiceOption($0, $0.rawValue) })
@@ -606,8 +606,8 @@ private struct InspectorView: View {
                 VStack(alignment: .leading, spacing: Space.xl) {
                     PageHeader(finding.title, subtitle: finding.moduleID == "orphans" ? "Suspected orphan process" : "Item details")
                     HStack(spacing: Space.sm) {
-                        IconTile(icon: Display.icon(moduleID: finding.moduleID, path: finding.resource.path, brand: finding.brand, symbol: store.enabledModules.first { $0.id == finding.moduleID }?.symbol ?? "doc"))
-                        StatusBadge(finding.risk.rawValue, warning: finding.risk == .permanent)
+                        IconTile(icon: Display.icon(moduleID: finding.moduleID, path: finding.resource.path, brand: finding.brand, symbol: store.enabledModules.first { $0.id == finding.moduleID }?.symbol ?? "doc"), tone: Display.tone(finding.moduleID))
+                        StatusBadge(finding.risk.rawValue, tone: Display.riskTone(finding.risk) ?? Palette.muted, warning: finding.risk == .permanent)
                         if let brand = finding.brand, let name = BrandCatalog.name(brand) {
                             Text(name).font(TypeStyle.caption).foregroundStyle(Palette.muted)
                         }
@@ -813,7 +813,7 @@ public struct PreferencesView: View {
                                     Text(module.summary).font(TypeStyle.caption).foregroundStyle(Palette.muted)
                                 }
                             } icon: {
-                                Image(systemName: module.symbol).foregroundStyle(Palette.accentSymbol)
+                                ToolIcon(module.symbol, tone: Display.tone(module.id), size: .small)
                             }
                         }
                     }
