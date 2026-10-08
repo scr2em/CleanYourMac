@@ -136,14 +136,15 @@ private struct ResultCell: View {
     let focus: @MainActor () -> Void
     var body: some View {
         if let row = store.row(at: index) {
+            let shown = Display.badge(risk: row.risk, badge: row.badge, blocked: row.blocked, confirm: row.acknowledgeable)
             FindingRow(
                 title: row.title,
                 subtitle: (row.subtitle as NSString).abbreviatingWithTildeInPath,
                 value: Display.value(row),
-                badge: [row.badge ?? (row.blocked ? "Inspect" : row.risk.rawValue), Display.lastUsed(row.lastUsedAt)].compactMap { $0 }.joined(separator: " · "),
+                badge: [shown.text, Display.lastUsed(row.lastUsedAt)].compactMap { $0 }.joined(separator: " · "),
                 icon: Display.icon(moduleID: row.moduleID, path: row.path, brand: row.brand, symbol: symbol),
                 tone: Display.tone(row.moduleID),
-                badgeTone: Display.riskTone(row.risk, blocked: row.blocked),
+                badgeTone: shown.tone,
                 active: store.inspectedID == row.id,
                 eligible: row.eligible && !store.isApplying,
                 disabledReason: store.notSelectable(row),

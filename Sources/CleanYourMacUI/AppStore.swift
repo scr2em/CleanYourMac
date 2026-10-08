@@ -215,7 +215,7 @@ public final class AppStore {
         let initial = core.projectRoots()
         roots = core.normalizeRoots(defaults.stringArray(forKey: "scanRoots") ?? (initial.isEmpty ? [NSHomeDirectory() + "/Downloads"] : initial))
         exclusions = defaults.stringArray(forKey: "excludedPaths") ?? []
-        ignoredNames = defaults.stringArray(forKey: "ignoredProcessNames") ?? ["ssh-agent", "gpg-agent", "keyboxd", "dirmngr"]
+        ignoredNames = defaults.stringArray(forKey: "ignoredProcessNames") ?? ScanContext.defaultIgnoredProcessNames
         disabledModules = defaults.stringArray(forKey: "disabledModules") ?? []
         menuBarEnabled = !demo && defaults.bool(forKey: "menuBarEnabled")
         theme = defaults.string(forKey: "theme").flatMap(ComfyTheme.init(rawValue:)) ?? ComfyTheme.standard
@@ -289,7 +289,7 @@ public final class AppStore {
     public func notSelectable(_ row: CleanYourMacCore.ResultRow) -> String? {
         if let busy = whileApplying { return busy }
         guard !row.eligible else { return nil }
-        if row.acknowledgeable { return "Protected. Open it in the inspector to move it to Trash anyway." }
+        if row.acknowledgeable { return "Removed only after you confirm what is lost. Open it in the inspector." }
         return row.blockedReason ?? "Listed for information; nothing can be done with it here."
     }
     /// Repeats an action on items that were in use, after the user chose to force it.
@@ -761,6 +761,24 @@ public enum Display {
         case "gallery": .mint
         default: .gray
         }
+    }
+    /// AI Tools' tiers, shown as a row's badge in place of its risk.
+    static let tiers: Set<String> = ["Safe", "Review", "Caution"]
+    /// A finding's badge text and color, decided once for the list and the inspector. A
+    /// blocked item reads "Inspect" in a muted color, even when it has a tier: "Safe" on an
+    /// item that cannot be removed misleads. An item removed only after the user confirms
+    /// what is lost (a device backup, a transcript, an archive) reads "Confirm first", or its
+    /// own badge, in red, as does a Caution tier.
+    public static func badge(risk: Risk, badge: String?, blocked: Bool, confirm: Bool) -> (text: String, tone: Color?) {
+        if blocked {
+            let own = badge.flatMap { tiers.contains($0) ? nil : $0 }
+            return (own ?? "Inspect", nil)
+        }
+        if confirm {
+            return (badge ?? "Confirm first", Palette.destructive)
+        }
+        let tone: Color? = badge == "Caution" ? Palette.destructive : riskTone(risk)
+        return (badge ?? risk.rawValue, tone)
     }
     /// A calm meaning color for a row's badge: green when the item rebuilds itself, amber
     /// when it needs a look, red when removal is permanent, muted when it is blocked.

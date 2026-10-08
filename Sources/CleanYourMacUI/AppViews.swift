@@ -607,7 +607,9 @@ private struct InspectorView: View {
                     PageHeader(finding.title, subtitle: finding.moduleID == "orphans" ? "Suspected orphan process" : "Item details")
                     HStack(spacing: Space.sm) {
                         IconTile(icon: Display.icon(moduleID: finding.moduleID, path: finding.resource.path, brand: finding.brand, symbol: store.enabledModules.first { $0.id == finding.moduleID }?.symbol ?? "doc"), tone: Display.tone(finding.moduleID))
-                        StatusBadge(finding.risk.rawValue, tone: Display.riskTone(finding.risk) ?? Palette.muted, warning: finding.risk == .permanent)
+                        let confirm = finding.blockedReason == nil && finding.acknowledgement != nil
+                        let shown = Display.badge(risk: finding.risk, badge: finding.badge, blocked: finding.blockedReason != nil, confirm: confirm)
+                        StatusBadge(shown.text, tone: shown.tone ?? Palette.muted, warning: finding.risk == .permanent || confirm)
                         if let brand = finding.brand, let name = BrandCatalog.name(brand) {
                             Text(name).font(TypeStyle.caption).foregroundStyle(Palette.muted)
                         }
@@ -617,7 +619,7 @@ private struct InspectorView: View {
                     if finding.blockedReason == nil, let loss = finding.acknowledgement, let kind = finding.acknowledgedActions?.first {
                         Panel {
                             VStack(alignment: .leading, spacing: Space.md) {
-                                Label("Protected", systemImage: "lock.shield").font(TypeStyle.sectionTitle).foregroundStyle(Palette.warning)
+                                Label("Confirm what is lost", systemImage: "lock.shield").font(TypeStyle.sectionTitle).foregroundStyle(Palette.warning)
                                 Text(loss).font(TypeStyle.secondary).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
                                 ActionButton("\(kind.label) Anyway…", kind: .destructive, disabled: store.isApplying || store.isScanning || store.demo, reason: store.reason(store.inDemo, store.whileApplying, store.whileScanning)) { confirming = kind }
                             }

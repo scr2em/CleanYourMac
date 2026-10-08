@@ -196,7 +196,9 @@ public struct ScanContext: Codable, Sendable {
     public let exclusions: [String]
     public let ignoredProcessNames: [String]
     public let limitToRoots: Bool
-    public init(roots: [String], exclusions: [String] = [], ignoredProcessNames: [String] = ["ssh-agent", "gpg-agent", "keyboxd", "dirmngr"], limitToRoots: Bool = false) {
+    /// The core's `DEFAULT_IGNORED_PROCESSES`: security agents meant to outlive what started them.
+    public static let defaultIgnoredProcessNames = ["ssh-agent", "gpg-agent", "keyboxd", "dirmngr"]
+    public init(roots: [String], exclusions: [String] = [], ignoredProcessNames: [String] = ScanContext.defaultIgnoredProcessNames, limitToRoots: Bool = false) {
         self.roots = roots; self.exclusions = exclusions; self.ignoredProcessNames = ignoredProcessNames; self.limitToRoots = limitToRoots
     }
 }
