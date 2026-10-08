@@ -496,3 +496,82 @@ fn fast_path_rules_match_the_reference_rules() {
         "{outcomes:?}"
     );
 }
+
+#[test]
+fn checking_only_new_components_matches_the_full_check() {
+    use cym_core::policy::{home, Scope};
+    let names = [
+        "src",
+        ".git",
+        ".GIT",
+        ".Git",
+        "CVS",
+        "cvs",
+        "Library",
+        "library",
+        "Keychains",
+        "keychains",
+        "Mobile Documents",
+        "CloudStorage",
+        ".env",
+        ".env.local",
+        ".envrc",
+        "repo.fossil",
+        "x.MTN",
+        ".ssh",
+        "Projects",
+        "_darcs",
+        "_MTN",
+        "$tf",
+        "{arch}",
+        "BitKeeper",
+        "SCCS",
+        "RCS",
+        "node_modules",
+        "keep",
+        "Keep",
+        "System",
+        "tmp",
+        "a",
+    ];
+    let user = "/Users/me".to_owned();
+    for root in [user.clone(), home(), "/".to_owned()] {
+        let base = root.trim_end_matches('/');
+        let context = ScanContext {
+            exclusions: vec![
+                format!("{base}/Projects/keep"),
+                format!("{user}/a"),
+                "/elsewhere".into(),
+            ],
+            ..Default::default()
+        };
+        let scope = Scope::new(&context);
+        let below = scope.below(&root);
+        let full = |path: &str| scope.excludes(path) || scope.system_excluded(path);
+        let mut checked = 0;
+        for a in names {
+            for b in names {
+                for c in names {
+                    let parts = [a, b, c];
+                    for depth in 1..=3 {
+                        // A walk reaches an entry only when every folder above it passed.
+                        let reached =
+                            (1..depth).all(|d| !full(&format!("{base}/{}", parts[..d].join("/"))));
+                        if !reached {
+                            continue;
+                        }
+                        let path = format!("{base}/{}", parts[..depth].join("/"));
+                        let parent = path.rsplit('/').nth(1).unwrap_or_default();
+                        assert_eq!(
+                            below.excludes_entry(&path, parts[depth - 1], parent),
+                            full(&path),
+                            "{path}"
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert!(checked > 10_000, "{checked}");
+    }
+}

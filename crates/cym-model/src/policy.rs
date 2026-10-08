@@ -134,16 +134,34 @@ fn sensitive_name(path: &str) -> bool {
     path.split('/')
         .filter(|c| !c.is_empty() && *c != ".")
         .any(|c| {
-            let named = |n: &str| c.eq_ignore_ascii_case(n);
-            let hit = version_control(c).is_some()
-                || named(".env")
-                || c.get(..5).is_some_and(|p| p.eq_ignore_ascii_case(".env."))
-                || CREDENTIALS.iter().any(|n| named(n))
-                || (previous.eq_ignore_ascii_case("Library")
-                    && (named("Keychains") || named("Mobile Documents") || named("CloudStorage")));
+            let hit = sensitive_part(c, previous);
             previous = c;
             hit
         })
+}
+/// One component of `sensitive_name`, with the component before it.
+fn sensitive_part(c: &str, previous: &str) -> bool {
+    let named = |n: &str| c.eq_ignore_ascii_case(n);
+    version_control(c).is_some()
+        || named(".env")
+        || c.get(..5).is_some_and(|p| p.eq_ignore_ascii_case(".env."))
+        || CREDENTIALS.iter().any(|n| named(n))
+        || (previous.eq_ignore_ascii_case("Library")
+            && (named("Keychains") || named("Mobile Documents") || named("CloudStorage")))
+}
+/// `sensitive_name` for the last component of a path whose earlier components were already
+/// checked, such as an entry a walk reached: the same answer, without re-reading the path.
+pub fn sensitive_component(name: &str, parent: &str) -> bool {
+    // Every sensitive name starts with one of these bytes; any other name can only be a
+    // repository file (`*.fossil`, `*.mtn`). Most names are settled by this one comparison.
+    match name.as_bytes().first() {
+        Some(
+            b'.' | b'_' | b'{' | b'$' | b'C' | b'R' | b'S' | b'B' | b'K' | b'M' | b'c' | b'k'
+            | b'm',
+        ) => sensitive_part(name, parent),
+        Some(_) => repository_file(name).is_some(),
+        None => false,
+    }
 }
 
 /// The exclusion and system-location rules for one scan, prepared once so each visited
@@ -177,6 +195,29 @@ impl Scope {
     }
     pub fn system_excluded(&self, path: &str) -> bool {
         Self::inside(path, &self.system) || sensitive_name(path)
+    }
+    /// The rules that can still apply below `root`, a folder whose own path passed them:
+    /// only exclusions and system locations inside it. Use with `excludes_entry`.
+    pub fn below(&self, root: &str) -> Scope {
+        let inside = |roots: &[String]| {
+            roots
+                .iter()
+                .filter(|r| contains_folded(r, root))
+                .cloned()
+                .collect()
+        };
+        Scope {
+            exclusions: inside(&self.exclusions),
+            system: inside(&self.system),
+        }
+    }
+    /// For an entry a walk reached below the root `below` was prepared for, every folder
+    /// between them having passed: the same answer as `excludes(path) ||
+    /// system_excluded(path)`, checking only what the entry adds.
+    pub fn excludes_entry(&self, path: &str, name: &str, parent: &str) -> bool {
+        (!self.exclusions.is_empty() && Self::inside(path, &self.exclusions))
+            || (!self.system.is_empty() && Self::inside(path, &self.system))
+            || sensitive_component(name, parent)
     }
 }
 pub fn protected(path: &str) -> bool {
@@ -344,16 +385,18 @@ const REPOSITORY_FILES: &[(&str, &str)] = &[("Fossil", ".fossil"), ("Monotone", 
 /// in any letter case, as on a case-insensitive volume; plain names such as `CVS` must match
 /// exactly, so a user's own `cvs` folder is not mistaken for one.
 pub fn version_control(name: &str) -> Option<&'static str> {
-    checkout_marker(name).or_else(|| {
-        REPOSITORY_FILES
-            .iter()
-            .find(|(_, ext)| {
-                name.len() > ext.len()
-                    && name.is_char_boundary(name.len() - ext.len())
-                    && name[name.len() - ext.len()..].eq_ignore_ascii_case(ext)
-            })
-            .map(|(system, _)| *system)
-    })
+    checkout_marker(name).or_else(|| repository_file(name))
+}
+/// The system whose single-file repository `name` is, by extension.
+fn repository_file(name: &str) -> Option<&'static str> {
+    REPOSITORY_FILES
+        .iter()
+        .find(|(_, ext)| {
+            name.len() > ext.len()
+                && name.is_char_boundary(name.len() - ext.len())
+                && name[name.len() - ext.len()..].eq_ignore_ascii_case(ext)
+        })
+        .map(|(system, _)| *system)
 }
 /// The version-control system whose checkout marker one path component names.
 pub fn checkout_marker(name: &str) -> Option<&'static str> {

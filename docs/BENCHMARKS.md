@@ -117,3 +117,27 @@ Linux VM, 4 vCPUs. The benchmark fixture copied to a non-hidden path (152,716 en
 - **CleanYourMac does more in that time.** The Dependencies scan also reports Python environments and other ecosystems (303 findings in all), with project, package manager and last-used details.
 - **Size totals differ by design.** npkill's `du` also counts the blocks of folders themselves: 4 KB per folder on ext4, 504 KB per `node_modules` here, 100,800 KB in all. CleanYourMac counts the blocks of files, which agree exactly with `du`. On APFS folders take almost no blocks, so on a Mac the totals should nearly match.
 - **This is the Linux harness.** On macOS npkill also uses `du`, and CleanYourMac lists folders with `getattrlistbulk`. Run the script on a Mac to confirm the numbers there.
+
+## Profiling the walk
+
+The question was whether rewriting part of the core in C would make scans faster. `callgrind` (valgrind) on `cym scan` showed it would not. Warm scans spend 45–65% of their CPU time in the macOS kernel (listing folders, reading metadata), which C cannot change, and Rust and C compile through the same LLVM backend. The profile showed something else: a third of the instructions went to re-checking every visited path in full against the credential, version-control and system rules (`policy::sensitive_name`, `Scope::inside`), although a walk only enters folders that already passed them.
+
+Two changes, both returning exactly the same decisions:
+
+- **Only what an entry adds is checked.** `Scope::below(root)` keeps only the exclusions and system locations inside the walked root (usually none), and `policy::sensitive_component` checks the entry's own name with its parent. One byte settles most names: every sensitive name starts with `.`, `_`, `{`, `$` or one of a few letters, or ends in a repository-file extension. `checking_only_new_components_matches_the_full_check` compares it with the full check on every reachable path of up to three components built from 32 tricky names, under a user folder, the home folder and `/`.
+- **Rule matching settles most folders without allocating.** `match_rules` compares the folder's name with each rule's last name before splitting any path or pattern.
+
+Linux VM, warm cache, `cym scan <tool>` on the benchmark fixture, median of seven runs. Every tool's findings (IDs, sizes and blocked reasons) were identical before and after.
+
+| Tool | Before | After | Wall time | CPU time in the app |
+| --- | ---: | ---: | --- | --- |
+| Large Files | 832 ms | 616 ms | −26% | −59% |
+| Git Worktrees | 323 ms | 232 ms | −28% | −36% |
+| Build Artifacts | 305 ms | 226 ms | −26% | −38% |
+| Dependencies | 443 ms | 366 ms | −17% | −25% |
+| Exact Duplicates | 377 ms | 327 ms | −13% | −19% |
+| Storage Explorer | 188 ms | 182 ms | −3% | −3% |
+
+Build Artifacts' instruction count halved (995 M to 494 M before the second change). Storage Explorer lists one level and gains little.
+
+Still open: Build Artifacts searches each matched folder for shipped builds (`shipped_outputs`, up to 20,000 entries) before the sizer walks it again, about 86 ms of its 271 ms here. Folding that search into the size walk, or limiting it to rules whose output can hold a shipped build, would change which folders need confirmation, so it is a decision rather than a refactor.

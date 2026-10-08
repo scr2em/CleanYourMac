@@ -246,6 +246,8 @@ impl Services {
             };
             let mut limited = false;
             let mut mounts = vec![];
+            // The root passed every rule above, so entries need only what they add.
+            let below = scope.below(&root);
             self.walker.walk(
                 &root,
                 control,
@@ -264,11 +266,8 @@ impl Services {
                         limited = true;
                         return Ok(Visit::Stop);
                     }
-                    if e.symlink
-                        || e.dataless
-                        || scope.excludes(e.path())
-                        || scope.system_excluded(e.path())
-                    {
+                    let parent = e.path().rsplit('/').nth(1).unwrap_or_default();
+                    if e.symlink || e.dataless || below.excludes_entry(e.path(), e.name(), parent) {
                         return Ok(Visit::Skip);
                     }
                     // Another drive, disk image or network share mounted inside the root is

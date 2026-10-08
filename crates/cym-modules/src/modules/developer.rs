@@ -589,6 +589,16 @@ pub fn match_rules<'a>(
     s: &Services,
     path: &str,
 ) -> Option<ArtifactMatch<'a>> {
+    // Nearly every folder a walk visits matches no rule's last name; settle that without
+    // allocating, before splitting paths or patterns.
+    let name = path.rsplit('/').next()?;
+    if !rules.iter().any(|rule| {
+        rule.names
+            .iter()
+            .any(|p| glob(p.rsplit('/').next().unwrap_or(p), name).is_some())
+    }) {
+        return None;
+    }
     let parts: Vec<&str> = path.split('/').collect();
     let last = *parts.last()?;
     let containing = parent(path);
