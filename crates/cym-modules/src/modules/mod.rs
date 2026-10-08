@@ -93,7 +93,7 @@ impl Registry {
     ) -> Result<ScanReport> {
         let module = self.get(id).ok_or("Unknown module")?;
         let mut report = ScanReport::default();
-        let mut sink = Guard::new(&mut report, services.result_limit);
+        let mut sink = Guard::new(&mut report, services.result_limit, context);
         run(module.as_ref(), services, context, control, &mut sink);
         report.cancelled = control.is_cancelled();
         Ok(report)
@@ -113,25 +113,45 @@ pub fn run(
     }
 }
 
-/// Removes duplicate finding IDs and bounds the result count for one module.
+/// Every finding of a module passes through here: it removes duplicate IDs, bounds the result
+/// count, and enforces the scan's scope whatever the module checked itself. Findings that
+/// are excluded, outside the roots of a limited scan, or in a system location are dropped;
+/// a folder that holds an excluded path is listed but cannot be acted on.
 pub struct Guard<'a> {
     inner: &'a mut dyn Sink,
     seen: HashSet<String>,
     limited: bool,
     limit: usize,
+    context: &'a ScanContext,
 }
 impl<'a> Guard<'a> {
-    pub fn new(inner: &'a mut dyn Sink, limit: usize) -> Self {
+    pub fn new(inner: &'a mut dyn Sink, limit: usize, context: &'a ScanContext) -> Self {
         Self {
             inner,
             seen: HashSet::new(),
             limited: false,
             limit,
+            context,
         }
     }
 }
 impl Sink for Guard<'_> {
     fn finding(&mut self, mut finding: Finding) {
+        if let Some(path) = finding.resource.path() {
+            if !self.context.allows(path) || crate::policy::system_excluded(path) {
+                return;
+            }
+            let inside = self
+                .context
+                .exclusions
+                .iter()
+                .find(|x| crate::policy::contains(x, path));
+            if let (Some(excluded), None) = (inside, &finding.blocked_reason) {
+                finding.blocked_reason = Some(format!(
+                    "Contains an excluded folder ({excluded}), which would be moved with it. Select the items inside instead."
+                ));
+            }
+        }
         if finding.brand.is_none() {
             finding.brand = crate::brand::of(&finding).map(Into::into);
         }

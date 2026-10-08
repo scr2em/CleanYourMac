@@ -1,0 +1,218 @@
+//! Scope boundaries, checked for every built-in tool at once. A fixture holds the same kinds
+//! of clutter inside the chosen folder, inside an excluded folder within it, outside it, and
+//! behind a symbolic link that points outside. Every finding of every tool must then respect
+//! the context it was scanned with, and every action must respect the context it runs with.
+mod common;
+use common::*;
+use cym_core::{model::*, policy, ports::*, Engine};
+use std::{fs, os::unix::fs::symlink};
+
+/// A Node project, a Rust build folder, a 150 MB file and a duplicate pair under `base`.
+fn clutter(f: &Fixture, base: &str) {
+    f.write(&format!("{base}/web/package.json"), "{}");
+    f.write(&format!("{base}/web/node_modules/dep/index.js"), "x");
+    f.write(&format!("{base}/crate/Cargo.toml"), "[package]");
+    f.write(&format!("{base}/crate/target/debug/app"), "x");
+    let big = f.write(&format!("{base}/media/video.mov"), "");
+    fs::File::options()
+        .write(true)
+        .open(big)
+        .unwrap()
+        .set_len(150_000_000)
+        .unwrap();
+    let copy = "duplicate contents ".repeat(400);
+    f.write(&format!("{base}/docs/a/copy.txt"), &copy);
+    f.write(&format!("{base}/docs/b/copy.txt"), &copy);
+}
+
+struct Scene {
+    f: Fixture,
+    engine: Engine,
+    ids: Vec<String>,
+}
+fn scene() -> Scene {
+    let f = Fixture::new();
+    clutter(&f, "chosen");
+    clutter(&f, "chosen/private");
+    clutter(&f, "elsewhere");
+    symlink(f.at("elsewhere"), f.at("chosen/link")).unwrap();
+    // Fixed locations in the fixture home: shared stores, caches, logs and a toolchain.
+    f.write("home/.cargo/registry/src/index/serde/lib.rs", "x");
+    f.write("home/.npm/_cacache/index", "x");
+    f.write("home/.cache/huggingface/hub/model.bin", "x");
+    f.write("home/.cache/pip/http/x", "x");
+    f.write("home/Library/Logs/App/log.txt", "x");
+    f.write("home/Library/Caches/com.example.App/data", "x");
+    f.write("home/.nvm/versions/node/v20.0.0/bin/node", "x");
+    let engine = Engine::new(services(&f), builtin(&f));
+    let ids = engine
+        .registry
+        .descriptors()
+        .into_iter()
+        .map(|d| d.id)
+        .collect();
+    Scene { f, engine, ids }
+}
+
+/// Everything a finding must satisfy under the context it was scanned with.
+fn assert_within(scene: &Scene, c: &ScanContext) -> Vec<Finding> {
+    let report = scene
+        .engine
+        .scan_report(&scene.ids, c, &ScanControl::default());
+    let uses_roots: Vec<String> = scene
+        .engine
+        .registry
+        .descriptors()
+        .into_iter()
+        .filter(|d| d.uses_roots)
+        .map(|d| d.id)
+        .collect();
+    let under_root = |p: &str| c.roots.iter().any(|r| policy::contains(p, r));
+    for r in &report.findings {
+        let Some(p) = r.resource.path() else { continue };
+        let what = format!("{} {p}", r.module_id);
+        assert!(!c.excludes(p), "excluded: {what}");
+        assert!(!policy::system_excluded(p), "system: {what}");
+        assert!(
+            !p.contains("/elsewhere/") && !p.contains("/link/"),
+            "outside the chosen folder or through a link: {what}"
+        );
+        // Shared package stores are fixed locations, listed by a roots-based tool.
+        let shared = r.value("Scope") == Some("Shared by all projects");
+        if c.limit_to_roots || (uses_roots.contains(&r.module_id) && !shared) {
+            assert!(under_root(p), "outside the roots: {what}");
+        }
+        // An actionable folder never holds an excluded path, or acting on it would move it.
+        if !r.actions.is_empty() && r.blocked_reason.is_none() {
+            for excluded in &c.exclusions {
+                assert!(
+                    !policy::contains(excluded, p) || excluded == p,
+                    "actionable {what} contains excluded {excluded}"
+                );
+            }
+        }
+    }
+    report.findings
+}
+
+#[test]
+fn every_tool_stays_inside_roots_and_out_of_exclusions() {
+    let s = scene();
+    let base = ScanContext {
+        roots: vec![s.f.at("chosen")],
+        exclusions: vec![s.f.at("chosen/private")],
+        ..Default::default()
+    };
+    // Roots-based tools only; fixed locations still listed.
+    let found = assert_within(&s, &base);
+    let count = |id: &str| found.iter().filter(|r| r.module_id == id).count();
+    assert!(found
+        .iter()
+        .any(|r| r.module_id == "node" && r.title == "web"));
+    assert_eq!(count("artifacts"), 1);
+    assert_eq!(count("large"), 1);
+    assert_eq!(count("duplicates"), 2);
+    assert!(count("caches") > 0);
+    // Limited to the roots, fixed locations outside them disappear.
+    let limited = ScanContext {
+        limit_to_roots: true,
+        ..base.clone()
+    };
+    let found = assert_within(&s, &limited);
+    assert!(found.iter().all(|r| r.module_id != "caches"));
+    // Excluding fixed locations removes them, and anything inside them.
+    let excluded = ScanContext {
+        roots: vec![s.f.at("chosen")],
+        exclusions: vec![
+            s.f.at("home/.cargo"),
+            s.f.at("home/.cache/huggingface"),
+            s.f.at("home/Library/Logs/App"),
+            s.f.at("home/.nvm"),
+        ],
+        ..Default::default()
+    };
+    assert_within(&s, &excluded);
+    // A root that is itself a link is never followed.
+    let through_link = ScanContext {
+        roots: vec![s.f.at("chosen/link")],
+        limit_to_roots: true,
+        ..Default::default()
+    };
+    let found = assert_within(&s, &through_link);
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn actions_recheck_the_current_scope() {
+    let s = scene();
+    let scanned = ScanContext {
+        roots: vec![s.f.at("chosen")],
+        ..Default::default()
+    };
+    let findings: Vec<Finding> = assert_within(&s, &scanned)
+        .into_iter()
+        .filter(|r| {
+            r.actions.contains(&ActionKind::Trash)
+                && r.blocked_reason.is_none()
+                && r.resource.path().is_some()
+        })
+        .collect();
+    assert!(!findings.is_empty());
+    let attempt = |f: &Finding, c: ScanContext| {
+        s.engine
+            .execute(
+                &ActionRequest {
+                    findings: vec![f.clone()],
+                    kind: ActionKind::Trash,
+                    context: c,
+                    acknowledged: vec![],
+                    force: true,
+                },
+                &ScanControl::default(),
+            )
+            .remove(0)
+    };
+    for f in &findings {
+        let path = f.resource.path().unwrap().to_owned();
+        let parent = std::path::Path::new(&path)
+            .parent()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        // Excluded since the scan, or with an excluded ancestor or descendant.
+        for exclusion in [path.clone(), parent, format!("{path}/inner")] {
+            let result = attempt(
+                f,
+                ScanContext {
+                    exclusions: vec![exclusion.clone()],
+                    ..scanned.clone()
+                },
+            );
+            if exclusion.ends_with("/inner") && !fs::metadata(&path).is_ok_and(|m| m.is_dir()) {
+                continue;
+            }
+            assert_eq!(
+                result.outcome,
+                Outcome::Failed,
+                "{} {path} acted on with {exclusion} excluded",
+                f.module_id
+            );
+        }
+        // Outside the chosen folders when the scope is limited to them.
+        let result = attempt(
+            f,
+            ScanContext {
+                roots: vec![s.f.at("elsewhere")],
+                limit_to_roots: true,
+                ..scanned.clone()
+            },
+        );
+        assert_eq!(
+            result.outcome,
+            Outcome::Failed,
+            "{} {path} acted on outside the roots",
+            f.module_id
+        );
+        assert!(fs::symlink_metadata(&path).is_ok(), "{path} was moved");
+    }
+}

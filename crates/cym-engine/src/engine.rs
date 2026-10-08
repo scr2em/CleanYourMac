@@ -112,7 +112,7 @@ impl Engine {
                         buffer: vec![],
                         last_stored: None,
                     };
-                    let mut guard = Guard::new(&mut sink, self.services.result_limit);
+                    let mut guard = Guard::new(&mut sink, self.services.result_limit, context);
                     modules::run(
                         module.as_ref(),
                         &self.services,
