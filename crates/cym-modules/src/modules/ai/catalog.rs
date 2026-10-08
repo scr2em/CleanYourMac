@@ -79,7 +79,15 @@ pub fn all() -> Vec<AiTool> {
 fn electron() -> Vec<AiLocation> {
     crate::modules::electron_folders!("", "")
         .into_iter()
-        .map(|(folder, name, note, _)| at(folder, name, Tier::Safe, note))
+        // Caches come back; logs and crash reports are never made again.
+        .map(|(folder, name, note, cache)| {
+            at(
+                folder,
+                name,
+                if cache { Tier::Safe } else { Tier::Review },
+                note,
+            )
+        })
         .collect()
 }
 
