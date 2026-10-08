@@ -103,7 +103,7 @@ impl WorktreeModule {
             f.bytes = in_scope.then_some(size.logical);
             f.allocated_bytes = in_scope.then_some(size.allocated);
             f.modified_at = Some(e.modified());
-            f.last_used_at = git.last_commit(&record.path, k);
+            f.last_used_at = in_scope.then(|| git.last_commit(&record.path, k)).flatten();
             f.risk = Risk::Permanent;
             f.subtitle = format!("{} · {}", head_label(&record), record.path);
             f.badge = Some(state_badge(&record).into());
@@ -130,7 +130,12 @@ impl WorktreeModule {
                 ),
                 detail("Type", if record.main { "Main" } else { "Linked" }),
             ];
-            if in_scope && state.eligible && size.complete {
+            // Removing a worktree also deletes its record in the main repository.
+            if c.protects(&directory) {
+                f.blocked_reason = Some(format!(
+                    "Its repository ({directory}) is excluded, and removing the worktree changes it."
+                ));
+            } else if in_scope && state.eligible && size.complete {
                 f.actions.push(ActionKind::RemoveWorktree);
             } else {
                 f.blocked_reason = Some(if in_scope && state.eligible {

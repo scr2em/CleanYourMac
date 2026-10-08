@@ -251,3 +251,115 @@ fn actions_recheck_the_current_scope() {
         assert!(fs::symlink_metadata(&path).is_ok(), "{path} was moved");
     }
 }
+
+#[test]
+fn changing_scope_forgets_rows_outside_it_and_stale_scans_cannot_write() {
+    let s = scene();
+    let k = ScanControl::default();
+    let whole = ScanContext {
+        roots: vec![s.f.at("chosen"), s.f.at("elsewhere")],
+        ..Default::default()
+    };
+    s.engine
+        .scan_to_store(&["large".into()], &whole, &k, 1, &|_| {});
+    assert_eq!(s.engine.results.len(), 3);
+    // Now only the chosen folder, with its private folder excluded.
+    let narrow = ScanContext {
+        roots: vec![s.f.at("chosen")],
+        exclusions: vec![s.f.at("chosen/private")],
+        limit_to_roots: true,
+        ..Default::default()
+    };
+    let removed = s.engine.retain_in_scope(&narrow);
+    assert_eq!(removed.len(), 2, "{removed:?}");
+    assert_eq!(s.engine.results.len(), 1);
+    // A scan that started before its module was cleared cannot add rows afterwards.
+    let epoch = s.engine.results.epoch("large");
+    s.engine.results.clear_modules(&["large".into()]);
+    let stale = s.engine.scan_report(&["large".into()], &whole, &k).findings;
+    assert!(!s.engine.results.insert_at("large", epoch, stale.clone()));
+    assert_eq!(s.engine.results.len(), 0);
+    let current = s.engine.results.epoch("large");
+    assert!(s.engine.results.insert_at("large", current, stale));
+    // Selected IDs that are gone are reported, not silently dropped.
+    let results = s
+        .engine
+        .execute_ids(&["large:/nowhere".into()], ActionKind::Trash, &whole, &k);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].outcome, Outcome::Failed);
+}
+
+#[test]
+fn a_duplicate_stays_when_its_original_is_in_the_same_batch() {
+    let s = scene();
+    let c = ScanContext {
+        roots: vec![s.f.at("chosen")],
+        exclusions: vec![s.f.at("chosen/private")],
+        ..Default::default()
+    };
+    let report = s
+        .engine
+        .scan_report(&["duplicates".into()], &c, &ScanControl::default());
+    let copy = report
+        .findings
+        .iter()
+        .find(|r| r.blocked_reason.is_none())
+        .unwrap()
+        .clone();
+    let original = copy.value("Preserved original").unwrap().to_owned();
+    // The folder holding the original goes in the same batch.
+    let folder = std::path::Path::new(&original).parent().unwrap();
+    let identity = s
+        .engine
+        .services
+        .entry(folder.to_str().unwrap())
+        .unwrap()
+        .identity;
+    let holder = file_finding("holder", "large", identity);
+    let results = s.engine.execute(
+        &ActionRequest {
+            findings: vec![copy.clone(), holder],
+            kind: ActionKind::Trash,
+            context: c,
+            acknowledged: vec![],
+            force: true,
+        },
+        &ScanControl::default(),
+    );
+    let mine = results
+        .iter()
+        .find(|r| r.finding_id.as_deref() == Some(copy.id.as_str()))
+        .unwrap();
+    assert_eq!(mine.outcome, Outcome::Failed, "{}", mine.message);
+    assert!(fs::metadata(copy.resource.path().unwrap()).is_ok());
+}
+
+#[test]
+fn restore_only_returns_trash_items_to_unprotected_places() {
+    let s = scene();
+    let path = s.f.write("chosen/notes.txt", "x");
+    let mut row = cym_core::model::ActionResult {
+        id: "r".into(),
+        date: 0.0,
+        title: "notes".into(),
+        original_path: Some(s.f.at("chosen/restored.txt")),
+        action: ActionKind::Trash,
+        outcome: Outcome::Applied,
+        message: String::new(),
+        trash_path: Some(path.clone()),
+        finding_id: None,
+        trash_identity: Some(s.engine.services.entry(&path).unwrap().identity),
+        journal_warning: None,
+        overridable: false,
+    };
+    // Not in a Trash folder.
+    assert!(s.engine.restore(&row).is_err());
+    // Into a protected location.
+    row.original_path = Some(policy::home());
+    assert!(s.engine.restore(&row).is_err());
+    assert!(fs::metadata(&path).is_ok());
+    // The parent of a protected folder is protected too.
+    let home = policy::home();
+    let parent = std::path::Path::new(&home).parent().unwrap();
+    assert!(policy::protected(parent.to_str().unwrap()));
+}

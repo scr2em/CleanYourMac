@@ -52,6 +52,18 @@ pub enum Resource {
         state: String,
     },
 }
+impl Finding {
+    /// The path that decides whether this finding is in a scan's scope: the folder an action
+    /// would change (a simulator's data, or the item itself). Processes are scoped by their
+    /// own module, by working folder or executable, so they have none.
+    pub fn scope_path(&self) -> Option<&str> {
+        match &self.resource {
+            Resource::Process { .. } => None,
+            Resource::Simulator { .. } => self.value("Data path"),
+            resource => resource.path(),
+        }
+    }
+}
 impl Resource {
     pub fn path(&self) -> Option<&str> {
         match self {

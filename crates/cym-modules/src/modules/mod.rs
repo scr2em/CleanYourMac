@@ -137,7 +137,8 @@ impl<'a> Guard<'a> {
 }
 impl Sink for Guard<'_> {
     fn finding(&mut self, mut finding: Finding) {
-        if let Some(path) = finding.resource.path() {
+        let scoped = finding.scope_path().map(str::to_owned);
+        if let Some(path) = scoped.as_deref() {
             if !self.context.allows(path) || crate::policy::system_excluded(path) {
                 return;
             }

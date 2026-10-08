@@ -148,6 +148,7 @@ fn dispatch(engine: &Engine, method: &str, p: &Value) -> Result<Value> {
             param::<Option<bool>>(p, "force")?.unwrap_or(false),
             &ScanControl::default(),
         )),
+        "retainInScope" => value(engine.retain_in_scope(&param(p, "context")?)),
         "removeResults" => value(engine.results.remove(&param::<Vec<String>>(p, "ids")?)),
         "loadResults" => {
             engine.results.clear();

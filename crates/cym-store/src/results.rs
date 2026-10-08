@@ -206,6 +206,9 @@ pub struct Selection {
 #[derive(Default)]
 pub struct ResultStore {
     buckets: RwLock<HashMap<String, Bucket>>,
+    /// Bumped each time a module's rows are cleared for a new scan, so rows from an earlier,
+    /// cancelled scan of that module can be told apart and dropped.
+    epochs: Mutex<HashMap<String, u64>>,
     generation: AtomicU64,
     next_query: AtomicU64,
     snapshots: Mutex<VecDeque<Arc<Snapshot>>>,
@@ -322,12 +325,38 @@ impl ResultStore {
         self.len() == 0
     }
     pub fn clear_modules(&self, modules: &[String]) {
+        let mut epochs = self.epochs.lock().ok();
         if let Ok(mut buckets) = self.buckets.write() {
             for module in modules {
                 buckets.remove(module);
+                if let Some(epochs) = epochs.as_mut() {
+                    *epochs.entry(module.clone()).or_default() += 1;
+                }
             }
         }
         self.changed();
+    }
+    /// The current epoch of a module's rows; see `insert_at`.
+    pub fn epoch(&self, module: &str) -> u64 {
+        self.epochs
+            .lock()
+            .ok()
+            .and_then(|e| e.get(module).copied())
+            .unwrap_or_default()
+    }
+    /// Inserts one module's rows unless the module was cleared since `epoch` was read, which
+    /// means a newer scan owns it now.
+    pub fn insert_at(&self, module: &str, epoch: u64, rows: Vec<Finding>) -> bool {
+        let Ok(epochs) = self.epochs.lock() else {
+            return false;
+        };
+        if epochs.get(module).copied().unwrap_or_default() != epoch {
+            return false;
+        }
+        // Held across the insert, so a clear cannot slip in between.
+        self.insert(rows);
+        drop(epochs);
+        true
     }
     pub fn clear(&self) {
         if let Ok(mut buckets) = self.buckets.write() {
@@ -380,6 +409,30 @@ impl ResultStore {
     }
     /// Removes rows whose file or folder no longer exists (deleted outside the app) and
     /// returns their IDs. Other resources (processes, simulators) are left alone.
+    /// Drops rows that fall outside `context` (excluded, holding an excluded path, outside
+    /// the roots of a limited scope, or in a system location), as when the user changes
+    /// what to scan or protects a folder. Returns the removed IDs.
+    pub fn retain_in_scope(&self, context: &ScanContext) -> Vec<String> {
+        let outside: Vec<String> = match self.buckets.read() {
+            Ok(buckets) => buckets
+                .values()
+                .flat_map(|b| b.rows.iter())
+                .collect::<Vec<_>>()
+                .into_par_iter()
+                .filter(|f| {
+                    f.scope_path().is_some_and(|p| {
+                        !context.allows(p)
+                            || context.protects(p)
+                            || crate::policy::system_excluded(p)
+                    })
+                })
+                .map(|f| f.id.clone())
+                .collect(),
+            Err(_) => vec![],
+        };
+        self.remove(&outside);
+        outside
+    }
     pub fn remove_missing(&self, exists: &(dyn Fn(&str) -> bool + Sync)) -> Vec<String> {
         let missing: Vec<String> = match self.buckets.read() {
             Ok(buckets) => buckets

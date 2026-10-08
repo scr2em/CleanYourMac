@@ -176,7 +176,8 @@ pub fn protected(path: &str) -> bool {
         &(h.clone() + "/Applications"),
     ]
     .iter()
-    .any(|q| q.eq_ignore_ascii_case(&p))
+    // A protected folder, or a folder holding one, such as /Users.
+    .any(|q| q.eq_ignore_ascii_case(&p) || (!q.is_empty() && contains_folded(q, &p)))
         || system_excluded(&p)
 }
 /// Generated output, dependency stores and tool caches across ecosystems. Duplicate

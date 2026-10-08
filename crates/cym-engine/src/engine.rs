@@ -109,6 +109,7 @@ impl Engine {
                         name: descriptor.name.clone(),
                         send: &send,
                         last_progress: None,
+                        epoch: store.map_or(0, |s| s.epoch(&descriptor.id)),
                         store,
                         buffer: vec![],
                         last_stored: None,
@@ -195,7 +196,14 @@ impl Engine {
             acknowledged: acknowledged.to_vec(),
             force,
         };
-        let results = self.execute(&request, control);
+        let mut results = self.execute(&request, control);
+        // IDs no longer in the results (removed elsewhere, or out of scope now) are reported,
+        // so a batch summary counts every item the user selected.
+        let found: std::collections::HashSet<&str> =
+            request.findings.iter().map(|f| f.id.as_str()).collect();
+        for id in ids.iter().filter(|id| !found.contains(id.as_str())) {
+            results.push(actions::unlisted(id, kind));
+        }
         let done: Vec<String> = results
             .iter()
             .filter(|r| matches!(r.outcome, Outcome::Applied | Outcome::Skipped))
@@ -203,6 +211,11 @@ impl Engine {
             .collect();
         self.results.remove(&done);
         results
+    }
+    /// Forgets results outside `context`, after the user changes what to scan or protects a
+    /// folder. Returns the removed IDs.
+    pub fn retain_in_scope(&self, context: &ScanContext) -> Vec<String> {
+        self.results.retain_in_scope(&self.services.scoped(context))
     }
     pub fn restore(&self, row: &ActionResult) -> Result<()> {
         actions::restore(&self.services, row, &ScanControl::default())
@@ -238,11 +251,16 @@ struct Forward<'a> {
     store: Option<&'a ResultStore>,
     buffer: Vec<Finding>,
     last_stored: Option<Instant>,
+    /// The module's store epoch when this scan started.
+    epoch: u64,
 }
 impl Forward<'_> {
     fn flush(&mut self, finished: bool) {
         let Some(store) = self.store else { return };
-        store.insert(std::mem::take(&mut self.buffer));
+        // A newer scan of this module cleared it; these rows belong to an older scope.
+        if !store.insert_at(&self.id, self.epoch, std::mem::take(&mut self.buffer)) {
+            return;
+        }
         if finished
             || self
                 .last_stored

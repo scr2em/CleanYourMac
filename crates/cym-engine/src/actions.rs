@@ -13,7 +13,9 @@ pub fn execute(
     control: &ScanControl,
 ) -> Vec<ActionResult> {
     let mut results = vec![];
-    for finding in policy::normalized_selection(&request.findings) {
+    let selection = policy::normalized_selection(&request.findings);
+    let selected: Vec<&str> = selection.iter().filter_map(|f| f.resource.path()).collect();
+    for finding in selection.iter().cloned() {
         if control.is_cancelled() {
             break;
         }
@@ -25,6 +27,15 @@ pub fn execute(
         let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             if let Err(message) = check(&finding, request) {
                 return failed(&message);
+            }
+            // A duplicate goes only while its kept copy stays: not when the same batch also
+            // moves the original, or a folder holding it.
+            if let Some(original) = finding.value("Preserved original") {
+                if selected.iter().any(|p| policy::contains(original, p)) {
+                    return failed(
+                        "Its kept original is also selected, so this copy stays. Remove one of the two.",
+                    );
+                }
             }
             let in_use = (!request.force)
                 .then(|| registry.get(&finding.module_id))
@@ -163,6 +174,25 @@ fn apply(
     }
 }
 
+/// The outcome for a selected ID that is no longer among the results.
+pub fn unlisted(id: &str, action: ActionKind) -> ActionResult {
+    ActionResult {
+        id: uuid::Uuid::new_v4().to_string(),
+        date: now(),
+        title: id.rsplit(':').next().unwrap_or(id).into(),
+        original_path: None,
+        action,
+        outcome: Outcome::Failed,
+        message: "No longer listed; it may have changed or left the current scope. Scan again."
+            .into(),
+        trash_path: None,
+        finding_id: Some(id.into()),
+        trash_identity: None,
+        journal_warning: None,
+        overridable: false,
+    }
+}
+
 // Process command arguments are deliberately omitted from the journal.
 fn row(
     f: &Finding,
@@ -193,6 +223,16 @@ pub fn restore(services: &Services, row: &ActionResult, control: &ScanControl) -
     let (Some(original), Some(trashed)) = (&row.original_path, &row.trash_path) else {
         return Err("This action has no restorable item.".into());
     };
+    // Only an item in a Trash folder goes back, and never into a protected location.
+    if !Path::new(trashed)
+        .components()
+        .any(|c| matches!(c.as_os_str().to_str(), Some(".Trash" | ".Trashes")))
+    {
+        return Err("Only items in the Trash can be restored.".into());
+    }
+    if policy::protected(original) {
+        return Err("The original location is protected; restore it in Finder.".into());
+    }
     if services.exists(original) {
         return Err("An item already exists at the original path.".into());
     }

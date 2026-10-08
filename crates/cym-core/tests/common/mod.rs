@@ -197,7 +197,7 @@ pub fn builtin(fixture: &Fixture) -> cym_core::modules::Registry {
 /// Native filesystem adapters with fixture Trash and an in-memory journal.
 pub fn services(fixture: &Fixture) -> Services {
     Services {
-        trash: Arc::new(FixtureTrash(fixture.at("fixture-trash"))),
+        trash: Arc::new(FixtureTrash(fixture.at(".Trash"))),
         apps: Arc::new(FakeApps::default()),
         processes: Arc::new(FakeProcesses::default()),
         ..Services::with_journal(Arc::new(MemoryJournal::default()))

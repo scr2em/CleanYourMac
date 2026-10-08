@@ -32,6 +32,17 @@ fn installed_apps(s: &Services, k: &ScanControl, warnings: &mut Vec<String>) -> 
     }
     Ok(apps)
 }
+/// Whether a bundle identifier is safe to use as a file name: dot-separated parts of
+/// letters, digits, `-` and `_`, with no empty part.
+fn bundle_id(id: &str) -> bool {
+    id.split('.').count() >= 2
+        && id.split('.').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        })
+}
 /// Refuses to act while the owning application runs.
 fn owner_not_running(s: &Services, f: &Finding) -> Result<()> {
     let path = f.resource.path().unwrap_or("");
@@ -98,7 +109,9 @@ impl ScanModule for ApplicationsModule {
                 None
             };
             let app_path = app.path().to_owned();
-            if !id.is_empty() && !apple {
+            // The identifier becomes part of a path, so only a well-formed one is used: an
+            // app could otherwise name `../../Pictures` as its own data.
+            if bundle_id(&id) && !apple && c.allows(&app_path) {
                 let h = policy::home();
                 for path in [
                     format!("{h}/Library/Caches/{id}"),
