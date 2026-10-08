@@ -100,7 +100,13 @@ impl ScanModule for LargeFilesModule {
         sink: &mut dyn Sink,
     ) -> Result<()> {
         let mut warnings = vec![];
+        let project_folders = super::developer::ProjectFolders::default();
         let result = s.walk(c, k, &mut warnings, &mut |e| {
+            // A file inside build output or installed packages is part of that build; Build
+            // Artifacts and Dependencies offer the whole folder instead.
+            if e.directory {
+                return Ok(!project_folders.contains(s, e.path()));
+            }
             if e.regular && e.bytes >= self.minimum_bytes {
                 let mut f = Finding::new(
                     "large",

@@ -442,6 +442,69 @@ fn the_newest_xcode_stays_when_xcode_select_picks_the_command_line_tools() {
 }
 
 #[test]
+fn large_files_never_look_inside_build_or_dependency_folders() {
+    let f = Fixture::new();
+    let big = |path: &str| {
+        let path = f.write(path, "");
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(150_000_000)
+            .unwrap();
+    };
+    // Inside a project's dependencies or build output: removing one file breaks the build.
+    f.write("app/package.json", "{}");
+    big("app/node_modules/sharp/build/sharp.node");
+    f.write("rs/Cargo.toml", "[package]");
+    big("rs/target/release/server");
+    f.write("py/pyproject.toml", "");
+    f.write("py/.venv/pyvenv.cfg", "");
+    big("py/.venv/lib/python3.12/site-packages/torch/lib/libtorch.so");
+    // A folder only named like build output, with no project files, is the user's.
+    big("Documents/build/keynote-render.mov");
+    // A node_modules no project owns is not a dependency folder either.
+    big("old/node_modules/blob.bin");
+    big("Movies/trip.mov");
+    let engine = Engine::new(services(&f), builtin(&f));
+    let mut found: Vec<String> = scan(&engine, &f, "large", vec![f.path()])
+        .iter()
+        .filter_map(|r| {
+            r.resource
+                .path()
+                .map(|p| p.strip_prefix(&f.path()).unwrap_or(p).to_owned())
+        })
+        .collect();
+    found.sort();
+    assert_eq!(
+        found,
+        vec![
+            "/Documents/build/keynote-render.mov",
+            "/Movies/trip.mov",
+            "/old/node_modules/blob.bin"
+        ]
+    );
+}
+
+#[test]
+fn dependencies_never_look_inside_build_output() {
+    let f = Fixture::new();
+    f.write("app/package.json", "{}");
+    f.write("app/next.config.js", "module.exports = {}");
+    f.write("app/node_modules/react/index.js", "x");
+    // Next.js standalone output carries its own node_modules: part of the build, not a project.
+    f.write("app/.next/standalone/package.json", "{}");
+    f.write("app/.next/standalone/node_modules/react/index.js", "x");
+    let engine = Engine::new(services(&f), builtin(&f));
+    let found: Vec<String> = scan(&engine, &f, "node", vec![f.path()])
+        .iter()
+        .filter_map(|r| r.resource.path().map(str::to_owned))
+        .filter(|p| p.starts_with(&f.path()))
+        .collect();
+    assert_eq!(found, vec![f.at("app/node_modules")]);
+}
+
+#[test]
 fn build_output_with_a_shipped_archive_needs_confirmation() {
     let f = Fixture::new();
     f.write("app/pubspec.yaml", "name: app");

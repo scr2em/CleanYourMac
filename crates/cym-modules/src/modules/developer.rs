@@ -577,6 +577,43 @@ impl Default for ArtifactsModule {
         }
     }
 }
+/// Rebuildable project folders, recognised by the same evidence as Build Artifacts and
+/// Dependencies: build output and installed packages. Removing one file from inside them
+/// leaves a broken build or install, so other file tools neither list nor search inside;
+/// those two tools offer the whole folder instead.
+pub struct ProjectFolders {
+    build_output: Vec<ArtifactRule>,
+    dependencies: Vec<ArtifactRule>,
+    manifests: Vec<(&'static str, &'static str)>,
+}
+impl Default for ProjectFolders {
+    fn default() -> Self {
+        let artifacts = ArtifactsModule::default();
+        Self {
+            build_output: artifacts.rules,
+            dependencies: artifacts.dependencies,
+            manifests: DependenciesModule::default().manifests,
+        }
+    }
+}
+impl ProjectFolders {
+    /// Whether the folder at `path` is build output or installed packages of a project.
+    pub fn contains(&self, s: &Services, path: &str) -> bool {
+        if name(path) == "node_modules" {
+            let project = parent(path);
+            return self
+                .manifests
+                .iter()
+                .any(|(_, file)| s.is_file(&format!("{project}/{file}")));
+        }
+        match_rules(&self.dependencies, s, path).is_some() || self.build_output(s, path)
+    }
+    /// Whether the folder at `path` is a project's build output.
+    pub fn build_output(&self, s: &Services, path: &str) -> bool {
+        match_rules(&self.build_output, s, path).is_some()
+    }
+}
+
 impl ArtifactsModule {
     /// The first rule whose names and evidence match the folder at `path`.
     pub fn matches(&self, s: &Services, path: &str) -> Option<ArtifactMatch<'_>> {
@@ -1095,6 +1132,7 @@ impl ScanModule for DependenciesModule {
             .collect();
         let mut matched = vec![];
         let mut warnings = vec![];
+        let project_folders = ProjectFolders::default();
         let walked = s.walk(&context, k, &mut warnings, &mut |e| {
             if !e.directory {
                 return Ok(true);
@@ -1113,6 +1151,11 @@ impl ScanModule for DependenciesModule {
             }
             if let Some(m) = self.matches(s, e.path()) {
                 matched.push((e.clone(), m.rule.hide_tracked));
+                return Ok(false);
+            }
+            // Build output (`.next`, `target`, …) belongs to Build Artifacts; packages it holds,
+            // such as `.next/standalone/node_modules`, are part of the build.
+            if project_folders.build_output(s, e.path()) {
                 return Ok(false);
             }
             Ok(true)
