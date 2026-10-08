@@ -12,7 +12,7 @@ CleanYourMac finds items that use disk space on your Mac. Examples are large dow
 
 ![CleanYourMac overview: storage totals and the recommended fixes](docs/screenshots/overview.png)
 
-- **Made for developers.** It knows `node_modules`, Python environments, Cargo `target`, DerivedData, simulators, toolchains and Git worktrees. It shows the project that owns each item.
+- **Made for developers.** It knows `node_modules`, Python environments, Cargo `target`, DerivedData, simulators, toolchains, Git worktrees and Docker. It shows the project that owns each item.
 - **Cleans up after AI tools.** It sorts the caches, transcripts and models of Claude Code, Codex, Gemini CLI, Cursor, Ollama and 20 more tools into Safe, Review and Caution tiers.
 - **Safe by design.** Items go to the Trash. The app examines each item again before it acts, and it does not touch credentials, settings or files that Git tracks.
 - **Fast.** A Rust core reads the disk in parallel and keeps a million results searchable.
@@ -83,6 +83,10 @@ When you move an item to the Trash, you can restore it. The disk space becomes f
 <tr>
 <td><img src="docs/screenshots/simulators.png" alt="Simulators page with devices and an installed runtime"><br><strong>Simulators.</strong> App data of each device, with its runtime and the date of the last boot.</td>
 <td><img src="docs/screenshots/toolchains.png" alt="Toolchains page with Swift, Android, Rust, Python and Node.js versions"><br><strong>Toolchains &amp; SDKs.</strong> Installed language versions. The version in use stays.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/containers.png" alt="Containers and VMs page with Docker disks, build cache, unused images and volumes"><br><strong>Containers &amp; VMs.</strong> The real size of Docker, OrbStack, Colima and Podman disks, and their own cleanup commands.</td>
+<td><img src="docs/screenshots/installers.png" alt="Installers page with a macOS installer, an Xcode archive and disk images"><br><strong>Installers.</strong> macOS installers, Xcode archives, disk images and packages that you already used.</td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/caches-logs.png" alt="Caches and Logs page with Gradle, Homebrew, Cargo and pip caches"><br><strong>Caches &amp; Logs.</strong> Caches that tools download or make again, with the cost of each removal.</td>

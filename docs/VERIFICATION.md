@@ -8,11 +8,21 @@ Verified locally after the SVG resource update:
 - The design-token lint and full Swift test suite pass (native mutation tests remain opt-in).
 - The packaged app builds for both arm64 and x86_64, contains its brand-icon resources, and passes strict ad hoc signature verification.
 - The universal app opens on Apple silicon. Intel and older macOS systems were cross-built, not run locally.
-- Four screenshots were captured from the actual app in its isolated, non-destructive demo mode. All displayed paths and processes are fictional.
+- The README screenshots are rendered from the Figma design file with example data. All displayed paths and processes are fictional.
 
 Build checks fix the Swift module-count expectation, the SVG raw-string delimiter, and machine-dependent random exclusion coverage. Demo inspection waits for the result store to finish loading, and the simulator fixture includes its data path so aggregate totals match normal scan results.
 
 The Homebrew cask pins the universal preview archive by SHA-256. This preview is not Developer ID signed or notarized.
+
+## Checks that need a Mac
+
+Fixture tests cover these tools on Linux with stubbed command output. Confirm them on a Mac with real data:
+
+- **Containers & VMs:** the output of `docker system df --format '{{json .}}'` and `docker context show` on Docker Desktop, OrbStack and Colima; the folder of Podman's machine disk and the output of `podman system df`.
+- **Simulators:** the fields of `xcrun simctl runtime list -j` (`deletable`, `sizeBytes`, `lastUsedAt`), and that a deleted runtime frees its space.
+- **Caches & Logs:** the Electron web caches list no app whose `Cache` folder holds more than a cache.
+- **AI Tools:** a Claude Code session still resumes after its `tool-results` folder is in the Trash; the bundle identifiers of Kiro, Trae, Void and the Codex app in `crates/cym-modules/src/modules/ai/catalog.rs` match the installed apps; Ollama frees a model's files when it starts after its manifest is in the Trash.
+- **Native tests:** run `scripts/test-native.sh` on a Mac with a simulator runtime and record the result here.
 
 ## Current: Rust core with a SwiftUI client
 
