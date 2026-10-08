@@ -1011,9 +1011,41 @@ fn worktree_blocker(
 /// Why a Git worktree must stay: uncommitted or untracked work, settings that run programs,
 /// or a state Git cannot report. `None` for a folder that is not a worktree.
 fn git_blocker(s: &Services, path: &str, k: &ScanControl) -> Option<String> {
-    if !s.exists(&format!("{path}/.git")) {
-        return None;
+    // A tool may keep the repository a folder or two below the matched one (Codex uses
+    // `worktrees/<id>/<repo>`), so every repository down to that depth is checked; a folder
+    // that cannot be listed, or too many to check, blocks instead.
+    const UNCHECKED: &str =
+        "Some folders in this worktree could not be checked. Check it yourself.";
+    let mut level = vec![path.to_owned()];
+    let mut repos = vec![];
+    for depth in 0..3 {
+        let mut next = vec![];
+        for dir in level {
+            if s.exists(&format!("{dir}/.git")) {
+                repos.push(dir);
+            } else if depth < 2 {
+                let mut warnings = vec![];
+                let children = s.children(&dir, &mut warnings);
+                if !warnings.is_empty() {
+                    return Some(UNCHECKED.into());
+                }
+                next.extend(
+                    children
+                        .into_iter()
+                        .filter(|e| e.directory)
+                        .map(|e| e.path().to_owned()),
+                );
+            }
+        }
+        if next.len() + repos.len() > 256 {
+            return Some(UNCHECKED.into());
+        }
+        level = next;
     }
+    repos.iter().find_map(|repo| repo_blocker(s, repo, k))
+}
+/// Why one Git repository must stay; see `git_blocker`.
+fn repo_blocker(s: &Services, path: &str, k: &ScanControl) -> Option<String> {
     let git = crate::git::Git(s.commands.as_ref());
     match git.risky_config(path, k) {
         Ok(None) => {}
@@ -1105,6 +1137,9 @@ impl AiToolsModule {
     ) -> Candidate {
         let home = self.home();
         let mut details = self.base(tool, root, location.tier);
+        // Marks the row as a session, so the history never keeps its title (which can quote
+        // a prompt or a summary of the conversation).
+        details.push(detail("Session", e.name()));
         if let Some(cwd) = &info.cwd {
             details.push(detail("Project", short(cwd, &home)));
         }

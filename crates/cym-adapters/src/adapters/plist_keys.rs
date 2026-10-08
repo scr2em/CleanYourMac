@@ -86,29 +86,83 @@ pub fn parse(bytes: &[u8], keys: &[&str]) -> Option<HashMap<String, Scalar>> {
     Some(found)
 }
 
-const MAX_DEPTH: usize = 64;
-/// The deepest nesting of `<array>` and `<dict>` elements, counted without parsing.
+const MAX_DEPTH: usize = 128;
+/// The deepest element nesting, counted without parsing. Every element counts, whatever its
+/// name or prefix; comments, processing instructions, CDATA and quoted attribute values are
+/// skipped. Anything this scan cannot follow (an internal DTD subset, which could declare
+/// markup, or a mismatched or unterminated tag) counts as too deep, so the recursive parser
+/// only ever sees documents whose nesting was measured.
 fn xml_depth(bytes: &[u8]) -> usize {
-    let (mut depth, mut deepest) = (0usize, 0usize);
-    let mut rest = bytes;
-    while let Some(at) = rest.iter().position(|b| *b == b'<') {
-        rest = &rest[at + 1..];
-        let end = rest.iter().position(|b| *b == b'>').unwrap_or(rest.len());
-        let tag = &rest[..end];
-        let name: Vec<u8> = tag
-            .iter()
-            .take_while(|b| b.is_ascii_alphanumeric() || **b == b'/')
-            .copied()
-            .collect();
-        let empty = tag.ends_with(b"/");
-        match name.as_slice() {
-            b"array" | b"dict" if !empty => {
-                depth += 1;
-                deepest = deepest.max(depth);
+    const REFUSE: usize = usize::MAX;
+    let find = |from: usize, pattern: &[u8]| -> Option<usize> {
+        bytes
+            .get(from..)?
+            .windows(pattern.len())
+            .position(|w| w == pattern)
+            .map(|p| p + from)
+    };
+    // The position of the `>` closing a tag that starts at `from`, outside quoted values.
+    let tag_end = |from: usize| -> Option<usize> {
+        let mut quote = None;
+        for (i, b) in bytes.get(from..)?.iter().enumerate() {
+            match (quote, *b) {
+                (None, b'"' | b'\'') => quote = Some(*b),
+                (Some(q), b) if b == q => quote = None,
+                (None, b'>') => return Some(from + i),
+                _ => {}
             }
-            b"/array" | b"/dict" => depth = depth.saturating_sub(1),
-            _ => {}
         }
+        None
+    };
+    let mut open: Vec<&[u8]> = vec![];
+    let mut deepest = 0;
+    let mut at = 0;
+    while let Some(next) = find(at, b"<") {
+        let rest = &bytes[next..];
+        let skip = if rest.starts_with(b"<!--") {
+            find(next + 4, b"-->").map(|e| e + 3)
+        } else if rest.starts_with(b"<![CDATA[") {
+            find(next + 9, b"]]>").map(|e| e + 3)
+        } else if rest.starts_with(b"<?") {
+            find(next + 2, b"?>").map(|e| e + 2)
+        } else if rest.starts_with(b"<!") {
+            match tag_end(next + 2) {
+                Some(e) if !bytes[next..e].contains(&b'[') => Some(e + 1),
+                _ => None,
+            }
+        } else {
+            let Some(e) = tag_end(next + 1) else {
+                return REFUSE;
+            };
+            let tag = &bytes[next + 1..e];
+            let (closing, body) = match tag.strip_prefix(b"/") {
+                Some(body) => (true, body),
+                None => (false, tag),
+            };
+            let name = &body[..body
+                .iter()
+                .position(|b| b.is_ascii_whitespace() || *b == b'/')
+                .unwrap_or(body.len())];
+            if name.is_empty() {
+                return REFUSE;
+            }
+            if closing {
+                if open.pop() != Some(name) {
+                    return REFUSE;
+                }
+            } else if !tag.ends_with(b"/") {
+                open.push(name);
+                deepest = deepest.max(open.len());
+                if deepest > MAX_DEPTH {
+                    return deepest;
+                }
+            }
+            Some(e + 1)
+        };
+        let Some(skip) = skip else {
+            return REFUSE;
+        };
+        at = skip;
     }
     deepest
 }
@@ -269,6 +323,45 @@ mod tests {
         assert_eq!(
             xml_depth(b"<dict><array/><array><dict></dict></array></dict>"),
             3
+        );
+        // Closing tags the parser never sees, and names the count would not recognise, do
+        // not hide nesting.
+        let deep_in = |open: &str, close: &str| {
+            format!(
+                "<plist><dict><key>K</key>{}{}</dict></plist>",
+                open.repeat(100_000),
+                close.repeat(100_000)
+            )
+        };
+        for (open, close) in [
+            ("<array><!--</array>-->", "</array>"),
+            ("<array><![CDATA[</array>]]>", "</array>"),
+            ("<array><?x </array>?>", "</array>"),
+            ("<x:array>", "</x:array>"),
+            ("<ARRAY>", "</ARRAY>"),
+            ("<array a=\"x/>\">", "</array>"),
+            ("<array a='</array>'>", "</array>"),
+        ] {
+            assert_eq!(
+                parse(deep_in(open, close).as_bytes(), &["K"]),
+                None,
+                "{open}"
+            );
+        }
+        // Mismatched tags and internal DTD subsets are refused outright.
+        assert_eq!(xml_depth(b"<a></b>"), usize::MAX);
+        assert_eq!(
+            xml_depth(b"<!DOCTYPE p [<!ENTITY e \"<a>\">]><p/>"),
+            usize::MAX
+        );
+        // A real Info.plist header still parses.
+        let header = br#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- built by Xcode -->
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>a.b</string></dict></plist>"#;
+        assert_eq!(
+            parse(header, &["CFBundleIdentifier"]).unwrap()["CFBundleIdentifier"].text(),
+            Some("a.b")
         );
         // Truncated or nonsense binary data is refused, not trusted.
         assert_eq!(parse(&binary[..binary.len() - 5], &["x"]), None);

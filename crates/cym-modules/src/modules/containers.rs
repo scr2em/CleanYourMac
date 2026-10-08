@@ -321,13 +321,22 @@ pub fn local_endpoint(uri: &str) -> bool {
     let Some(rest) = uri.strip_prefix("ssh://") else {
         return false;
     };
+    // A query, fragment, escape or backslash could make SSH read a different host than this
+    // check does, so such addresses are refused rather than interpreted.
+    if rest
+        .chars()
+        .any(|c| matches!(c, '?' | '#' | '%' | '\\') || c.is_whitespace() || c.is_control())
+    {
+        return false;
+    }
     let authority = rest.split('/').next().unwrap_or_default();
     let host = authority.rsplit('@').next().unwrap_or_default();
-    let host = match host.strip_prefix('[') {
-        Some(v6) => v6.split(']').next().unwrap_or_default(),
-        None => host.split(':').next().unwrap_or_default(),
+    let (host, port) = match host.strip_prefix('[') {
+        Some(v6) => v6.split_once(']').unwrap_or((v6, "x")),
+        None => host.split_once(':').map_or((host, ""), |(h, p)| (h, p)),
     };
-    matches!(host, "127.0.0.1" | "localhost" | "::1")
+    let port = port.strip_prefix(':').unwrap_or(port);
+    port.chars().all(|c| c.is_ascii_digit()) && matches!(host, "127.0.0.1" | "localhost" | "::1")
 }
 
 /// The engine a Docker context reaches.
@@ -653,6 +662,16 @@ mod tests {
         ));
         assert!(!local_endpoint("ssh://user@127.0.0.1.evil.com/x"));
         assert!(!local_endpoint("tcp://127.0.0.1:2375"));
+        // The host SSH reads must be the one checked here.
+        assert!(!local_endpoint(
+            "ssh://core@evil.example:22?@127.0.0.1/run/podman/podman.sock"
+        ));
+        assert!(!local_endpoint(
+            "ssh://core@evil.example:22#@127.0.0.1/run/podman/podman.sock"
+        ));
+        assert!(!local_endpoint("ssh://core@evil.example%40127.0.0.1/x"));
+        assert!(!local_endpoint("ssh://core@[::1]evil.example/x"));
+        assert!(!local_endpoint("ssh://core@127.0.0.1:22evil/x"));
         assert_eq!(
             task_args("docker", "volumes"),
             None,

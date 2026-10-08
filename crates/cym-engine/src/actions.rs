@@ -246,7 +246,10 @@ fn row(
 /// The title kept in the local history. A session's title can quote the prompt typed in an
 /// AI tool, which should not outlive the session, so it is replaced by the tool and file.
 fn journal_title(f: &Finding) -> String {
-    if f.value("First prompt").is_some() || f.value("Session").is_some() {
+    if f.value("First prompt").is_some()
+        || f.value("Session").is_some()
+        || (f.module_id == "ai" && f.value("Project").is_some())
+    {
         let file = f
             .resource
             .path()

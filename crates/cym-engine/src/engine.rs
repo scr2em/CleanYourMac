@@ -217,7 +217,14 @@ impl Engine {
         force: bool,
         control: &ScanControl,
     ) -> Vec<ActionResult> {
-        if self.example.load(std::sync::atomic::Ordering::SeqCst) {
+        // The flag and the rows are read under one lock, so example rows loaded while this
+        // runs are never taken for scanned ones.
+        let findings = {
+            let _guard = self.examples.lock().unwrap_or_else(|e| e.into_inner());
+            (!self.example.load(std::sync::atomic::Ordering::SeqCst))
+                .then(|| self.results.findings(ids))
+        };
+        let Some(findings) = findings else {
             return ids
                 .iter()
                 .map(|id| ActionResult {
@@ -225,9 +232,9 @@ impl Engine {
                     ..actions::unlisted(id, kind)
                 })
                 .collect();
-        }
+        };
         let request = ActionRequest {
-            findings: self.results.findings(ids),
+            findings,
             kind,
             context: context.clone(),
             acknowledged: acknowledged.to_vec(),

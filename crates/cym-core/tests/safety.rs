@@ -88,19 +88,22 @@ fn an_ai_worktree_with_work_in_it_stays() {
     let f = Fixture::new();
     let worktree = f.dir("home/.codex/worktrees/task-1");
     f.write("home/.codex/worktrees/task-2/notes.txt", "not a repository");
+    // Codex keeps the repository one folder below: worktrees/<id>/<repo>.
+    let nested = f.dir("home/.codex/worktrees/task-3/app");
     let s = services(&f);
     let k = ScanControl::default();
     let git = Git(s.commands.as_ref());
-    assert_eq!(
-        git.run(&worktree, &["init", "-b", "main"], &k)
-            .unwrap()
-            .status,
-        0
-    );
+    for repo in [&worktree, &nested] {
+        assert_eq!(
+            git.run(repo, &["init", "-b", "main"], &k).unwrap().status,
+            0
+        );
+    }
     f.write(
         "home/.codex/worktrees/task-1/new-feature.rs",
         "fn main() {}",
     );
+    f.write("home/.codex/worktrees/task-3/app/wip.rs", "fn main() {}");
     let engine = Engine::new(services(&f), builtin(&f));
     let findings = scan(&engine, &f, "ai", vec![f.at("home")]);
     let dirty = findings
@@ -125,4 +128,17 @@ fn an_ai_worktree_with_work_in_it_stays() {
         })
         .unwrap();
     assert!(plain.blocked_reason.is_none());
+    let nested = findings
+        .iter()
+        .find(|r| {
+            r.resource
+                .path()
+                .is_some_and(|p| p.ends_with("worktrees/task-3"))
+        })
+        .unwrap();
+    assert!(nested
+        .blocked_reason
+        .as_deref()
+        .unwrap()
+        .contains("uncommitted or untracked"));
 }

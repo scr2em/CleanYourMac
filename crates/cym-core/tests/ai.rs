@@ -340,6 +340,30 @@ fn codex_gemini_and_cli_sessions_show_their_project() {
     let copilot = find("session-state/s1").expect("copilot session");
     assert_eq!(copilot.title, "Session · Add login page");
     assert_eq!(copilot.value("Project"), Some("~/projects/live"));
+    assert_eq!(copilot.value("Session"), Some("s1"));
+    // The summary in its title never reaches the local history.
+    let engine = Engine::new(services(&f), builtin(&f));
+    let result = engine
+        .execute(
+            &ActionRequest {
+                findings: vec![copilot.clone()],
+                kind: ActionKind::Trash,
+                context: ScanContext {
+                    roots: vec![f.at("home")],
+                    ..Default::default()
+                },
+                acknowledged: vec![],
+                force: false,
+            },
+            &ScanControl::default(),
+        )
+        .remove(0);
+    assert_eq!(result.outcome, Outcome::Applied, "{}", result.message);
+    let history = engine.history();
+    assert!(!history.is_empty());
+    for row in history {
+        assert!(!row.title.contains("login"), "{}", row.title);
+    }
 
     for never in [
         "config.toml",
