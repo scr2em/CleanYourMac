@@ -121,6 +121,28 @@ pub struct AiTool {
     pub home_locations: Vec<AiLocation>,
 }
 
+impl AiTool {
+    /// The home-relative folders this tool's items come from, up to the first `*`: its
+    /// fixed data folders and home locations. Other tools leave them to AI Tools.
+    pub fn home_folders(&self) -> Vec<String> {
+        let fixed = |path: &str| -> String {
+            path.split('/')
+                .take_while(|p| !p.contains('*'))
+                .collect::<Vec<_>>()
+                .join("/")
+        };
+        self.roots
+            .iter()
+            .filter_map(|r| match r {
+                Root::Home(name) if !name.contains('*') => Some(name.clone()),
+                _ => None,
+            })
+            .chain(self.home_locations.iter().map(|l| fixed(l.path)))
+            .filter(|f| !f.is_empty())
+            .collect()
+    }
+}
+
 pub struct AiToolsModule {
     pub tools: Vec<AiTool>,
     /// The home folder roots are relative to; the user's when `None`.

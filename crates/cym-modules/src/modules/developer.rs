@@ -1028,11 +1028,19 @@ impl ScanModule for CachesModule {
         if let Some(candidate) = self.tool_cache_candidate(s, c) {
             candidates.push(candidate);
         }
-        // macOS leftovers, except folders the tool caches above already cover.
-        candidates.extend(
-            self.mac
-                .candidates(s, c, k, &self.home(), &self.covered(s))?,
-        );
+        // macOS leftovers, except folders the tool caches above cover or another tool lists
+        // with checks of its own (a leftover's app check would never see `limactl` run).
+        let home = self.home();
+        let covered: Vec<String> = self
+            .covered(s)
+            .into_iter()
+            .chain(
+                super::listed_elsewhere()
+                    .into_iter()
+                    .map(|f| format!("{home}/{f}")),
+            )
+            .collect();
+        candidates.extend(self.mac.candidates(s, c, k, &home, &covered)?);
         let logs = self.logs();
         if s.is_dir(&logs) && !c.excludes(&logs) {
             let mut warnings = vec![];

@@ -41,16 +41,9 @@ const WEB_CACHES: &[(&str, &str)] = &[
 ];
 /// A folder is an Electron or Chromium app's when it holds one of these.
 const CHROMIUM_MARKERS: &[&str] = &["Code Cache", "GPUCache", "DawnGraphiteCache"];
-/// App folders reported by other tools: VS Code-style editors and Claude in AI Tools and
-/// Developer Caches, and browsers, whose profiles are not app caches.
+/// Browsers, whose profiles are not app caches. Editors and other apps that AI Tools or Caches
+/// & Logs list are left out through the folders those tools cover.
 const WEB_CACHE_EXCEPT: &[&str] = &[
-    "Code",
-    "Cursor",
-    "Windsurf",
-    "Kiro",
-    "Trae",
-    "Void",
-    "Claude",
     "Google",
     "BraveSoftware",
     "Microsoft Edge",

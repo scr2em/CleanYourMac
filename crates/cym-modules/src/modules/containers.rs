@@ -117,6 +117,11 @@ const CACHES: &[(&str, &str, &str)] = &[
     ("Library/Caches/colima", "Colima downloads", "colima"),
 ];
 
+/// The home-relative download caches this module lists, which other tools leave to it.
+pub fn cache_folders() -> impl Iterator<Item = &'static str> {
+    CACHES.iter().map(|(path, _, _)| *path)
+}
+
 /// What an engine's `system df` reports for one kind of data.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Usage {

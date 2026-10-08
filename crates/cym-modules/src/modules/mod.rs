@@ -247,6 +247,17 @@ pub(crate) fn project_activity(s: &Services, folder: &str) -> Option<f64> {
         .reduce(f64::max)
 }
 
+/// Home-relative folders that AI Tools and Containers & VMs list with their own checks, so
+/// the leftovers in Caches & Logs never list them a second time under a weaker one.
+pub(crate) fn listed_elsewhere() -> Vec<String> {
+    ai::AiToolsModule::default()
+        .tools
+        .iter()
+        .flat_map(ai::AiTool::home_folders)
+        .chain(containers::cache_folders().map(Into::into))
+        .collect()
+}
+
 /// The version-control system whose checkout `folder` is the root of, if any; Git first,
 /// since a Jujutsu or Sapling checkout may also hold a `.git`.
 ///

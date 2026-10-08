@@ -1348,3 +1348,48 @@ fn every_tool_location_is_an_app_or_tool_folder() {
     assert!(!in_app_home_folder("/Users/me/go/src/app/x", home));
     assert!(!in_app_home_folder("/Users/me.old/.cache/x", home));
 }
+
+/// A folder another tool lists with its own checks is not listed again as a macOS leftover,
+/// whose app check could never see that tool running.
+#[test]
+fn leftovers_skip_folders_other_tools_list() {
+    let f = Fixture::new();
+    let home = f.dir("home");
+    for folder in [
+        "Library/Caches/lima",
+        "Library/Caches/claude-cli-nodejs",
+        "Library/Caches/com.example.Editor",
+        "Library/Application Support/Cursor/Cache",
+        "Library/Application Support/Slack/Cache",
+    ] {
+        f.write(&format!("home/{folder}/blob"), "x");
+    }
+    f.write(
+        "home/Library/Application Support/Cursor/Code Cache/js/a",
+        "x",
+    );
+    f.write(
+        "home/Library/Application Support/Slack/Code Cache/js/a",
+        "x",
+    );
+    let module = Arc::new(CachesModule {
+        home: Some(home),
+        ..Default::default()
+    });
+    let report = Engine::new(services(&f), builtin(&f).register(module)).scan_report(
+        &["caches".into()],
+        &f.context(),
+        &ScanControl::default(),
+    );
+    let paths: Vec<&str> = report
+        .findings
+        .iter()
+        .filter_map(|r| r.resource.path())
+        .collect();
+    let listed = |end: &str| paths.iter().any(|p| p.ends_with(end));
+    assert!(listed("/Caches/com.example.Editor"), "{paths:?}");
+    assert!(listed("/Slack/Cache"), "{paths:?}");
+    for elsewhere in ["/Caches/lima", "/Caches/claude-cli-nodejs", "/Cursor/Cache"] {
+        assert!(!listed(elsewhere), "{elsewhere}: {paths:?}");
+    }
+}
