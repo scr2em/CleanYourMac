@@ -459,6 +459,13 @@ private struct FinderView: View {
             .padding(.horizontal, Space.xl)
             SelectionFooter(store: store).padding(.horizontal, Space.lg).padding(.vertical, Space.sm)
         }
+        // The page owns the query: whenever the tool, search, filters, sort or stored results
+        // change, ask the core for a new snapshot (debounced for typing and streamed results).
+        .task(id: store.queryKey) {
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            await store.requery()
+        }
     }
     private var sortDirectionLabel: String {
         switch store.sort {
