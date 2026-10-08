@@ -259,3 +259,55 @@ fn sparse_files_count_by_size_on_disk() {
     assert!(totals.disk_bytes < 1_000_000, "{}", totals.disk_bytes);
     assert_eq!(totals.disk_bytes, vm.allocated_bytes.unwrap());
 }
+
+#[test]
+fn chosen_folders_limit_every_tool_to_them() {
+    let f = Fixture::new();
+    // Inside the chosen folder.
+    f.write("projects/app/package.json", "{}");
+    f.write("projects/app/node_modules/x/index.js", "x");
+    // Fixed locations outside it: shared stores, caches, logs, toolchains and Mac leftovers.
+    f.write("home/.cargo/registry/src/index/serde/lib.rs", "x");
+    f.write("home/.npm/_cacache/index", "x");
+    f.write("home/.cache/tool/data", "x");
+    f.write("home/Library/Logs/App/log.txt", "x");
+    f.write("home/Library/Caches/com.example.App/data", "x");
+    f.write("home/.nvm/versions/node/v20.0.0/bin/node", "x");
+    let context = ScanContext {
+        roots: vec![f.at("projects")],
+        limit_to_roots: true,
+        ..Default::default()
+    };
+    let engine = Engine::new(services(&f), builtin(&f));
+    let ids: Vec<String> = engine
+        .registry
+        .descriptors()
+        .into_iter()
+        .map(|d| d.id)
+        .collect();
+    let report = engine.scan_report(&ids, &context, &ScanControl::default());
+    let outside: Vec<_> = report
+        .findings
+        .iter()
+        .filter_map(|r| r.resource.path())
+        .filter(|p| !p.starts_with(&f.at("projects")))
+        .collect();
+    assert!(outside.is_empty(), "{outside:?}");
+    assert!(report
+        .findings
+        .iter()
+        .any(|r| r.module_id == "node" && r.title == "app"));
+    // Without the limit, the same scan also lists the fixed locations.
+    let everywhere = engine.scan_report(
+        &["caches".into(), "node".into(), "toolchains".into()],
+        &ScanContext {
+            limit_to_roots: false,
+            ..context
+        },
+        &ScanControl::default(),
+    );
+    assert!(everywhere.findings.iter().any(|r| r
+        .resource
+        .path()
+        .is_some_and(|p| p.starts_with(&f.at("home")))));
+}

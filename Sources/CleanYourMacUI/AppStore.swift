@@ -204,7 +204,15 @@ public final class AppStore {
         configureMonitor()
         if demo { roots = ["/Users/demo/Projects"]; exclusions = []; disabledModules = []; loadDemo(rows: demoRows) }
     }
-    public var context: ScanContext { ScanContext(roots: selectedModuleID == "storage" && !storageNavigation.isEmpty ? [storageNavigation.last!] : scanRoots, exclusions: exclusions, ignoredProcessNames: ignoredNames) }
+    /// With chosen folders, every tool is limited to them, including those that read fixed
+    /// locations such as caches, toolchains and apps.
+    public var context: ScanContext {
+        ScanContext(
+            roots: selectedModuleID == "storage" && !storageNavigation.isEmpty ? [storageNavigation.last!] : scanRoots,
+            exclusions: exclusions, ignoredProcessNames: ignoredNames,
+            limitToRoots: scanPlace == .folders && !demo
+        )
+    }
     public var enabledModules: [ModuleDescriptor] { modules.filter { !disabledModules.contains($0.id) } }
     public var currentModule: ModuleDescriptor? { modules.first { $0.id == selectedModuleID } }
     public func count(for module: String) -> Int { overview.modules.first { $0.moduleId == module }?.count ?? 0 }
@@ -436,13 +444,27 @@ public final class AppStore {
         defaults.set(menuBarEnabled, forKey: "menuBarEnabled"); defaults.set(theme.rawValue, forKey: "theme")
         defaults.set(scanPlace.rawValue, forKey: "scanPlace"); defaults.set(lastScanAt, forKey: "lastScanAt")
     }
-    public func addRoot() {
+    /// Scans the folders the user picks from now on, instead of the previous ones.
+    /// Returns whether folders were chosen.
+    @discardableResult public func chooseFolders() -> Bool { pickFolders(replacing: true) }
+    /// Adds folders to the chosen ones, as Settings does.
+    public func addRoot() { pickFolders(replacing: false) }
+    @discardableResult private func pickFolders(replacing: Bool) -> Bool {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = true
+        panel.prompt = "Scan"
         panel.message = "Choose folders to inspect. Scanning never removes files."
-        if panel.runModal() == .OK {
-            roots = core.normalizeRoots(roots + panel.urls.map(\.path)); storageNavigation = []; persist()
+        if panel.runModal() == .OK, !panel.urls.isEmpty {
+            let chosen = panel.urls.map(\.path)
+            roots = core.normalizeRoots(replacing ? chosen : roots + chosen)
+            storageNavigation = []
+            scanPlace = .folders
+            persist()
+            return true
         }
+        // Nothing to scan without a folder.
+        if scanPlace == .folders && roots.isEmpty { scanPlace = .wholeMac }
+        return false
     }
 
     // MARK: Scanning
@@ -450,6 +472,7 @@ public final class AppStore {
     public func scan() {
         guard !isApplying else { return }
         if demo { loadDemo(rows: 0); return }
+        if scanPlace == .folders && roots.isEmpty && !chooseFolders() { return }
         if isScanning { cancelScan() }
         scanTask?.cancel()
         let id = UUID(), selected = selectedModuleID ?? "overview", context = self.context

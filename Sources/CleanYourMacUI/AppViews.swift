@@ -124,7 +124,11 @@ private struct ScanPlacePicker: View {
             }
             .pickerStyle(.segmented).labelsHidden().fixedSize()
             .disabled(store.isScanning, because: store.whileScanning)
-            if store.scanPlace == .folders { ActionButton("Choose folders", disabled: store.isScanning, reason: store.whileScanning) { store.addRoot() } }
+            // Picking "Chosen folders" with none chosen asks for them straight away.
+            .onChange(of: store.scanPlace) { _, place in
+                if place == .folders && store.roots.isEmpty { store.chooseFolders() }
+            }
+            if store.scanPlace == .folders { ActionButton("Choose folders", disabled: store.isScanning, reason: store.whileScanning) { store.chooseFolders() } }
         }
     }
 }
@@ -327,10 +331,16 @@ private struct ScopeView: View {
     var body: some View {
         HStack(spacing: Space.md) {
             Image(systemName: usesRoots ? "folder" : "scope").foregroundStyle(.secondary)
-            Text(usesRoots ? store.context.roots.map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: " · ") : scopeDescription)
+            Text(usesRoots || store.scanPlace == .folders ? store.context.roots.map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: " · ") : scopeDescription)
                 .font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
             Spacer()
-            if usesRoots { ActionButton("Choose folders", disabled: store.isScanning || store.isApplying, reason: store.reason(store.whileScanning, store.whileApplying)) { store.addRoot() } }
+            if store.scanPlace == .folders {
+                ActionButton("Whole Mac", disabled: store.isScanning || store.isApplying, reason: store.reason(store.whileScanning, store.whileApplying)) { store.scanPlace = .wholeMac }
+            }
+            if usesRoots || store.scanPlace == .folders { ActionButton("Choose folders", disabled: store.isScanning || store.isApplying, reason: store.reason(store.whileScanning, store.whileApplying)) {
+                // On a tool's page, scan the new folders right away.
+                if store.chooseFolders() { store.scan() }
+            } }
         }
     }
     private var scopeDescription: String {
@@ -700,7 +710,7 @@ public struct PreferencesView: View {
             } header: {
                 Text("Scan roots")
             } footer: {
-                Text("Storage and developer tools look inside these folders.").font(TypeStyle.caption).foregroundStyle(.secondary)
+                Text("Scans look only inside these folders when you choose Chosen folders. Adding one switches to it.").font(TypeStyle.caption).foregroundStyle(.secondary)
             }
             Section("Menu bar") {
                 Toggle("Show a menu bar summary and monitor orphan processes", isOn: $store.menuBarEnabled)

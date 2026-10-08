@@ -59,7 +59,8 @@ impl WorktreeModule {
             if record.main || record.bare {
                 continue;
             }
-            if c.excludes(&record.path) {
+            // Excluded, or outside the chosen folders when the scan is limited to them.
+            if !c.allows(&record.path) {
                 continue;
             }
             sink.progress(format!("Inspecting {}", record.path));
