@@ -377,3 +377,71 @@ fn folders_macos_keeps_private_become_one_warning() {
     assert!(summary.contains("/Users/x/Library/Group Containers/group.0, "));
     assert!(!summary.contains("group.3"));
 }
+
+/// The scan, the stored results after a settings change and an action give one verdict: a
+/// folder that comes to hold an excluded folder is kept but blocked, in any letter case,
+/// and can be acted on again once the exclusion is gone.
+#[test]
+fn a_scope_change_blocks_what_the_scan_would_block() {
+    let store = cym_core::results::ResultStore::default();
+    let row = |path: &str| {
+        let mut f = Finding::new(
+            "storage",
+            path,
+            "folder",
+            Resource::File {
+                file: FileIdentity {
+                    path: path.into(),
+                    device: 1,
+                    inode: 2,
+                    modified_seconds: 0,
+                    modified_nanos: 0,
+                    tree_signature: None,
+                },
+            },
+            "",
+        );
+        f.actions = vec![ActionKind::Trash];
+        f
+    };
+    store.insert(vec![
+        row("/Volumes/Work/Projects"),
+        row("/Volumes/Work/Projects/keep/a"),
+        row("/Volumes/Work/Other"),
+    ]);
+    let roots = vec!["/Volumes/Work".to_string()];
+    let narrowed = ScanContext {
+        roots: roots.clone(),
+        exclusions: vec!["/Volumes/Work/projects/KEEP".into()],
+        ..Default::default()
+    };
+    let changed = store.retain_in_scope(&narrowed);
+    assert_eq!(changed.len(), 2, "{changed:?}");
+    let get = |path: &str| store.get(&format!("storage:{path}"));
+    assert!(get("/Volumes/Work/Projects/keep/a").is_none());
+    let holder = get("/Volumes/Work/Projects").unwrap();
+    assert!(holder
+        .blocked_reason
+        .as_deref()
+        .unwrap()
+        .starts_with(policy::HOLDS_EXCLUDED));
+    assert!(get("/Volumes/Work/Other").unwrap().blocked_reason.is_none());
+    // The guard and the action check say the same for the same scope.
+    assert!(matches!(
+        narrowed.verdict("/Volumes/Work/Projects"),
+        policy::Verdict::Block(_)
+    ));
+    // Removing the exclusion lifts the block it caused.
+    let widened = ScanContext {
+        roots,
+        ..Default::default()
+    };
+    assert_eq!(
+        store.retain_in_scope(&widened),
+        vec!["storage:/Volumes/Work/Projects".to_string()]
+    );
+    assert!(get("/Volumes/Work/Projects")
+        .unwrap()
+        .blocked_reason
+        .is_none());
+}

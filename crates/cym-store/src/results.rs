@@ -412,29 +412,58 @@ impl ResultStore {
     }
     /// Removes rows whose file or folder no longer exists (deleted outside the app) and
     /// returns their IDs. Other resources (processes, simulators) are left alone.
-    /// Drops rows that fall outside `context` (excluded, holding an excluded path, outside
-    /// the roots of a limited scope, or in a system location), as when the user changes
-    /// what to scan or protects a folder. Returns the removed IDs.
+    /// Applies a changed scope to stored rows, as the scan would have: rows now outside it
+    /// are removed, rows that now hold an excluded folder are blocked, and rows blocked only
+    /// for an exclusion that is gone can be acted on again. Returns the IDs of every row
+    /// removed or changed.
     pub fn retain_in_scope(&self, context: &ScanContext) -> Vec<String> {
-        let outside: Vec<String> = match self.buckets.read() {
+        use crate::policy::{Verdict, HOLDS_EXCLUDED};
+        let lifted = |f: &Finding| {
+            f.blocked_reason
+                .as_deref()
+                .is_some_and(|r| r.starts_with(HOLDS_EXCLUDED))
+        };
+        // Each row's new blocked reason; `None` inside means unblocked.
+        let changes: Vec<(String, Option<Option<String>>)> = match self.buckets.read() {
             Ok(buckets) => buckets
                 .values()
                 .flat_map(|b| b.rows.iter())
                 .collect::<Vec<_>>()
                 .into_par_iter()
-                .filter(|f| {
-                    f.scope_path().is_some_and(|p| {
-                        !context.allows(p)
-                            || context.protects(p)
-                            || crate::policy::system_excluded(p)
-                    })
+                .filter_map(|f| {
+                    let change = match context.verdict(f.scope_path()?) {
+                        Verdict::Drop => None,
+                        Verdict::Block(reason) if f.blocked_reason.is_none() => Some(Some(reason)),
+                        Verdict::Keep if lifted(f) => Some(None),
+                        _ => return None,
+                    };
+                    Some((f.id.clone(), change))
                 })
-                .map(|f| f.id.clone())
                 .collect(),
             Err(_) => vec![],
         };
-        self.remove(&outside);
-        outside
+        if changes.is_empty() {
+            return vec![];
+        }
+        if let Ok(mut buckets) = self.buckets.write() {
+            for (id, change) in &changes {
+                for bucket in buckets.values_mut() {
+                    let Some(&i) = bucket.index.get(id) else {
+                        continue;
+                    };
+                    match change {
+                        None => {
+                            bucket.remove(id);
+                        }
+                        Some(reason) => {
+                            Arc::make_mut(&mut bucket.rows[i]).blocked_reason = reason.clone();
+                        }
+                    }
+                }
+            }
+        }
+        self.changed();
+        changes.into_iter().map(|(id, _)| id).collect()
     }
     pub fn remove_missing(&self, exists: &(dyn Fn(&str) -> bool + Sync)) -> Vec<String> {
         let missing: Vec<String> = match self.buckets.read() {

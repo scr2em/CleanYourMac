@@ -173,20 +173,13 @@ impl<'a> Guard<'a> {
 }
 impl Sink for Guard<'_> {
     fn finding(&mut self, mut finding: Finding) {
-        let scoped = finding.scope_path().map(str::to_owned);
-        if let Some(path) = scoped.as_deref() {
-            if !self.context.allows(path) || crate::policy::system_excluded(path) {
-                return;
-            }
-            let inside = self
-                .context
-                .exclusions
-                .iter()
-                .find(|x| crate::policy::contains(x, path));
-            if let (Some(excluded), None) = (inside, &finding.blocked_reason) {
-                finding.blocked_reason = Some(format!(
-                    "Contains an excluded folder ({excluded}), which would be moved with it. Select the items inside instead."
-                ));
+        if let Some(path) = finding.scope_path() {
+            match self.context.verdict(path) {
+                crate::policy::Verdict::Drop => return,
+                crate::policy::Verdict::Block(reason) => {
+                    finding.blocked_reason.get_or_insert(reason);
+                }
+                crate::policy::Verdict::Keep => {}
             }
         }
         if finding.brand.is_none() {

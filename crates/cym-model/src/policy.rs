@@ -114,7 +114,31 @@ fn under_folded(path: &str, root: &str) -> bool {
 pub fn contains_folded(path: &str, root: &str) -> bool {
     under_folded(&canonical_cow(path), &canonical_cow(root))
 }
+/// What a scan's scope says about an item at a path. The scan, the stored results after a
+/// settings change, and every action ask this one question, so they cannot disagree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Verdict {
+    /// Excluded, outside the roots of a limited scan, or in a system location: not listed.
+    Drop,
+    /// Holds an excluded folder, which would be moved with it: listed, but not acted on.
+    Block(String),
+    Keep,
+}
+/// How a blocked reason from `Verdict::Block` starts, so it can be lifted again.
+pub const HOLDS_EXCLUDED: &str = "Contains an excluded folder";
 impl ScanContext {
+    /// See `Verdict`. Folders match in any letter case, as on a Mac's volume.
+    pub fn verdict(&self, path: &str) -> Verdict {
+        if !self.allows(path) || system_excluded(path) {
+            return Verdict::Drop;
+        }
+        match self.exclusions.iter().find(|x| contains_folded(x, path)) {
+            Some(excluded) => Verdict::Block(format!(
+                "{HOLDS_EXCLUDED} ({excluded}), which would be moved with it. Select the items inside instead."
+            )),
+            None => Verdict::Keep,
+        }
+    }
     pub fn excludes(&self, path: &str) -> bool {
         self.exclusions.iter().any(|r| contains_folded(path, r))
     }

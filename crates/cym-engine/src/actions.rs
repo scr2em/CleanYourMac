@@ -80,25 +80,34 @@ fn check(f: &Finding, request: &ActionRequest) -> Result<()> {
             return Err("This item's path is not in its plain form.".into());
         }
     }
-    if let Some(path) = f.resource.path() {
-        if c.protects(path) {
-            return Err("The item or an item inside it is now excluded.".into());
+    const EXCLUDED: &str = "The item or an item inside it is now excluded.";
+    const OUTSIDE: &str = "This item is outside the finder's current included paths.";
+    // The same verdict the scan gave it, against the scope as it is now.
+    if let Some(path) = f.scope_path() {
+        match c.verdict(path) {
+            policy::Verdict::Keep => {}
+            policy::Verdict::Block(_) => return Err(EXCLUDED.into()),
+            policy::Verdict::Drop if c.excludes(path) => return Err(EXCLUDED.into()),
+            policy::Verdict::Drop if policy::system_excluded(path) => {
+                return Err("This item is in a system location.".into())
+            }
+            policy::Verdict::Drop => return Err(OUTSIDE.into()),
         }
     }
-    if c.limit_to_roots {
-        let path = f.value("Data path").or(f.resource.path());
+    // A process has no folder of its own: its executable and working folder decide.
+    if let Resource::Process { process } = &f.resource {
         let working = f.value("Working folder");
-        let allowed = path.is_some_and(|p| c.allows(p))
-            || (f.module_id == "orphans" && working.is_some_and(|p| c.allows(p)));
-        if !allowed {
-            return Err("This item is outside the finder's current included paths.".into());
+        if c.protects(&process.executable) {
+            return Err(EXCLUDED.into());
         }
-    }
-    if f.value("Working folder").is_some_and(|p| c.excludes(p)) {
-        return Err("This process working folder is now excluded.".into());
-    }
-    if f.value("Data path").is_some_and(|p| c.protects(p)) {
-        return Err("This simulator data path is now excluded.".into());
+        if working.is_some_and(|p| c.excludes(p)) {
+            return Err("This process working folder is now excluded.".into());
+        }
+        if c.limit_to_roots
+            && !(c.allows(&process.executable) || working.is_some_and(|p| c.allows(p)))
+        {
+            return Err(OUTSIDE.into());
+        }
     }
     Ok(())
 }
