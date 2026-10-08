@@ -453,7 +453,7 @@ pub(crate) fn owners_closed(services: &Services, prefixes: &[&str]) -> Result<()
         None => Ok(()),
     }
 }
-/// Bundle-identifier prefixes of apps that own developer data.
+/// Bundle-identifier prefixes of apps that own developer data or app caches.
 pub mod owners {
     pub const XCODE: &[&str] = &["com.apple.dt.Xcode", "com.apple.iphonesimulator"];
     pub const ANDROID: &[&str] = &["com.google.android.studio", "com.jetbrains."];
@@ -461,6 +461,16 @@ pub mod owners {
     pub const VSCODE: &[&str] = &["com.microsoft.VSCode"];
     pub const UNITY: &[&str] = &["com.unity3d.UnityEditor", "com.unity3d.unityhub"];
     pub const UNREAL: &[&str] = &["com.epicgames.UnrealEditor"];
+    pub const CHROME: &[&str] = &["com.google.Chrome"];
+    pub const EDGE: &[&str] = &["com.microsoft.edgemac"];
+    pub const BRAVE: &[&str] = &["com.brave.Browser"];
+    pub const STEAM: &[&str] = &["com.valvesoftware.steam"];
+    pub const ADOBE: &[&str] = &[
+        "com.adobe.PremierePro",
+        "com.adobe.AfterEffects",
+        "com.adobe.ame",
+        "com.adobe.Audition",
+    ];
 }
 pub(crate) fn descriptor(
     id: &str,

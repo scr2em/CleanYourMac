@@ -33,6 +33,7 @@ const WEB_CACHES: &[(&str, &str)] = &[
         "Library/Application Support/*/DawnWebGPUCache",
         "Graphics cache",
     ),
+    ("Library/Application Support/*/DawnCache", "Graphics cache"),
     (
         "Library/Application Support/*/Service Worker/CacheStorage",
         "Offline web cache",

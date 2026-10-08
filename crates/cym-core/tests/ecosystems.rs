@@ -975,3 +975,231 @@ fn caches_include_mac_leftovers_without_repeating_developer_caches() {
     let error = module.in_use(&running, editor, ActionKind::Trash).unwrap();
     assert!(error.contains("Quit Editor"), "{error}");
 }
+
+#[test]
+fn caches_list_browser_game_and_media_app_caches_by_profile() {
+    let f = Fixture::new();
+    let home = f.dir("home");
+    let chrome = "home/Library/Application Support/Google/Chrome";
+    f.write(&format!("{chrome}/Default/Code Cache/js/a"), "x");
+    f.write(&format!("{chrome}/Default/History"), "x");
+    f.write(&format!("{chrome}/Default/Local Storage/leveldb/a"), "x");
+    f.write(
+        &format!("{chrome}/Profile 1/Service Worker/CacheStorage/a/b"),
+        "x",
+    );
+    f.write(
+        &format!("{chrome}/OptGuideOnDeviceModel/2025.1/weights.bin"),
+        "x",
+    );
+    f.write(
+        "home/Library/Application Support/Microsoft Edge/Default/GPUCache/data_0",
+        "x",
+    );
+    f.write(
+        "home/Library/Application Support/Steam/steamapps/shadercache/570/a",
+        "x",
+    );
+    f.write(
+        "home/Library/Application Support/Steam/steamapps/common/Game/game.bin",
+        "x",
+    );
+    f.write(
+        "home/Library/Application Support/Adobe/Common/Media Cache Files/clip.cfa",
+        "x",
+    );
+    f.write("home/.cache/puppeteer/chrome/mac_arm-131/x", "x");
+    f.write("home/.cache/uv/wheels-v5/x", "x");
+    f.write("home/.cocoapods/repos/trunk/.git/HEAD", "x");
+    f.write("home/.gradle/jdks/temurin-17/bin/java", "x");
+    f.write("home/Library/Caches/ccache/0/x", "x");
+    f.write(
+        "home/.vagrant.d/boxes/hashicorp-VAGRANTSLASH-bionic64/0/x",
+        "x",
+    );
+    let module = Arc::new(CachesModule {
+        home: Some(home.clone()),
+        ..Default::default()
+    });
+    let roots = module.action_roots();
+    assert!(roots.contains(&format!("{home}/Library/Application Support/Google/Chrome")));
+    let s = services(&f);
+    let report = Engine::new(s.clone(), builtin(&f).register(module.clone())).scan_report(
+        &["caches".into()],
+        &f.context(),
+        &ScanControl::default(),
+    );
+    let mut rows: Vec<_> = report
+        .findings
+        .iter()
+        .map(|f| (f.title.as_str(), f.risk))
+        .collect();
+    rows.sort_by_key(|(title, _)| title.to_string());
+    assert_eq!(
+        rows,
+        [
+            ("Adobe media cache", Risk::Rebuild),
+            ("Chrome offline web cache · Profile 1", Risk::Rebuild),
+            ("Chrome on-device AI model", Risk::Review),
+            ("Chrome script cache · Default", Risk::Rebuild),
+            ("CocoaPods spec repo · trunk", Risk::Review),
+            ("Command-line tool caches (~/.cache)", Risk::Review),
+            ("Edge GPU cache · Default", Risk::Rebuild),
+            ("Gradle JDKs", Risk::Rebuild),
+            ("Puppeteer browsers", Risk::Rebuild),
+            ("Steam shader cache", Risk::Rebuild),
+            (
+                "Vagrant box · hashicorp-VAGRANTSLASH-bionic64",
+                Risk::Review
+            ),
+            ("ccache", Risk::Rebuild),
+            ("uv cache", Risk::Review),
+        ],
+        "{:?}",
+        report.warnings
+    );
+    // Profile data that is not a cache is never listed.
+    assert!(report.findings.iter().all(|f| {
+        let path = f.resource.path().unwrap_or_default();
+        !path.contains("Local Storage") && !path.ends_with("History") && !path.contains("common")
+    }));
+    let script = report
+        .findings
+        .iter()
+        .find(|f| f.title == "Chrome script cache · Default")
+        .unwrap();
+    assert_eq!(script.value("Ecosystem"), Some("Google Chrome"));
+    assert_eq!(script.actions, [ActionKind::Trash]);
+    let k = ScanControl::default();
+    assert!(module.preflight(&s, script, ActionKind::Trash, &k).is_ok());
+    // A browser cache waits for the browser, not for unrelated developer tools.
+    let node = FakeProcesses::default();
+    node.rows
+        .lock()
+        .unwrap()
+        .push(process("/opt/homebrew/bin/node", 1, 501));
+    let busy = Services {
+        processes: Arc::new(node),
+        ..s.clone()
+    };
+    assert!(module.in_use(&busy, script, ActionKind::Trash).is_none());
+    let puppeteer = report
+        .findings
+        .iter()
+        .find(|f| f.title == "Puppeteer browsers")
+        .unwrap();
+    assert!(module.in_use(&busy, puppeteer, ActionKind::Trash).is_some());
+    let running = Services {
+        apps: Arc::new(FakeApps(vec![RunningApp {
+            pid: 7,
+            bundle_id: "com.google.Chrome".into(),
+            path: "/Applications/Google Chrome.app".into(),
+        }])),
+        ..s
+    };
+    let error = module.in_use(&running, script, ActionKind::Trash).unwrap();
+    assert!(error.contains("Google Chrome"), "{error}");
+}
+
+#[test]
+fn caches_managed_by_their_apps_are_shown_but_never_offered() {
+    let f = Fixture::new();
+    let home = f.dir("home");
+    f.write(
+        "home/Library/Caches/CloudKit/com.apple.bird/pending/upload.bin",
+        "x",
+    );
+    f.write(
+        "home/Library/Application Support/Google/DriveFS/1234567890/content_cache/a",
+        "x",
+    );
+    f.write("home/Library/Messages/Attachments/0a/00/IMG_0001.HEIC", "x");
+    f.write("home/Library/Caches/bazel/_bazel_me/abc/execroot/x", "x");
+    let module = Arc::new(CachesModule {
+        home: Some(home),
+        ..Default::default()
+    });
+    let s = services(&f);
+    let report = Engine::new(s.clone(), builtin(&f).register(module.clone())).scan_report(
+        &["caches".into()],
+        &f.context(),
+        &ScanControl::default(),
+    );
+    let mut titles: Vec<_> = report.findings.iter().map(|f| f.title.as_str()).collect();
+    titles.sort();
+    // The iCloud cache is no longer offered as an ordinary app cache.
+    assert_eq!(
+        titles,
+        [
+            "Bazel output",
+            "Google Drive offline files and cache",
+            "Messages attachments",
+            "iCloud Drive sync cache",
+        ]
+    );
+    let k = ScanControl::default();
+    for f in &report.findings {
+        assert!(f.actions.is_empty(), "{} offers no Trash", f.title);
+        assert!(f.blocked_reason.is_some(), "{}", f.title);
+        assert!(f.bytes.unwrap() > 0, "{} shows its size", f.title);
+        assert!(!f.reason.contains("before moving this cache to Trash"));
+        // Even a selection made outside the app is refused.
+        assert!(module.preflight(&s, f, ActionKind::Trash, &k).is_err());
+    }
+}
+
+#[test]
+fn toolchains_list_conda_environments_uv_pythons_and_ide_jdks() {
+    let f = Fixture::new();
+    let home = f.dir("home");
+    f.write("home/miniconda3/envs/data/bin/python", "x");
+    f.write("home/miniconda3/bin/python", "x");
+    f.write(
+        "home/.local/share/uv/python/cpython-3.12.4-macos-aarch64-none/bin/python3",
+        "x",
+    );
+    f.write("home/.local/share/uv/python/.lock", "");
+    f.write(
+        "home/Library/Java/JavaVirtualMachines/corretto-17.0.8/Contents/Home/bin/java",
+        "x",
+    );
+    let module = Arc::new(ToolchainsModule {
+        home: Some(home),
+        ..Default::default()
+    });
+    let report = Engine::new(services(&f), builtin(&f).register(module)).scan_report(
+        &["toolchains".into()],
+        &f.context(),
+        &ScanControl::default(),
+    );
+    let mut rows: Vec<_> = report
+        .findings
+        .iter()
+        .map(|f| {
+            (
+                f.title.as_str(),
+                f.value("Official command").unwrap_or(""),
+                f.risk,
+            )
+        })
+        .collect();
+    rows.sort_by_key(|(title, _, _)| title.to_string());
+    assert_eq!(
+        rows,
+        [
+            (
+                "Conda environment data",
+                "conda env remove -n data",
+                Risk::Review
+            ),
+            ("JDK corretto-17.0.8", "", Risk::Review),
+            (
+                "Python cpython-3.12.4-macos-aarch64-none",
+                "uv python uninstall cpython-3.12.4-macos-aarch64-none",
+                Risk::Review
+            ),
+        ],
+        "{:?}",
+        report.warnings
+    );
+}

@@ -189,6 +189,10 @@ fn xcode_previews_device_support_and_extra_installs() {
     f.write("home/Library/Developer/Xcode/DocumentationCache/v1/x", "x");
     f.write("home/Library/Developer/CoreSimulator/Caches/dyld/x", "x");
     f.write(
+        "home/Library/Developer/XCTestDevices/0A1B2C3D-0000/data/x",
+        "x",
+    );
+    f.write(
         "home/Library/Developer/CoreSimulator/Devices/ABCDEF12-0000/data/Library/Caches/com.apple.containermanagerd/Dead/temp.1/x",
         "x",
     );
@@ -227,6 +231,9 @@ fn xcode_previews_device_support_and_extra_installs() {
         .actions
         .contains(&ActionKind::Trash));
     assert!(titled("Simulator caches")
+        .actions
+        .contains(&ActionKind::Trash));
+    assert!(titled("Test simulator clones")
         .actions
         .contains(&ActionKind::Trash));
     assert_eq!(
@@ -417,4 +424,48 @@ fn docker_cleanup_stops_when_it_would_free_more_than_reviewed() {
     assert_eq!(result.outcome, Outcome::Failed);
     assert!(result.message.contains("more than"), "{}", result.message);
     assert_eq!(runner.calls().len(), 3, "prune never ran");
+}
+
+#[test]
+fn virtual_machines_are_listed_for_their_size_and_removed_in_their_app() {
+    let f = Fixture::new();
+    f.write(
+        "home/Parallels/Windows 11.pvm/harddisk.hdd/disk.hds",
+        "disk",
+    );
+    f.write(
+        "home/Library/Containers/com.utmapp.UTM/Data/Documents/Debian.utm/Data/disk.qcow2",
+        "disk",
+    );
+    f.write(
+        "home/Virtual Machines.localized/Ubuntu.vmwarevm/Ubuntu.vmdk",
+        "disk",
+    );
+    f.write("home/VirtualBox VMs/Fedora/Fedora.vdi", "disk");
+    f.write("home/.tart/vms/sequoia/disk.img", "disk");
+    // Tart's pulled images are a cache, listed by Caches & Logs instead.
+    f.write("home/.tart/cache/OCIs/ghcr.io/x/disk.img", "disk");
+    let mut s = services(&f);
+    s.commands = StubRunner::new(vec![]);
+    let engine = Engine::new(s, builtin(&f));
+    let findings = scan(&engine, &f, "containers");
+    let mut titles: Vec<_> = findings.iter().map(|r| r.title.as_str()).collect();
+    titles.sort();
+    assert_eq!(
+        titles,
+        [
+            "Parallels Desktop virtual machine · Windows 11",
+            "Tart virtual machine · sequoia",
+            "UTM virtual machine · Debian",
+            "VMware Fusion virtual machine · Ubuntu",
+            "VirtualBox virtual machine · Fedora",
+        ]
+    );
+    for vm in &findings {
+        assert!(vm.actions.is_empty(), "{} offers no Trash", vm.title);
+        assert_eq!(vm.risk, Risk::Review);
+        assert!(vm.bytes.unwrap() > 0);
+        assert!(vm.blocked_reason.is_some());
+        assert!(vm.value("Official cleanup").is_some());
+    }
 }

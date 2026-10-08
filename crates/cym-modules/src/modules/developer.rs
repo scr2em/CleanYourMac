@@ -1254,6 +1254,8 @@ pub struct CacheLocation {
     /// Packages that every project of the ecosystem installs from, also listed by the
     /// Dependencies module.
     pub package_store: bool,
+    /// Only its app uses it, so running command-line developer tools do not hold it.
+    pub app_cache: bool,
 }
 fn cache(ecosystem: &'static str, name: &'static str, path: &'static str) -> CacheLocation {
     CacheLocation {
@@ -1266,6 +1268,7 @@ fn cache(ecosystem: &'static str, name: &'static str, path: &'static str) -> Cac
         blocked: None,
         risk: Risk::Rebuild,
         package_store: false,
+        app_cache: false,
     }
 }
 impl CacheLocation {
@@ -1293,11 +1296,19 @@ impl CacheLocation {
         self.package_store = true;
         self
     }
-    /// The home-relative folder that holds this location's matches.
+    pub fn app_cache(mut self) -> Self {
+        self.app_cache = true;
+        self
+    }
+    /// The home-relative folder that holds this location's matches: the components before
+    /// the first `*`.
     fn root(&self) -> &'static str {
-        match self.path.rsplit_once('/') {
-            Some((parent, last)) if last.contains('*') => parent,
-            _ => self.path,
+        let path: &'static str = self.path;
+        match path.find('*') {
+            Some(star) => path[..star]
+                .rsplit_once('/')
+                .map_or("", |(parent, _)| parent),
+            None => path,
         }
     }
 }
@@ -1345,6 +1356,8 @@ impl Default for CachesModule {
                     .note("Browsers are downloaded again by playwright install."),
                 cache("JavaScript", "Cypress binaries", "Library/Caches/Cypress")
                     .command("cypress cache clear"),
+                cache("JavaScript", "Puppeteer browsers", ".cache/puppeteer")
+                    .note("Puppeteer downloads its browser again when a project installs it."),
                 // Python and machine learning
                 cache("Python", "pip cache", "Library/Caches/pip").package_store().command("pip cache purge"),
                 cache("Python", "Poetry cache", "Library/Caches/pypoetry/cache").package_store(),
@@ -1358,6 +1371,13 @@ impl Default for CachesModule {
                 cache("Python", "Miniforge packages", "miniforge3/pkgs").package_store()
                     .note(HARD_LINKS)
                     .command("conda clean --all"),
+                cache("Python", "uv cache", ".cache/uv").package_store()
+                    .note("Environments link these packages, so less space may be freed than shown. Environments made with uv's symlink link mode stop working.")
+                    .command("uv cache prune")
+                    .risk(Risk::Review),
+                cache("Python", "pre-commit environments", ".cache/pre-commit")
+                    .note("pre-commit installs its hook environments again on the next commit.")
+                    .command("pre-commit clean"),
                 // Apple platforms
                 cache("Xcode", "Xcode cache", "Library/Caches/com.apple.dt.Xcode")
                     .apps(owners::XCODE),
@@ -1374,6 +1394,11 @@ impl Default for CachesModule {
                 )
                 .package_store()
                 .apps(owners::XCODE),
+                cache("CocoaPods", "CocoaPods spec repo", ".cocoapods/repos/*")
+                    .note("A Git copy of a Podspec repository. Projects that use the CDN (the default since CocoaPods 1.8) do not need the old master repo; a private repo comes back only with pod repo add and its URL.")
+                    .command("pod repo remove <name>")
+                    .apps(owners::XCODE)
+                    .risk(Risk::Review),
                 // Flutter and Dart: global tools in bin and global_packages are kept.
                 cache("Flutter / Dart", "Pub hosted packages", ".pub-cache/hosted").package_store()
                     .command("dart pub cache clean"),
@@ -1385,6 +1410,9 @@ impl Default for CachesModule {
                     .apps(owners::ANDROID),
                 cache("Gradle", "Gradle daemon logs", ".gradle/daemon").apps(owners::ANDROID),
                 cache("Kotlin", "Kotlin/Native toolchains", ".konan").apps(owners::ANDROID),
+                cache("Gradle", "Gradle JDKs", ".gradle/jdks")
+                    .note("Java runtimes Gradle downloaded for toolchains; it downloads them again when a build needs one.")
+                    .apps(owners::ANDROID),
                 cache("Maven", "Maven repository", ".m2/repository").package_store()
                     .note("Artifacts installed locally with mvn install exist nowhere else.")
                     .apps(owners::ANDROID)
@@ -1412,6 +1440,13 @@ impl Default for CachesModule {
                 cache("Rust (Cargo)", "Cargo Git database", ".cargo/git/db").package_store(),
                 cache("Rust (Cargo)", "Cargo Git checkouts", ".cargo/git/checkouts").package_store(),
                 cache("Rust (Cargo)", "sccache", "Library/Caches/Mozilla.sccache"),
+                // C and C++
+                cache("C / C++", "ccache", "Library/Caches/ccache").command("ccache --clear"),
+                cache("C / C++", "ccache", ".ccache").command("ccache --clear"),
+                cache("Bazel", "Bazel output", "Library/Caches/bazel")
+                    .note("Build outputs and downloads of every Bazel workspace; the next build starts from scratch.")
+                    .command("bazel clean --expunge")
+                    .blocked("Bazel makes its outputs read-only, so Trash cannot remove them. Run `bazel clean --expunge` in each workspace."),
                 // Go
                 cache("Go", "Go module cache", "go/pkg/mod").package_store()
                     .command("go clean -modcache")
@@ -1460,6 +1495,92 @@ impl Default for CachesModule {
                     .note("Logs can help diagnose problems.")
                     .apps(owners::VSCODE),
                 cache("Unity", "Unity package cache", "Library/Unity/cache").apps(owners::UNITY),
+                // Virtual machines and clusters: images the tools download again. The
+                // machines themselves are listed by Containers & VMs.
+                cache("Tart", "Tart image cache", ".tart/cache")
+                    .note("Images Tart pulled; virtual machines cloned from them keep working.")
+                    .command("tart prune"),
+                cache("Vagrant", "Vagrant box", ".vagrant.d/boxes/*")
+                    .note("Machines already made from the box keep working; a new machine downloads it again.")
+                    .command("vagrant box prune")
+                    .risk(Risk::Review),
+                cache("Kubernetes", "minikube downloads", ".minikube/cache")
+                    .note("Images and Kubernetes binaries minikube downloads again; clusters stay."),
+                // Browsers: per-profile caches in Application Support. History, cookies,
+                // passwords, extensions and Local Storage stay.
+                cache("Google Chrome", "Chrome script cache", "Library/Application Support/Google/Chrome/*/Code Cache")
+                    .apps(owners::CHROME)
+                    .app_cache(),
+                cache("Google Chrome", "Chrome GPU cache", "Library/Application Support/Google/Chrome/*/GPUCache")
+                    .apps(owners::CHROME)
+                    .app_cache(),
+                cache("Google Chrome", "Chrome offline web cache", "Library/Application Support/Google/Chrome/*/Service Worker/CacheStorage")
+                    .note("Sites keep working offline only after you visit them again.")
+                    .apps(owners::CHROME)
+                    .app_cache(),
+                cache("Google Chrome", "Chrome on-device AI model", "Library/Application Support/Google/Chrome/OptGuideOnDeviceModel")
+                    .note("Chrome downloads the model, often several GB, again while its on-device AI features are on. Turn them off in Chrome's settings to keep it away.")
+                    .apps(owners::CHROME)
+                    .app_cache()
+                    .risk(Risk::Review),
+                cache("Microsoft Edge", "Edge script cache", "Library/Application Support/Microsoft Edge/*/Code Cache")
+                    .apps(owners::EDGE)
+                    .app_cache(),
+                cache("Microsoft Edge", "Edge GPU cache", "Library/Application Support/Microsoft Edge/*/GPUCache")
+                    .apps(owners::EDGE)
+                    .app_cache(),
+                cache("Microsoft Edge", "Edge offline web cache", "Library/Application Support/Microsoft Edge/*/Service Worker/CacheStorage")
+                    .note("Sites keep working offline only after you visit them again.")
+                    .apps(owners::EDGE)
+                    .app_cache(),
+                cache("Brave", "Brave script cache", "Library/Application Support/BraveSoftware/Brave-Browser/*/Code Cache")
+                    .apps(owners::BRAVE)
+                    .app_cache(),
+                cache("Brave", "Brave GPU cache", "Library/Application Support/BraveSoftware/Brave-Browser/*/GPUCache")
+                    .apps(owners::BRAVE)
+                    .app_cache(),
+                cache("Brave", "Brave offline web cache", "Library/Application Support/BraveSoftware/Brave-Browser/*/Service Worker/CacheStorage")
+                    .note("Sites keep working offline only after you visit them again.")
+                    .apps(owners::BRAVE)
+                    .app_cache(),
+                // Games and media apps
+                cache("Steam", "Steam shader cache", "Library/Application Support/Steam/steamapps/shadercache")
+                    .note("Games compile their shaders again and may stutter briefly the first time.")
+                    .apps(owners::STEAM)
+                    .app_cache(),
+                cache("Steam", "Steam web cache", "Library/Application Support/Steam/appcache/httpcache")
+                    .apps(owners::STEAM)
+                    .app_cache(),
+                cache("Steam", "Steam unfinished downloads", "Library/Application Support/Steam/steamapps/downloading")
+                    .note("Downloads and updates in progress; Steam starts them again.")
+                    .apps(owners::STEAM)
+                    .app_cache()
+                    .risk(Risk::Review),
+                cache("Adobe", "Adobe media cache", "Library/Application Support/Adobe/Common/Media Cache Files")
+                    .note("Premiere Pro and After Effects make it again when they open a project; the first open is slower.")
+                    .apps(owners::ADOBE)
+                    .app_cache(),
+                cache("Adobe", "Adobe media cache database", "Library/Application Support/Adobe/Common/Media Cache")
+                    .note("Premiere Pro and After Effects make it again when they open a project; the first open is slower.")
+                    .apps(owners::ADOBE)
+                    .app_cache(),
+                // Shown so their size is known, but managed by their apps: removing the folder
+                // can lose changes that are not uploaded yet, or leave broken messages.
+                cache("iCloud", "iCloud Drive sync cache", "Library/Caches/CloudKit")
+                    .note("macOS keeps iCloud Drive transfers here, including changes not uploaded yet.")
+                    .risk(Risk::Review)
+                    .app_cache()
+                    .blocked("macOS manages this iCloud cache. Removing it can lose changes not uploaded yet, and it grows back. To free space, turn on Optimize Mac Storage in iCloud Drive settings."),
+                cache("Google Drive", "Google Drive offline files and cache", "Library/Application Support/Google/DriveFS")
+                    .note("Google Drive keeps files made available offline, its file cache and changes waiting to upload here.")
+                    .risk(Risk::Review)
+                    .app_cache()
+                    .blocked("Google Drive manages this folder, and it can hold changes not uploaded yet. To free space, make folders online-only in Google Drive, or use its Clear cache setting."),
+                cache("macOS", "Messages attachments", "Library/Messages/Attachments")
+                    .note("Photos, videos and files from your conversations.")
+                    .risk(Risk::Review)
+                    .app_cache()
+                    .blocked("Removing attachments here leaves broken messages. Delete them in Messages, or in System Settings › General › Storage › Messages."),
             ],
         }
     }
@@ -1543,39 +1664,55 @@ fn find_location<'a>(
     locations: &'a [CacheLocation],
     path: &str,
 ) -> Option<&'a CacheLocation> {
-    let relative = path.strip_prefix(home)?.strip_prefix('/')?;
-    locations.iter().find(|l| match l.path.rsplit_once('/') {
-        Some((parent, last)) if last.contains('*') => relative
-            .rsplit_once('/')
-            .is_some_and(|(p, n)| p == parent && glob(last, n).is_some()),
-        _ => relative == l.path,
+    let relative: Vec<&str> = path
+        .strip_prefix(home)?
+        .strip_prefix('/')?
+        .split('/')
+        .collect();
+    locations.iter().find(|l| {
+        let parts: Vec<&str> = l.path.split('/').collect();
+        parts.len() == relative.len()
+            && parts
+                .iter()
+                .zip(&relative)
+                .all(|(pattern, name)| glob(pattern, name).is_some())
     })
 }
-/// Existing folders for a location: the path itself, or each match of its last `*`.
+/// Existing folders for a location: the path itself, or each match of its `*` components,
+/// titled with the names they matched (`JetBrains IDE caches · PyCharm2024.2`).
 fn expand(s: &Services, home: &str, location: &CacheLocation) -> Vec<(Entry, String)> {
-    let path = format!("{home}/{}", location.path);
-    match location.path.rsplit_once('/') {
-        Some((_, last)) if last.contains('*') => {
-            let root = format!("{home}/{}", location.root());
-            if !s.is_dir(&root) {
-                return vec![];
+    let mut current: Vec<(String, Vec<String>)> = vec![(home.to_owned(), vec![])];
+    for part in location.path.split('/') {
+        let mut next = vec![];
+        for (folder, names) in current {
+            if !part.contains('*') {
+                next.push((format!("{folder}/{part}"), names));
+                continue;
             }
-            s.children(&root, &mut vec![])
-                .into_iter()
-                .filter(|e| e.directory && glob(last, e.name()).is_some())
-                .map(|e| {
-                    let title = format!("{} · {}", location.name, e.name());
-                    (e, title)
-                })
-                .collect()
+            if !s.is_dir(&folder) {
+                continue;
+            }
+            for e in s.children(&folder, &mut vec![]) {
+                if e.directory && !e.symlink && glob(part, e.name()).is_some() {
+                    let mut names = names.clone();
+                    names.push(e.name().to_owned());
+                    next.push((e.identity.path, names));
+                }
+            }
         }
-        _ => s
-            .entry(&path)
-            .ok()
-            .map(|e| (e, location.name.to_owned()))
-            .into_iter()
-            .collect(),
+        current = next;
     }
+    current
+        .into_iter()
+        .filter_map(|(path, names)| {
+            let e = s.entry(&path).ok()?;
+            let title = match names.is_empty() {
+                true => location.name.to_owned(),
+                false => format!("{} · {}", location.name, names.join(" · ")),
+            };
+            Some((e, title))
+        })
+        .collect()
 }
 impl ScanModule for CachesModule {
     fn descriptor(&self) -> ModuleDescriptor {
@@ -1608,12 +1745,13 @@ impl ScanModule for CachesModule {
         let mut candidates = vec![];
         for location in &self.locations {
             k.check()?;
-            let mut reason = format!(
-                "{} Close the owning tools before moving this cache to Trash.",
-                location
-                    .note
-                    .unwrap_or("Cached downloads may be needed for offline installs.")
-            );
+            let note = location
+                .note
+                .unwrap_or("Cached downloads may be needed for offline installs.");
+            let mut reason = match location.blocked {
+                Some(_) => note.to_owned(),
+                None => format!("{note} Close the owning tools before moving this cache to Trash."),
+            };
             let mut details = vec![detail("Ecosystem", location.ecosystem)];
             if let Some(command) = location.command {
                 reason += &format!(" Official command: `{command}`.");
@@ -1665,11 +1803,12 @@ impl ScanModule for CachesModule {
         if let Some(result) = self.mac.preflight(s, &self.home(), path) {
             return result.err();
         }
-        if let Some(reason) = self
-            .location(path)
-            .and_then(|l| owners_closed(s, l.apps).err())
-        {
+        let location = self.location(path);
+        if let Some(reason) = location.and_then(|l| owners_closed(s, l.apps).err()) {
             return Some(reason);
+        }
+        if location.is_some_and(|l| l.app_cache) {
+            return None;
         }
         let active = orphans::active_tools(s, None);
         (!active.is_empty()).then(|| {
