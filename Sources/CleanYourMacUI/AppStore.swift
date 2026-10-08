@@ -102,7 +102,7 @@ public final class AppStore {
     public enum ScanPlace: String, CaseIterable, Sendable {
         case wholeMac = "Whole Mac", folders = "Chosen folders"
     }
-    public var scanPlace: ScanPlace = .wholeMac { didSet { if scanPlace != oldValue { storageNavigation = []; persist() } } }
+    public var scanPlace: ScanPlace = .wholeMac { didSet { if scanPlace != oldValue { storageNavigation = []; persist(); scopeChanged() } } }
     /// The folders a scan starts from. "Whole Mac" means your home folder: system locations
     /// are never scanned, and other volumes are left alone.
     public var scanRoots: [String] { scanPlace == .wholeMac && !demo ? [NSHomeDirectory()] : roots }
@@ -112,8 +112,8 @@ public final class AppStore {
     public private(set) var recommendations: [Recommendation] = []
     /// The home volume's capacity, refreshed with the overview.
     public private(set) var diskSpace = DiskSpace.current()
-    public var roots: [String]
-    public var exclusions: [String]
+    public var roots: [String] { didSet { if roots != oldValue { scopeChanged() } } }
+    public var exclusions: [String] { didSet { if exclusions != oldValue { scopeChanged() } } }
     public var ignoredNames: [String]
     public var disabledModules: [String]
     public var selectedIDs = Set<String>()
@@ -277,6 +277,21 @@ public final class AppStore {
         await apply(ReviewDraft(ids: [finding.id], kind: kind, selection: summary, acknowledged: [finding.id]))
     }
 
+    /// After the folders to scan or the exclusions change: forget results outside the new
+    /// scope, with their selection, so nothing listed or recommended lies outside it.
+    private func scopeChanged() {
+        guard !demo else { return }
+        let context = ScanContext(roots: scanRoots, exclusions: exclusions, ignoredProcessNames: ignoredNames, limitToRoots: scanPlace == .folders)
+        Task { [weak self] in
+            guard let self else { return }
+            let removed = Set(await self.core.retainInScope(context))
+            guard !removed.isEmpty else { return }
+            self.selectedIDs.subtract(removed)
+            if let id = self.inspectedID, removed.contains(id) { self.inspectedID = nil }
+            self.resultsChanged()
+            await self.refreshOverview()
+        }
+    }
     /// When the app becomes active again: forget results deleted elsewhere in the meantime
     /// (in Finder, a terminal or another app) and refresh totals, fixes and disk space.
     public func refreshOnReturn() async {
@@ -475,6 +490,8 @@ public final class AppStore {
         if scanPlace == .folders && roots.isEmpty && !chooseFolders() { return }
         if isScanning { cancelScan() }
         scanTask?.cancel()
+        // An overview scan rescans Storage Explorer's top level, so leave any opened folder.
+        if (selectedModuleID ?? "overview") == "overview" { storageNavigation = [] }
         let id = UUID(), selected = selectedModuleID ?? "overview", context = self.context
         scanID = id; isScanning = true; progress = "Starting scan…"; warnings = []; scanHadWarnings = false; selectedIDs = []; inspectedID = nil
         // The overview scans every enabled module except those the user must run explicitly.
@@ -612,7 +629,9 @@ public final class AppStore {
         isRefreshingOrphans = true
         defer { isRefreshingOrphans = false }
         do {
-            for try await _ in core.scan(moduleIDs: ["orphans"], context: context, store: true) {}
+            // The whole scan scope, not a folder opened in Storage Explorer.
+            let scope = ScanContext(roots: scanRoots, exclusions: exclusions, ignoredProcessNames: ignoredNames, limitToRoots: scanPlace == .folders && !demo)
+            for try await _ in core.scan(moduleIDs: ["orphans"], context: scope, store: true) {}
             let orphanIDs = selectedIDs.filter { $0.hasPrefix("orphans:") }
             if !orphanIDs.isEmpty {
                 let present = Set(await core.selection(Array(orphanIDs), preview: orphanIDs.count).preview.map(\.id))

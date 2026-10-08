@@ -10,6 +10,7 @@ public enum Layout {
     public static let reviewWidth: CGFloat = 640, reviewHeight: CGFloat = 540, rowMinimum: CGFloat = 52, panelRadius: CGFloat = 16, controlRadius: CGFloat = 10, smallRadius: CGFloat = 5
     public static let iconSmall: CGFloat = 12, iconMedium: CGFloat = 16, iconLarge: CGFloat = 32, rowIcon: CGFloat = 24, checkbox: CGFloat = 18
     public static let sidebarRow: CGFloat = 36, controlHeight: CGFloat = 40
+    public static let chipHeight: CGFloat = 28, toolIcon: CGFloat = 40
     public static let scanOrb: CGFloat = 200, scanOrbCompact: CGFloat = 64, diskBar: CGFloat = 24
 }
 /// System font (SF Pro) on a compact macOS scale.
@@ -202,6 +203,10 @@ public struct ThemeSwatch: View {
         }
         .accessibilityHidden(true)
     }
+}
+/// Shared animation timing.
+public enum Motion {
+    public static let quick = Animation.easeOut(duration: 0.15)
 }
 public enum Stroke {
     public static let hairline: CGFloat = 1, focus: CGFloat = 2

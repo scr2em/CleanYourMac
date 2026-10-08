@@ -325,34 +325,43 @@ private struct AllToolsView: View {
     }
 }
 
-private struct ScopeView: View {
+/// Where scans look, on every page: the whole Mac or the chosen folders, which can be
+/// changed or re-chosen here.
+private struct ScopeChip: View {
     @Bindable var store: AppStore
-    let usesRoots: Bool
-    var body: some View {
-        HStack(spacing: Space.md) {
-            Image(systemName: usesRoots ? "folder" : "scope").foregroundStyle(.secondary)
-            Text(usesRoots || store.scanPlace == .folders ? store.context.roots.map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: " · ") : scopeDescription)
-                .font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
-            Spacer()
-            if store.scanPlace == .folders {
-                ActionButton("Whole Mac", disabled: store.isScanning || store.isApplying, reason: store.reason(store.whileScanning, store.whileApplying)) { store.scanPlace = .wholeMac }
-            }
-            if usesRoots || store.scanPlace == .folders { ActionButton("Choose folders", disabled: store.isScanning || store.isApplying, reason: store.reason(store.whileScanning, store.whileApplying)) {
-                // On a tool's page, scan the new folders right away.
-                if store.chooseFolders() { store.scan() }
-            } }
-        }
+    @State private var open = false
+    private var value: String {
+        guard store.scanPlace == .folders else { return "Whole Mac" }
+        let names = store.roots.map { ($0 as NSString).lastPathComponent }
+        guard let first = names.first else { return "No folders" }
+        return names.count > 1 ? "\(first) +\(names.count - 1)" : first
     }
-    private var scopeDescription: String {
-        switch store.selectedModuleID {
-        case "orphans": "Current-user processes · refreshes while this view is open"
-        case "simulators": "Devices and runtimes in your selected Xcode installation"
-        case "xcode": "Your Xcode build and device-support folders"
-        case "applications", "leftovers": "Installed applications and precisely named related files"
-        case "downloads": "Your Downloads folder"
-        case "trash": "Your local Trash"
-        case "toolchains": "Version managers, SDK components and virtual devices in your home folder"
-        default: "Known user caches and logs"
+    var body: some View {
+        Button { open.toggle() } label: {
+            ChipLabel(symbol: store.scanPlace == .folders ? "folder" : "laptopcomputer", label: "Scanning", value: value, active: store.scanPlace == .folders, open: open)
+        }
+        .buttonStyle(.plain)
+        .disabled(store.isScanning || store.isApplying, because: store.reason(store.whileScanning, store.whileApplying))
+        .help(placeDescription(store))
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: Space.xxs) {
+                OptionRow(title: "Whole Mac", checked: store.scanPlace == .wholeMac) { store.scanPlace = .wholeMac; open = false }
+                OptionRow(title: store.roots.isEmpty ? "Chosen folders" : "Chosen folders (\(store.roots.count))", checked: store.scanPlace == .folders) {
+                    open = false
+                    if store.roots.isEmpty { store.chooseFolders() } else { store.scanPlace = .folders }
+                }
+                ForEach(store.roots, id: \.self) { root in
+                    Text((root as NSString).abbreviatingWithTildeInPath).font(TypeStyle.caption).foregroundStyle(Palette.muted)
+                        .lineLimit(1).truncationMode(.middle).padding(.leading, Space.xl + Space.xs)
+                }
+                Divider().padding(.vertical, Space.xxs)
+                OptionRow(title: "Choose folders…", symbol: "plus") {
+                    open = false
+                    // On a tool's page, scan the new folders right away.
+                    if store.chooseFolders(), store.selectedModuleID != nil, store.selectedModuleID != "overview" { store.scan() }
+                }
+            }
+            .padding(Space.xs).frame(minWidth: 240, maxWidth: 360).background(Palette.elevated)
         }
     }
 }
@@ -361,42 +370,49 @@ private struct FinderView: View {
     @Bindable var store: AppStore
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: Space.lg) {
-                PageHeader(store.currentModule?.name ?? "Findings", subtitle: store.currentModule?.summary ?? "")
-                ScopeView(store: store, usesRoots: store.currentModule?.usesRoots ?? true)
-                if store.selectedModuleID == "storage", !store.storageNavigation.isEmpty {
-                    ActionButton("Back to parent", disabled: store.isScanning, reason: store.whileScanning) { store.browseBack() }
-                }
-                HStack(spacing: Space.md) {
-                    TextField("Search results", text: $store.search).textFieldStyle(.roundedBorder)
-                    Picker("Sort", selection: $store.sort) { ForEach(SortOrder.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.fixedSize()
-                    Button { store.sortAscending.toggle() } label: {
-                        Image(systemName: store.sortAscending ? "arrow.up" : "arrow.down").foregroundStyle(Palette.accentSymbol)
-                    }
-                    .buttonStyle(.borderless)
-                    .help(sortDirectionLabel)
-                    .accessibilityLabel(sortDirectionLabel)
-                    if store.isScanning { ActionButton("Cancel") { store.cancelScan() } }
-                    else { ActionButton("Scan", kind: .primary, disabled: store.isApplying || store.demo, reason: store.reason(store.inDemo, store.whileApplying)) { store.scan() } }
-                }
-                SearchSummary(store: store)
-                // Processes have no file dates or disk size; every other tool can be filtered.
-                if store.selectedModuleID != "orphans" {
-                    HStack(spacing: Space.md) {
-                        Picker("Size", selection: $store.sizeFilter) { ForEach(SizeFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.fixedSize()
-                        Picker("Modified", selection: $store.ageFilter) { ForEach(AgeFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.fixedSize()
-                        Picker("Last used", selection: $store.usedFilter) { ForEach(AgeFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.fixedSize()
-                        if store.sizeFilter != .all || store.ageFilter != .all || store.usedFilter != .all {
-                            Button("Clear filters") { store.sizeFilter = .all; store.ageFilter = .all; store.usedFilter = .all }
-                                .buttonStyle(.link)
+            VStack(alignment: .leading, spacing: Space.md) {
+                ToolHeader(store.currentModule?.name ?? "Findings", subtitle: store.currentModule?.summary ?? "", symbol: store.currentModule?.symbol ?? "tray") {
+                    if store.isScanning {
+                        HStack(spacing: Space.sm) {
+                            ProgressView().controlSize(.small)
+                            ActionButton("Cancel") { store.cancelScan() }
                         }
-                        Spacer()
-                    }.font(TypeStyle.caption)
+                    } else {
+                        ActionButton("Scan", kind: .primary, disabled: store.isApplying || store.demo, reason: store.reason(store.inDemo, store.whileApplying)) { store.scan() }
+                    }
                 }
-                HStack {
-                    if store.isScanning { ProgressView().controlSize(.small) }
-                    Text(store.progress).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1)
-                    Spacer()
+                HStack(spacing: Space.sm) {
+                    ScopeChip(store: store)
+                    if store.selectedModuleID == "storage", !store.storageNavigation.isEmpty {
+                        Button { store.browseBack() } label: { ChipLabel(symbol: "chevron.left", value: "Parent folder") }
+                            .buttonStyle(.plain).disabled(store.isScanning, because: store.whileScanning)
+                    }
+                    Spacer(minLength: Space.md)
+                    SearchSummary(store: store)
+                }
+                HStack(spacing: Space.sm) {
+                    SearchField("Search by name or path", text: $store.search).frame(minWidth: 180, maxWidth: 340)
+                    // Processes have no file dates or disk size; every other tool can be filtered.
+                    if store.selectedModuleID != "orphans" {
+                        ChoiceChip("Size", selection: $store.sizeFilter, neutral: .all, options: SizeFilter.allCases.map { ChoiceOption($0, $0.rawValue) })
+                        ChoiceChip("Modified", selection: $store.ageFilter, neutral: .all, options: AgeFilter.allCases.map { ChoiceOption($0, $0.rawValue) })
+                        ChoiceChip("Last used", selection: $store.usedFilter, neutral: .all, options: AgeFilter.allCases.map { ChoiceOption($0, $0.rawValue) })
+                        if store.sizeFilter != .all || store.ageFilter != .all || store.usedFilter != .all {
+                            Button("Clear") { store.sizeFilter = .all; store.ageFilter = .all; store.usedFilter = .all }
+                                .buttonStyle(.plain).font(TypeStyle.label).foregroundStyle(Palette.accentText)
+                        }
+                    }
+                    Spacer(minLength: Space.sm)
+                    ChoiceChip("Sort", symbol: nil, selection: $store.sort, options: SortOrder.allCases.map { ChoiceOption($0, $0.rawValue) })
+                    Button { store.sortAscending.toggle() } label: {
+                        Image(systemName: store.sortAscending ? "arrow.up" : "arrow.down").font(TypeStyle.label)
+                            .foregroundStyle(Palette.accentSymbol).frame(width: Layout.chipHeight, height: Layout.chipHeight)
+                            .background(Palette.surface, in: Circle()).overlay(Circle().strokeBorder(Palette.border, lineWidth: Stroke.hairline))
+                    }
+                    .buttonStyle(.plain).help(sortDirectionLabel).accessibilityLabel(sortDirectionLabel)
+                }
+                if store.isScanning {
+                    Text(store.progress).font(TypeStyle.caption).foregroundStyle(Palette.muted).lineLimit(1)
                 }
                 WarningView(store: store)
                 if store.selectedModuleID == "storage", !store.largest.isEmpty {
@@ -431,41 +447,23 @@ private struct FinderView: View {
     }
 }
 
-/// Aggregate figures for the rows matching the current search and filters.
+/// Aggregate figures for the rows matching the current search and filters, in one line.
 private struct SearchSummary: View {
     @Bindable var store: AppStore
     var body: some View {
         let summary = store.summary
-        VStack(alignment: .leading, spacing: Space.xs) {
-            if !store.search.isEmpty {
-                Text("Matching “\(store.search)”").font(TypeStyle.caption).foregroundStyle(Palette.muted)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Space.sm) {
-                    StatChip(store.resultTotal == 1 ? "Item" : "Items", value: store.resultTotal.formatted())
-                    if summary.processCount > 0 {
-                        StatChip("Memory", value: Display.bytes(summary.processMemoryBytes))
-                        if let busiest = store.maxCPU { StatChip("Highest CPU", value: String(format: "%.1f%%", busiest)) }
-                    } else {
-                        StatChip("Total size", value: Display.bytes(summary.diskBytes))
-                        StatChip("Ready to review", value: Display.bytes(summary.reclaimableBytes), emphasized: summary.reclaimableBytes > 0)
-                        if let largest = store.largest.first, let bytes = largest.diskBytes, bytes > 0 {
-                            StatChip("Largest · " + largest.title, value: Display.bytes(bytes))
-                        }
-                    }
-                    if summary.blocked > 0 { StatChip("Needs inspection", value: summary.blocked.formatted()) }
-                    if !store.selectedIDs.isEmpty { StatChip("Selected", value: store.selectedIDs.count.formatted()) }
-                }
-            }
+        var parts = [SummaryLine.Part(store.resultTotal.formatted(), store.resultTotal == 1 ? "item" : "items")]
+        if summary.processCount > 0 {
+            parts.append(.init(Display.bytes(summary.processMemoryBytes), "memory"))
+            if let busiest = store.maxCPU { parts.append(.init(String(format: "%.1f%%", busiest), "highest CPU")) }
+        } else if store.resultTotal > 0 {
+            parts.append(.init(Display.bytes(summary.diskBytes), "on disk"))
+            parts.append(.init(Display.bytes(summary.reclaimableBytes), "to review", emphasized: summary.reclaimableBytes > 0))
         }
-        .task(id: store.queryKey) {
-            // Debounce typing and streamed results before asking the core for a new snapshot.
-            try? await Task.sleep(for: .milliseconds(150))
-            guard !Task.isCancelled else { return }
-            await store.requery()
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Search summary")
+        if summary.blocked > 0 { parts.append(.init(summary.blocked.formatted(), "need inspection")) }
+        if !store.selectedIDs.isEmpty { parts.append(.init(store.selectedIDs.count.formatted(), "selected", emphasized: true)) }
+        if !store.search.isEmpty { parts.append(.init("“\(store.search)”", "matching")) }
+        return SummaryLine(parts)
     }
 }
 
