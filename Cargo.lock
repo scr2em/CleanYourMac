@@ -178,6 +178,7 @@ dependencies = [
  "cym-model",
  "cym-ports",
  "cym-services",
+ "libc",
  "plist",
  "rayon",
  "serde",
