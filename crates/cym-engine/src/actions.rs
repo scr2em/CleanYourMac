@@ -74,6 +74,12 @@ fn check(f: &Finding, request: &ActionRequest) -> Result<()> {
     if !(f.actions.contains(&request.kind) || acknowledged) || f.blocked_reason.is_some() {
         return Err("The requested action is not eligible for this finding.".into());
     }
+    if let Resource::File { file } | Resource::Worktree { file, .. } = &f.resource {
+        // Checks and the action must see the same path: no `..`, `.` or repeated separators.
+        if file.path != policy::canonical(&file.path) {
+            return Err("This item's path is not in its plain form.".into());
+        }
+    }
     if let Some(path) = f.resource.path() {
         if c.protects(path) {
             return Err("The item or an item inside it is now excluded.".into());
@@ -115,6 +121,21 @@ fn apply(
             services.validate(file, c, &module.action_roots(), control)?;
             let destination = services.trash.move_to_trash(&file.path)?;
             let identity = services.snapshot(&destination, control).ok();
+            // A link swapped into the path after the checks would move something else.
+            // Say so, and keep the Trash location so it can be restored from Activity.
+            if identity
+                .as_ref()
+                .is_some_and(|i| i.device != file.device || i.inode != file.inode)
+            {
+                return Ok(row(
+                    f,
+                    request.kind,
+                    Outcome::Failed,
+                    "The item changed while it was moved: something other than the reviewed item is now in the Trash. Restore it from Activity.",
+                    Some(destination),
+                    identity,
+                ));
+            }
             Ok(row(
                 f,
                 request.kind,
@@ -227,6 +248,9 @@ pub fn restore(services: &Services, row: &ActionResult, control: &ScanControl) -
     let (Some(original), Some(trashed)) = (&row.original_path, &row.trash_path) else {
         return Err("This action has no restorable item.".into());
     };
+    if *original != policy::canonical(original) || *trashed != policy::canonical(trashed) {
+        return Err("This action's paths are not in their plain form.".into());
+    }
     // Only an item in a Trash folder goes back, and never into a protected location.
     if !Path::new(trashed)
         .components()

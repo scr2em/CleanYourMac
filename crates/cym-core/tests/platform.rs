@@ -32,8 +32,9 @@ fn worktree_parser_preserves_unusual_paths() {
 
 #[test]
 fn ignored_files_are_listed_but_do_not_block_removal() {
-    // Status, then a missing upstream.
+    // The repository's own settings, status, then a missing upstream.
     let runner = StubRunner::new(vec![
+        output("local\tcore.bare\nfalse\0", 0),
         output("!! .env\0!! node_modules/\0", 0),
         output("", 128),
     ]);
@@ -50,7 +51,23 @@ fn ignored_files_are_listed_but_do_not_block_removal() {
     assert!(safety.reason.contains("branch feature"));
     assert!(safety.reason.contains(".env, node_modules"));
     assert_eq!(safety.upstream, "None");
-    assert_eq!(runner.calls().len(), 2);
+    assert_eq!(runner.calls().len(), 3);
+}
+
+#[test]
+fn a_repository_whose_settings_run_programs_is_left_to_inspect() {
+    let runner = StubRunner::new(vec![output("local\tfilter.x.clean\nsh -c evil\0", 0)]);
+    let record = Worktree {
+        path: "/fixture/worktree".into(),
+        branch: "feature".into(),
+        ..Default::default()
+    };
+    let safety = Git(runner.as_ref())
+        .safety(&record, &ScanControl::default())
+        .unwrap();
+    assert!(!safety.eligible);
+    assert!(safety.reason.contains("filter.x.clean"));
+    assert_eq!(runner.calls().len(), 1, "status never ran");
 }
 
 #[test]
@@ -61,7 +78,7 @@ fn uncommitted_and_untracked_work_blocks_removal() {
         ..Default::default()
     };
     let safety = |status: &str| {
-        let runner = StubRunner::new(vec![output(status, 0)]);
+        let runner = StubRunner::new(vec![output("", 0), output(status, 0)]);
         Git(runner.as_ref())
             .safety(&record, &ScanControl::default())
             .unwrap()

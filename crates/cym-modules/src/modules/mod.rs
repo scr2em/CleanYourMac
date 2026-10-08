@@ -121,10 +121,18 @@ pub fn run(
     control: &ScanControl,
     sink: &mut dyn Sink,
 ) {
-    if let Err(error) = module.scan(services, context, control, sink) {
-        if !control.is_cancelled() {
-            sink.warning(error);
-        }
+    // A panic in one module (for example on malformed tool data) ends only that module's
+    // scan; the others continue.
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        module.scan(services, context, control, &mut *sink)
+    }));
+    match outcome {
+        Ok(Err(error)) if !control.is_cancelled() => sink.warning(error),
+        Ok(_) => {}
+        Err(_) => sink.warning(format!(
+            "{} stopped on unexpected data. Its other results are still listed.",
+            module.descriptor().name
+        )),
     }
 }
 

@@ -175,6 +175,26 @@ impl ContainersModule {
         let name = String::from_utf8_lossy(&out.data).trim().to_owned();
         (out.status == 0 && !name.is_empty()).then_some(name)
     }
+    /// Where the current Docker context sends commands, such as
+    /// `unix:///Users/x/.docker/run/docker.sock`.
+    fn endpoint(&self, s: &Services, exe: &str, k: &ScanControl) -> Option<String> {
+        let out = self
+            .run_tool(
+                s,
+                exe,
+                &[
+                    "context",
+                    "inspect",
+                    "--format",
+                    "{{.Endpoints.docker.Host}}",
+                ],
+                10,
+                k,
+            )
+            .ok()?;
+        let host = String::from_utf8_lossy(&out.data).trim().to_owned();
+        (out.status == 0 && !host.is_empty()).then_some(host)
+    }
     /// Reclaimable space by kind, from `<tool> system df`.
     fn usage(&self, s: &Services, exe: &str, k: &ScanControl) -> Result<Vec<Usage>> {
         let out = self.run_tool(s, exe, &["system", "df", "--format", "{{json .}}"], 60, k)?;
@@ -357,9 +377,23 @@ impl ScanModule for ContainersModule {
         for tool in ["docker", "podman"] {
             k.check()?;
             let Some(exe) = self.cli(tool) else { continue };
+            let mut endpoint = None;
             let engine = if tool == "docker" {
-                self.context(s, &exe, k)
-                    .map(|name| (engine_for_context(&name), name))
+                let Some(name) = self.context(s, &exe, k) else {
+                    continue;
+                };
+                // Only an engine on this Mac: a context can point at a remote host.
+                match self.endpoint(s, &exe, k) {
+                    Some(host) if host.starts_with("unix://") => endpoint = Some(host),
+                    other => {
+                        sink.warning(format!(
+                            "Docker points at {} (context {name}), not an engine on this Mac, so its data is not listed.",
+                            other.unwrap_or_else(|| "an unknown engine".into())
+                        ));
+                        continue;
+                    }
+                }
+                Some((engine_for_context(&name), name))
             } else {
                 ENGINES
                     .iter()
@@ -427,6 +461,9 @@ impl ScanModule for ContainersModule {
                 if !context.is_empty() {
                     f.details.push(detail("Context", context.clone()));
                 }
+                if let Some(host) = &endpoint {
+                    f.details.push(detail("Endpoint", host.clone()));
+                }
                 if let Some(disk) = &disk {
                     // A place inside the disk, so totals count it once with the disk.
                     f.details
@@ -475,12 +512,18 @@ impl ScanModule for ContainersModule {
             .ok_or_else(|| format!("{tool} is no longer installed."))?;
         // Docker commands reach whichever engine the current context names; it must still
         // be the one this item was measured in.
-        if let Some(expected) = f.value("Context") {
+        if tool == "docker" {
             let now = self.context(s, &exe, k).unwrap_or_default();
-            if now != expected {
+            let host = self.endpoint(s, &exe, k).unwrap_or_default();
+            if Some(now.as_str()) != f.value("Context")
+                || Some(host.as_str()) != f.value("Endpoint")
+            {
                 return Err(format!(
                     "Docker now reaches a different engine ({now}). Scan again."
                 ));
+            }
+            if !host.starts_with("unix://") {
+                return Err("Docker no longer points at an engine on this Mac.".into());
             }
         }
         let out = self.run_tool(s, &exe, args, 900, k)?;

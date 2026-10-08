@@ -91,7 +91,20 @@ fn dispatch(engine: &Engine, method: &str, p: &Value) -> Result<Value> {
             p, "findings",
         )?)),
         "analytics" => value(engine.analytics(&param::<Vec<Finding>>(p, "findings")?)),
-        "execute" => value(engine.execute(&param(p, "request")?, &ScanControl::default())),
+        // Acts on the stored findings with these IDs; a caller cannot supply a finding's
+        // path, actions or details.
+        "execute" => {
+            let request: ActionRequest = param(p, "request")?;
+            let ids: Vec<String> = request.findings.iter().map(|f| f.id.clone()).collect();
+            value(engine.execute_acknowledged(
+                &ids,
+                request.kind,
+                &request.context,
+                &request.acknowledged,
+                request.force,
+                &ScanControl::default(),
+            ))
+        }
         "history" => value(engine.history()),
         "clearHistory" => engine.clear_history().map(|_| Value::Null),
         "restore" => engine

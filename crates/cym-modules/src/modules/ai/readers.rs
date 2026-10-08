@@ -318,7 +318,8 @@ pub fn file_path(value: &str) -> Option<String> {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(b) = u8::from_str_radix(&rest[i + 1..i + 3], 16) {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok();
+            if let Some(b) = hex.and_then(|h| u8::from_str_radix(h, 16).ok()) {
                 out.push(b);
                 i += 3;
                 continue;
@@ -423,11 +424,11 @@ pub fn ollama_models(s: &Services, root: &str) -> Vec<OllamaModel> {
     layers
         .iter()
         .map(|(file, blobs)| {
-            let (unique, shared) = blobs.iter().fold((0, 0), |(u, sh), (d, size)| {
+            let (unique, shared) = blobs.iter().fold((0u64, 0u64), |(u, sh), (d, size)| {
                 if uses[d.as_str()] == 1 {
-                    (u + size, sh)
+                    (u.saturating_add(*size), sh)
                 } else {
-                    (u, sh + size)
+                    (u, sh.saturating_add(*size))
                 }
             });
             let parts: Vec<&str> = file
@@ -474,6 +475,11 @@ mod tests {
             Some("/Users/x/My App")
         );
         assert_eq!(file_path("vscode-remote://ssh/x"), None);
+        // A percent sign before a multi-byte character is kept, not a panic.
+        assert_eq!(
+            file_path("file:///Users/x/%€").as_deref(),
+            Some("/Users/x/%€")
+        );
         assert_eq!(
             hub_repo("models--meta-llama--Llama-3-8B"),
             "meta-llama/Llama-3-8B"

@@ -217,8 +217,15 @@ impl Engine {
     pub fn retain_in_scope(&self, context: &ScanContext) -> Vec<String> {
         self.results.retain_in_scope(&self.services.scoped(context))
     }
+    /// Restores an action from the journal by its ID; the paths come from the journal's own
+    /// record, never from the caller.
     pub fn restore(&self, row: &ActionResult) -> Result<()> {
-        actions::restore(&self.services, row, &ScanControl::default())
+        let recorded = self
+            .history()
+            .into_iter()
+            .find(|r| r.id == row.id)
+            .ok_or("This action is not in the local history.")?;
+        actions::restore(&self.services, &recorded, &ScanControl::default())
     }
     pub fn history(&self) -> Vec<ActionResult> {
         self.services.journal.read()

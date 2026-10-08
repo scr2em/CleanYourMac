@@ -63,6 +63,8 @@ impl Git<'_> {
             "core.hooksPath=/dev/null",
             "-c",
             "core.untrackedCache=false",
+            "-c",
+            "log.showSignature=false",
             "-C",
             repository,
         ]
@@ -72,6 +74,22 @@ impl Git<'_> {
         arguments.extend(args.iter().map(|s| s.to_string()));
         self.0
             .run("/usr/bin/git", &arguments, Duration::from_secs(20), control)
+    }
+    /// A setting in the repository's own configuration that makes `status`, `log` or
+    /// `worktree remove` run a program (a clean filter, a text converter, a signature
+    /// program, an included file). Such a repository came from someone else's archive or
+    /// a shared drive, so it is left for manual inspection rather than run.
+    pub fn risky_config(&self, repository: &str, control: &ScanControl) -> Result<Option<String>> {
+        let out = self.run(
+            repository,
+            &["config", "--list", "--show-scope", "-z"],
+            control,
+        )?;
+        if out.status != 0 {
+            // No readable configuration: nothing of the repository's own to run.
+            return Ok(None);
+        }
+        Ok(risky_key(&out.data))
     }
     pub fn common_directory(&self, repository: &str, control: &ScanControl) -> Result<String> {
         let out = self.run(
@@ -129,6 +147,13 @@ impl Git<'_> {
             return Ok(Safety::blocked(
                 "Worktrees with submodules need manual inspection.",
                 "Submodules",
+                "Unknown",
+            ));
+        }
+        if let Some(key) = self.risky_config(&record.path, control)? {
+            return Ok(Safety::blocked(
+                &format!("This repository's own Git settings run a program ({key}). Inspect it manually."),
+                "Inspect",
                 "Unknown",
             ));
         }
@@ -264,8 +289,15 @@ impl Git<'_> {
     }
     /// Unix time of the checked-out commit, the worktree's last activity Git can vouch for.
     pub fn last_commit(&self, worktree: &str, control: &ScanControl) -> Option<f64> {
+        if !matches!(self.risky_config(worktree, control), Ok(None)) {
+            return None;
+        }
         let out = self
-            .run(worktree, &["log", "-1", "--format=%ct"], control)
+            .run(
+                worktree,
+                &["log", "-1", "--no-show-signature", "--format=%ct"],
+                control,
+            )
             .ok()?;
         (out.status == 0)
             .then(|| out.text().trim().parse().ok())
@@ -310,6 +342,34 @@ pub fn remove(
         return Err(out.error);
     }
     Ok(())
+}
+
+/// The first repository-level setting in `git config --list --show-scope -z` output that
+/// names a program Git may run while inspecting or removing a worktree.
+pub fn risky_key(output: &[u8]) -> Option<String> {
+    output
+        .split(|b| *b == 0)
+        .filter_map(|entry| {
+            let text = String::from_utf8_lossy(entry);
+            let (scope, rest) = text.split_once('\t')?;
+            let key = rest.split('\n').next()?.to_ascii_lowercase();
+            matches!(scope, "local" | "worktree").then_some(key)
+        })
+        .find(|key| {
+            let part = |i: usize| key.split('.').nth(i).unwrap_or_default().to_owned();
+            let last = key.rsplit('.').next().unwrap_or_default();
+            matches!(part(0).as_str(), "filter" | "gpg" | "include" | "includeif")
+                || matches!(
+                    key.as_str(),
+                    "diff.external"
+                        | "core.pager"
+                        | "core.fsmonitor"
+                        | "core.sshcommand"
+                        | "core.askpass"
+                        | "core.hookspath"
+                )
+                || (part(0) == "diff" && matches!(last, "textconv" | "command"))
+        })
 }
 
 /// Parses `git worktree list --porcelain -z`, which keeps unusual paths intact.

@@ -122,6 +122,11 @@ fn run(
     let mut outputs: [Option<Vec<u8>>; 2] = [None, None];
     while outputs.iter().any(Option::is_none) {
         if control.check().is_err() || Instant::now() >= deadline {
+            // Descendants still hold the pipes, so the group still exists and its ID cannot
+            // have been reused; stop them with it.
+            unsafe {
+                libc::kill(-(child.id() as i32), libc::SIGKILL);
+            }
             return Err(format!(
                 "{}; a descendant process kept its output open",
                 stopped(control)

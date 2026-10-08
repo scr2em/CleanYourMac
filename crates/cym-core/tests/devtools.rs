@@ -50,11 +50,14 @@ fn containers_list_their_disks_and_offer_only_their_own_cleanup() {
         r#"{"Active":"0","Reclaimable":"3.5GB","Size":"3.5GB","TotalCount":"40","Type":"Build Cache"}"#,
     ]
     .join("\n");
+    let socket = "unix:///Users/me/.docker/run/docker.sock\n";
     let runner = StubRunner::new(vec![
         output("desktop-linux\n", 0),
+        output(socket, 0),
         output(&df, 0),
-        // The action checks the context again, then prunes.
+        // The action checks the context and its endpoint again, then prunes.
         output("desktop-linux\n", 0),
+        output(socket, 0),
         output(
             "Deleted build cache objects:\nabc\n\nTotal reclaimed space: 3.5GB\n",
             0,
@@ -134,7 +137,10 @@ fn docker_cleanup_stops_when_the_context_changed() {
     let f = Fixture::new();
     f.write("home/.docker/bin/docker", "#!/bin/sh");
     let mut s = services(&f);
-    s.commands = StubRunner::new(vec![output("colima\n", 0)]);
+    s.commands = StubRunner::new(vec![
+        output("colima\n", 0),
+        output("unix:///Users/me/.colima/default/docker.sock\n", 0),
+    ]);
     let engine = Engine::new(s, builtin(&f));
     let mut finding = Finding::new(
         "containers",
@@ -147,7 +153,10 @@ fn docker_cleanup_stops_when_the_context_changed() {
         "fixture",
     );
     finding.actions = vec![ActionKind::RunCommand];
-    finding.details = vec![detail("Context", "desktop-linux")];
+    finding.details = vec![
+        detail("Context", "desktop-linux"),
+        detail("Endpoint", "unix:///Users/me/.docker/run/docker.sock"),
+    ];
     let result = run(&engine, &f, &finding, ActionKind::RunCommand);
     assert_eq!(result.outcome, Outcome::Failed);
     assert!(
@@ -347,4 +356,28 @@ fn installers_and_electron_caches() {
         .path()
         .unwrap_or_default()
         .contains("Local Storage")));
+}
+
+#[test]
+fn a_remote_docker_engine_is_never_cleaned() {
+    let f = Fixture::new();
+    f.write("home/.docker/bin/docker", "#!/bin/sh");
+    let runner = StubRunner::new(vec![
+        output("build-server\n", 0),
+        output("ssh://ci@build.example.com\n", 0),
+    ]);
+    let mut s = services(&f);
+    s.commands = runner.clone();
+    let engine = Engine::new(s, builtin(&f));
+    let context = ScanContext {
+        roots: vec![f.at("home")],
+        ..Default::default()
+    };
+    let report = engine.scan_report(&["containers".into()], &context, &ScanControl::default());
+    assert!(report.findings.is_empty());
+    assert!(report
+        .warnings
+        .iter()
+        .any(|w| w.contains("not an engine on this Mac")));
+    assert_eq!(runner.calls().len(), 2, "system df never ran");
 }

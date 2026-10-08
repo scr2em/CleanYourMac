@@ -71,7 +71,40 @@ impl FileSystem for StdFileSystem {
         .map_err(|e| e.to_string())
     }
     fn rename(&self, from: &str, to: &str) -> Result<()> {
-        fs::rename(from, to).map_err(|e| e.to_string())
+        rename_exclusive(from, to)
+    }
+}
+
+/// Renames without replacing: fails if something already exists at `to`, so an item that
+/// appears there after a check is never overwritten.
+pub fn rename_exclusive(from: &str, to: &str) -> Result<()> {
+    use std::ffi::CString;
+    let a = CString::new(from).map_err(|_| "Invalid path")?;
+    let b = CString::new(to).map_err(|_| "Invalid path")?;
+    #[cfg(target_vendor = "apple")]
+    let status = unsafe { libc::renamex_np(a.as_ptr(), b.as_ptr(), libc::RENAME_EXCL) };
+    #[cfg(target_os = "linux")]
+    let status = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            a.as_ptr(),
+            libc::AT_FDCWD,
+            b.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    #[cfg(not(any(target_vendor = "apple", target_os = "linux")))]
+    let status = {
+        let _ = (&a, &b);
+        if fs::symlink_metadata(to).is_ok() {
+            return Err("An item already exists at the destination.".into());
+        }
+        fs::rename(from, to).map(|_| 0).unwrap_or(-1)
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error().to_string())
     }
 }
 
@@ -429,7 +462,18 @@ fn read_digest(
     control: &ScanControl,
     mut update: impl FnMut(&[u8]),
 ) -> Result<()> {
-    let file = fs::File::open(path).map_err(|e| e.to_string())?;
+    // Never follow a link swapped in after the scan, and never block on a FIFO.
+    let file = {
+        use std::os::unix::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)
+            .map_err(|e| e.to_string())?
+    };
+    if !file.metadata().map_err(|e| e.to_string())?.is_file() {
+        return Err("Not a regular file".into());
+    }
     let mut reader = file.take(limit.unwrap_or(u64::MAX));
     let mut buffer = vec![0; 1_048_576];
     loop {

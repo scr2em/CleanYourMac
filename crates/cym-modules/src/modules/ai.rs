@@ -234,11 +234,19 @@ impl AiToolsModule {
             Root::EnvJoin(var, sub) => self
                 .var(var)
                 .map(|v| policy::canonical(&format!("{}/{sub}", v.trim_end_matches('/')))),
-            Root::Pointer(file) => std::fs::read_to_string(format!("{home}/{file}"))
-                .ok()
-                .map(|t| t.trim().to_owned())
-                .filter(|t| t.starts_with('/'))
-                .map(|t| policy::canonical(&t)),
+            // A small file naming a folder; never a protected one such as the home folder.
+            Root::Pointer(file) => {
+                let path = format!("{home}/{file}");
+                let small =
+                    std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_file() && m.len() <= 4096);
+                small
+                    .then(|| std::fs::read_to_string(&path).ok())
+                    .flatten()
+                    .map(|t| t.trim().to_owned())
+                    .filter(|t| t.starts_with('/'))
+                    .map(|t| policy::canonical(&t))
+                    .filter(|t| !policy::protected(t) && !policy::system_excluded(t))
+            }
         }
     }
     /// The tool a path belongs to, with the data folder holding it.

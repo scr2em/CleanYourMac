@@ -2,7 +2,10 @@
 //! logs, documentation caches, SwiftUI preview simulators, simulator caches, and Xcode
 //! installations other than the selected one.
 use super::{add_files, descriptor, flush, wildcard, Candidate, LastUsed, ScanModule};
-use crate::{model::*, orphans, policy, ports::*, services::Services, simulator::Simctl};
+use crate::{
+    adapters::plist_keys, model::*, orphans, policy, ports::*, services::Services,
+    simulator::Simctl,
+};
 use std::path::Path;
 
 /// Folders whose every item is listed: (home-relative folder, what an item is, risk).
@@ -124,20 +127,21 @@ impl XcodeModule {
 
 /// When Xcode last opened a DerivedData folder, from its `info.plist`.
 fn derived_data_accessed(folder: &str) -> Option<f64> {
-    let info = plist::Value::from_file(Path::new(folder).join("info.plist")).ok()?;
-    let date = info.as_dictionary()?.get("LastAccessedDate")?.as_date()?;
-    std::time::SystemTime::from(date)
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .map(|d| d.as_secs_f64())
+    let info = plist_keys::read(&format!("{folder}/info.plist"), &["LastAccessedDate"])?;
+    match info.get("LastAccessedDate")? {
+        plist_keys::Scalar::Date(seconds) => Some(*seconds),
+        _ => None,
+    }
 }
-/// An app's bundle identifier and short version, from its `Info.plist`.
+/// An app's bundle identifier and short version, from its `Info.plist`, read with bounds.
 pub fn bundle(app: &str) -> Option<(String, String)> {
-    let info = plist::Value::from_file(Path::new(app).join("Contents/Info.plist")).ok()?;
-    let d = info.as_dictionary()?;
+    let d = plist_keys::read(
+        &format!("{app}/Contents/Info.plist"),
+        &["CFBundleIdentifier", "CFBundleShortVersionString"],
+    )?;
     let text = |k: &str| {
         d.get(k)
-            .and_then(|v| v.as_string())
+            .and_then(|v| v.text())
             .unwrap_or_default()
             .to_owned()
     };
@@ -255,7 +259,7 @@ impl ScanModule for XcodeModule {
                     vec![ActionKind::Trash],
                     Risk::Review,
                 )
-                .title(format!("Removed app data · simulator {}", &device[..device.len().min(8)]))
+                .title(format!("Removed app data · simulator {}", device.chars().take(8).collect::<String>()))
                 .details(vec![detail("Simulator", device)])
                 .last_used(LastUsed::At(modified)),
             );

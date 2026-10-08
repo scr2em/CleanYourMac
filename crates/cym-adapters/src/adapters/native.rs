@@ -130,11 +130,17 @@ impl Applications for NativeApplications {
         Err("Application inspection requires macOS".into())
     }
     fn bundle_info(&self, app_path: &str) -> BundleInfo {
-        let info = plist::Value::from_file(Path::new(app_path).join("Contents/Info.plist")).ok();
-        let dict = info.as_ref().and_then(|i| i.as_dictionary());
+        let keys = ["CFBundleIdentifier", "CFBundleShortVersionString"];
+        let info = super::plist_keys::read(
+            &Path::new(app_path)
+                .join("Contents/Info.plist")
+                .to_string_lossy(),
+            &keys,
+        );
         let value = |key: &str| {
-            dict.and_then(|d| d.get(key))
-                .and_then(|v| v.as_string())
+            info.as_ref()
+                .and_then(|d| d.get(key))
+                .and_then(|v| v.text())
                 .unwrap_or("")
                 .to_owned()
         };
