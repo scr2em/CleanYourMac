@@ -279,7 +279,7 @@ impl ScanModule for ContainersModule {
             "Containers & VMs",
             "Developer",
             "shippingbox.circle",
-            "Docker, OrbStack, Colima, Lima and Podman: the real size of their virtual disks, and their own cleanup for build cache, unused images and stopped containers.",
+            "Docker, OrbStack, Colima, Lima and Podman: their real disk size, and their own cleanup.",
             false,
         )
     }
