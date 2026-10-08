@@ -11,7 +11,7 @@
 //! flag sessions whose project folder no longer exists.
 use super::{add_files, descriptor, flush, glob, owners_closed, Candidate, LastUsed, ScanModule};
 use crate::{model::*, policy, ports::*, services::Services};
-use std::collections::HashSet;
+use std::{collections::HashSet, path::Path};
 
 /// How much removing an item costs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,10 +83,18 @@ pub struct AiTool {
     pub sessions: Option<Sessions>,
     /// Process names that mean the tool is running.
     pub processes: &'static [&'static str],
+    /// Parts of an executable's path that mean the tool is running under another name, such
+    /// as Claude Code's native binary named after its version.
+    pub process_paths: &'static [&'static str],
     /// Bundle-identifier prefixes of its apps.
     pub apps: &'static [&'static str],
     /// The tool's own cleanup command or setting, shown with every item.
     pub command: Option<&'static str>,
+    /// A folder matched by a pattern root counts only if it holds one of these (or is empty),
+    /// so `~/.claude-*` finds accounts but not unrelated tools such as `~/.claude-code-router`.
+    pub markers: &'static [&'static str],
+    /// Locations relative to the home folder rather than a data folder.
+    pub home_locations: Vec<AiLocation>,
 }
 
 pub struct AiToolsModule {
@@ -113,26 +121,42 @@ pub fn claude() -> AiTool {
     AiTool {
         name: "Claude Code",
         roots: vec![Root::Home(".claude"), Root::Home(".claude-*"), Root::Env("CLAUDE_CONFIG_DIR")],
+        // Claude Code's own cleanup treats these as removable (code.claude.com/docs/en/claude-directory).
         locations: vec![
-            at("downloads", "Installer downloads", Tier::Safe, "Downloaded installers and old versions of the claude binary."),
-            at("local", "Old local installation", Tier::Safe, "An earlier npm installation of Claude Code; reinstall if you still use it."),
+            at("downloads", "Installer downloads", Tier::Safe, "Downloaded installers of the claude binary."),
+            at("local", "Old local installation", Tier::Safe, "An earlier per-user npm installation of Claude Code; reinstall it if you still run it."),
             at("cache", "Cache", Tier::Safe, "Rebuilt when needed."),
             at("plugins/cache", "Plugin cache", Tier::Safe, "Plugins are downloaded again from their marketplaces."),
-            at("paste-cache", "Paste cache", Tier::Safe, "Large pastes kept for the prompt history."),
-            at("image-cache", "Image cache", Tier::Safe, "Pasted images kept for the prompt history."),
+            at("plugins/.trash", "Removed plugins", Tier::Safe, "Plugins you already uninstalled."),
+            at("skills/.trash", "Removed skills", Tier::Safe, "Skills you already deleted."),
+            at("paste-cache", "Paste cache", Tier::Safe, "Large pastes; recalled prompts lose their pasted text."),
+            at("image-cache", "Image cache", Tier::Safe, "Pasted images of older versions."),
+            at("uploads", "Uploads", Tier::Safe, "Files attached to past sessions."),
             at("backups", "Settings backups", Tier::Safe, "Automatic backups of .claude.json; the current file stays."),
             at("shell-snapshots", "Shell snapshots", Tier::Safe, "Shell environment captured at session start; made again for each session."),
-            at("statsig", "Feature-flag cache", Tier::Safe, "Downloaded again at the next start."),
-            at("telemetry", "Telemetry", Tier::Safe, "Usage events waiting to be sent or already sent."),
+            at("session-env", "Session environments", Tier::Safe, "Per-session environment of past sessions."),
+            at("usage-data", "Usage data", Tier::Safe, "Usage records of past sessions."),
+            at("feedback-bundles", "Feedback bundles", Tier::Safe, "Bundles prepared for feedback reports."),
+            at("statsig", "Feature-flag cache", Tier::Safe, "No longer written by current versions."),
+            at("todos", "Old todo lists", Tier::Safe, "No longer written by current versions."),
+            at("logs", "Old logs", Tier::Safe, "No longer written by current versions."),
+            at("telemetry", "Telemetry", Tier::Safe, "Usage events waiting to be sent again."),
             at("debug", "Debug logs", Tier::Safe, "Logs of past sessions."),
-            at("todos", "Old todo lists", Tier::Review, "Todo lists of past sessions."),
-            at("file-history", "Edit checkpoints", Tier::Caution, "Earlier versions of files Claude edited. Removing them ends /rewind for those sessions."),
-            at("history.jsonl", "Prompt history", Tier::Caution, "The prompts you typed, used for the up-arrow history."),
+            at("plans", "Plans", Tier::Review, "Plans written in plan mode."),
+            at("tasks", "Task lists", Tier::Review, "Task lists a resumed session picks up again."),
+            at("file-history", "Edit checkpoints", Tier::Caution, "Earlier versions of files Claude edited. Removing them ends /rewind file restores for those sessions."),
+            at("history.jsonl", "Prompt history", Tier::Caution, "Every prompt you typed, for up-arrow and Ctrl-R recall."),
         ],
         sessions: Some(Sessions::Claude),
         processes: &["claude"],
+        process_paths: &["/.local/share/claude/versions/"],
         apps: &["com.anthropic.claudefordesktop"],
-        command: Some("Set cleanupPeriodDays in settings.json to have Claude Code remove old transcripts itself."),
+        command: Some("claude purge --dry-run shows what Claude Code would remove for a project; cleanupPeriodDays (default 30) removes old transcripts automatically."),
+        markers: &["projects", ".claude.json", "settings.json", "sessions", "history.jsonl"],
+        home_locations: vec![
+            at("Library/Caches/claude-cli-nodejs", "MCP and error logs", Tier::Safe, "Logs Claude Code writes per project."),
+            at(".cache/claude/staging", "Installer staging", Tier::Safe, "Files left by the native installer."),
+        ],
     }
 }
 
@@ -157,6 +181,13 @@ impl AiToolsModule {
                     .children(&home, &mut vec![])
                     .into_iter()
                     .filter(|e| e.directory && glob(name, e.name()).is_some())
+                    .filter(|e| {
+                        empty(s, e.path())
+                            || tool
+                                .markers
+                                .iter()
+                                .any(|m| s.exists(&format!("{}/{m}", e.path())))
+                    })
                     .map(|e| e.path().to_owned())
                     .collect(),
                 Root::Home(name) => vec![format!("{home}/{name}")],
@@ -176,12 +207,31 @@ impl AiToolsModule {
     }
     /// The tool a path belongs to, with the data folder holding it.
     fn owner(&self, s: &Services, path: &str) -> Option<(&AiTool, String)> {
+        let home = self.home();
         self.tools.iter().find_map(|tool| {
             self.roots(s, tool)
                 .into_iter()
+                .chain(self.home_roots(tool, &home))
                 .find(|root| policy::contains(path, root))
                 .map(|root| (tool, root))
         })
+    }
+    /// The home-relative folders a tool's home locations and binaries live in.
+    fn home_roots(&self, tool: &AiTool, home: &str) -> Vec<String> {
+        let mut roots: Vec<String> = tool
+            .home_locations
+            .iter()
+            .map(|l| {
+                format!(
+                    "{home}/{}",
+                    l.path.rsplit_once("/*").map_or(l.path, |(p, _)| p)
+                )
+            })
+            .collect();
+        if tool.sessions == Some(Sessions::Claude) {
+            roots.push(format!("{home}/.local/share/claude/versions"));
+        }
+        roots
     }
 }
 
@@ -242,9 +292,13 @@ pub fn session_info(head: &str) -> SessionInfo {
         }
         match v.get("type").and_then(|t| t.as_str()) {
             Some("summary") if info.title.is_none() => info.title = text("summary"),
+            Some("ai-title") if info.title.is_none() => info.title = text("aiTitle"),
+            // A name the user gave with /rename wins over any other title.
             Some("custom-title") => info.title = text("customTitle").or(info.title.take()),
             Some("user")
-                if info.first_prompt.is_none() && !v["isMeta"].as_bool().unwrap_or(false) =>
+                if info.first_prompt.is_none()
+                    && !v["isMeta"].as_bool().unwrap_or(false)
+                    && !v["isSidechain"].as_bool().unwrap_or(false) =>
             {
                 info.first_prompt = prompt_text(&v["message"]["content"]);
             }
@@ -326,7 +380,74 @@ fn live_sessions(s: &Services, root: &str) -> Live {
     live
 }
 
+/// Running processes of a tool, described for the user.
+fn running(s: &Services, tool: &AiTool) -> Vec<String> {
+    s.processes
+        .pids()
+        .into_iter()
+        .filter_map(|pid| s.processes.inspect(pid))
+        .filter(|p| {
+            tool.processes
+                .iter()
+                .any(|name| p.name.eq_ignore_ascii_case(name))
+                || tool
+                    .process_paths
+                    .iter()
+                    .any(|part| p.identity.executable.contains(part))
+        })
+        .map(|p| {
+            format!(
+                "{} (PID {}) · {}",
+                p.name, p.identity.pid, p.identity.executable
+            )
+        })
+        .collect()
+}
+
 impl AiToolsModule {
+    /// Old native Claude Code binaries in `~/.local/share/claude/versions`. The installer keeps
+    /// the launcher's target and the two newest; so does this, and never one that is running.
+    fn claude_versions(&self, s: &Services, out: &mut Vec<Candidate>) {
+        let home = self.home();
+        let folder = format!("{home}/.local/share/claude/versions");
+        let mut versions = s.children(&folder, &mut vec![]);
+        if versions.len() <= 2 {
+            return;
+        }
+        let launcher = std::fs::read_link(format!("{home}/.local/bin/claude"))
+            .ok()
+            .map(|t| {
+                policy::canonical(
+                    &Path::new(&format!("{home}/.local/bin"))
+                        .join(t)
+                        .to_string_lossy(),
+                )
+            });
+        versions.sort_by(|a, b| b.modified().total_cmp(&a.modified()));
+        let used: Vec<String> = s
+            .processes
+            .pids()
+            .into_iter()
+            .filter_map(|pid| s.processes.inspect(pid))
+            .map(|p| p.identity.executable)
+            .collect();
+        for (i, v) in versions.into_iter().enumerate() {
+            let linked = launcher
+                .as_deref()
+                .is_some_and(|t| policy::contains(t, v.path()));
+            if i < 2 || linked {
+                continue;
+            }
+            let running = used.iter().any(|exe| policy::contains(exe, v.path()));
+            out.push(
+                Candidate::new(v.clone(), "An older native Claude Code binary. The installer keeps the launcher's version and the two newest; this one is neither.", vec![ActionKind::Trash], Tier::Safe.risk())
+                    .title(format!("Old Claude Code version {}", v.name()))
+                    .details(vec![detail("Tool", "Claude Code"), detail("Tier", Tier::Safe.label()), detail("Version", v.name())])
+                    .last_used(LastUsed::At(v.modified()))
+                    .blocked(running.then_some("A running Claude Code uses this version.")),
+            );
+        }
+    }
     fn claude_sessions(
         &self,
         s: &Services,
@@ -345,6 +466,17 @@ impl AiToolsModule {
             let mut project_cwd: Option<String> = None;
             let mut sessions = 0;
             for e in &entries {
+                if e.regular
+                    && (e.name().contains(".orphaned-") || e.name().contains(".superseded-"))
+                {
+                    out.push(
+                        Candidate::new(e.clone(), "A set-aside copy of a transcript; Claude Code does not show it and removes it after cleanupPeriodDays.", vec![ActionKind::Trash], Tier::Safe.risk())
+                            .title(format!("Set-aside transcript · {}", e.name()))
+                            .details(vec![detail("Tool", "Claude Code"), detail("Tier", Tier::Safe.label())])
+                            .last_used(LastUsed::At(e.modified())),
+                    );
+                    continue;
+                }
                 let Some(id) = e.name().strip_suffix(".jsonl").filter(|_| e.regular) else {
                     continue;
                 };
@@ -591,6 +723,7 @@ impl ScanModule for AiToolsModule {
                     Root::Env(var) => roots.extend(self.var(var).map(|v| policy::canonical(&v))),
                 }
             }
+            roots.extend(self.home_roots(tool, &home));
         }
         roots
     }
@@ -605,6 +738,29 @@ impl ScanModule for AiToolsModule {
         let mut candidates = vec![];
         let mut warnings = vec![];
         for tool in &self.tools {
+            for location in &tool.home_locations {
+                for e in expand(s, &home, location) {
+                    if !c.allows(e.path()) {
+                        continue;
+                    }
+                    candidates.push(
+                        Candidate::new(
+                            e,
+                            &format!("{} {}", location.note, tier_note(location.tier)),
+                            vec![ActionKind::Trash],
+                            location.tier.risk(),
+                        )
+                        .title(location.title)
+                        .details(vec![
+                            detail("Tool", tool.name),
+                            detail("Tier", location.tier.label()),
+                        ]),
+                    );
+                }
+            }
+            if tool.sessions == Some(Sessions::Claude) {
+                self.claude_versions(s, &mut candidates);
+            }
             for root in self.roots(s, tool) {
                 k.check()?;
                 if !c.allows(&root) {
@@ -688,17 +844,9 @@ impl ScanModule for AiToolsModule {
                     .join("\n")
             ));
         }
-        let running: Vec<String> = s
-            .processes
-            .pids()
+        let running: Vec<String> = running(s, tool)
             .into_iter()
-            .filter_map(|pid| s.processes.inspect(pid))
-            .filter(|p| {
-                tool.processes
-                    .iter()
-                    .any(|name| p.name.eq_ignore_ascii_case(name))
-            })
-            .map(|p| format!("• {} (PID {})", p.name, p.identity.pid))
+            .map(|r| format!("• {r}"))
             .collect();
         (!running.is_empty()).then(|| format!("{} is running:\n{}", tool.name, running.join("\n")))
     }

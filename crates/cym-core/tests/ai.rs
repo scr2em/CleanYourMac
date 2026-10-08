@@ -220,3 +220,58 @@ fn a_running_session_is_never_moved() {
     assert_eq!(result.outcome, Outcome::Failed, "{}", result.message);
     assert!(std::fs::metadata(f.at("home/.claude/projects/-app/live.jsonl")).is_ok());
 }
+
+#[test]
+fn old_claude_versions_and_unrelated_folders() {
+    let f = Fixture::new();
+    // Four native versions; the launcher points at the oldest one.
+    for (i, v) in ["2.1.1", "2.1.2", "2.1.3", "2.1.4"].iter().enumerate() {
+        let path = f.write(&format!("home/.local/share/claude/versions/{v}"), "binary");
+        let when = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_secs(1_700_000_000 + i as u64 * 1000);
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    }
+    f.dir("home/.local/bin");
+    std::os::unix::fs::symlink(
+        "../share/claude/versions/2.1.1",
+        f.at("home/.local/bin/claude"),
+    )
+    .unwrap();
+    // A different tool that happens to start with .claude-, and a real second account.
+    f.write("home/.claude-code-router/config.json", "{}");
+    f.write("home/.claude-work/settings.json", "{}");
+    f.write("home/.claude-work/debug/x.txt", "x");
+    f.write(
+        "home/Library/Caches/claude-cli-nodejs/-app/errors/e.txt",
+        "x",
+    );
+    let findings = scan(&f, vec![]);
+    let titles: Vec<&str> = findings.iter().map(|r| r.title.as_str()).collect();
+    // Kept: the launcher's target (2.1.1) and the two newest (2.1.4, 2.1.3).
+    assert!(
+        titles.contains(&"Old Claude Code version 2.1.2"),
+        "{titles:?}"
+    );
+    for kept in ["2.1.1", "2.1.3", "2.1.4"] {
+        assert!(
+            !titles.contains(&format!("Old Claude Code version {kept}").as_str()),
+            "{kept}"
+        );
+    }
+    assert!(findings.iter().all(|r| !r
+        .resource
+        .path()
+        .unwrap_or_default()
+        .contains(".claude-code-router")));
+    assert!(findings.iter().any(|r| r
+        .resource
+        .path()
+        .unwrap_or_default()
+        .ends_with(".claude-work/debug")));
+    assert!(titles.contains(&"MCP and error logs"));
+}
