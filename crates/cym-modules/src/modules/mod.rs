@@ -237,10 +237,32 @@ pub(crate) fn project_activity(s: &Services, folder: &str) -> Option<f64> {
         .flatten()
         .filter(|e| {
             let name = e.name().to_lowercase();
-            !crate::policy::DUPLICATE_IGNORES.contains(&name.as_str()) || name == ".git"
+            // Version-control metadata changes with every commit, so it counts as activity.
+            !crate::policy::DUPLICATE_IGNORES.contains(&name.as_str())
+                || crate::policy::version_control(e.name()).is_some()
         })
         .map(|e| e.modified())
         .reduce(f64::max)
+}
+
+/// The version-control system whose checkout `folder` is the root of, if any; Git first,
+/// since a Jujutsu or Sapling checkout may also hold a `.git`.
+///
+/// Names come from the folder's listing, not a lookup, so on a case-insensitive volume a
+/// user's `cvs` folder is not taken for a `CVS` checkout.
+pub(crate) fn checkout(s: &Services, folder: &str) -> Option<&'static str> {
+    let systems: Vec<&'static str> =
+        s.fs.children(folder)
+            .ok()?
+            .into_iter()
+            .flatten()
+            .filter_map(|e| crate::policy::checkout_marker(e.name()))
+            .collect();
+    systems
+        .iter()
+        .find(|system| **system == "Git")
+        .or(systems.first())
+        .copied()
 }
 
 /// One item to size and report.

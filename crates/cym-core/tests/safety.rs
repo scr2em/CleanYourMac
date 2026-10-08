@@ -31,6 +31,49 @@ fn large_files_of_apps_and_tools_are_listed_but_never_offered() {
 }
 
 #[test]
+fn version_control_names_are_recognized_exactly() {
+    use cym_core::policy::version_control;
+    for (name, system) in [
+        (".git", "Git"),
+        (".HG", "Mercurial"),
+        (".sl", "Sapling"),
+        (".svn", "Subversion"),
+        (".jj", "Jujutsu"),
+        (".bzr", "Bazaar"),
+        ("_darcs", "Darcs"),
+        (".pijul", "Pijul"),
+        (".fslckout", "Fossil"),
+        ("_FOSSIL_", "Fossil"),
+        ("project.fossil", "Fossil"),
+        ("CVS", "CVS"),
+        ("RCS", "RCS"),
+        ("SCCS", "SCCS"),
+        ("BitKeeper", "BitKeeper"),
+        ("_MTN", "Monotone"),
+        ("db.mtn", "Monotone"),
+        ("{arch}", "GNU Arch"),
+        (".plastic", "Plastic SCM"),
+        ("$tf", "Team Foundation"),
+        (".repo", "repo"),
+        (".dvc", "DVC"),
+    ] {
+        assert_eq!(version_control(name), Some(system), "{name}");
+    }
+    // Plain names must match exactly: a user's own folders are not repositories.
+    for name in [
+        "cvs",
+        "Rcs",
+        "sccs",
+        "bitkeeper",
+        ".fossil",
+        "notes",
+        ".gitignore",
+    ] {
+        assert_eq!(version_control(name), None, "{name}");
+    }
+}
+
+#[test]
 fn file_scans_never_enter_version_control_folders() {
     let f = Fixture::new();
     let big = |path: &str| {
@@ -42,25 +85,144 @@ fn file_scans_never_enter_version_control_folders() {
             .set_len(150_000_000)
             .unwrap();
     };
-    for vcs in [".git", ".hg", ".svn", ".jj", ".bzr"] {
+    for vcs in [
+        ".git",
+        ".hg",
+        ".sl",
+        ".svn",
+        ".jj",
+        ".bzr",
+        "_darcs",
+        ".pijul",
+        "CVS",
+        "RCS",
+        "SCCS",
+        "BitKeeper",
+        "_MTN",
+        "{arch}",
+        ".plastic",
+        "$tf",
+        ".repo",
+        ".dvc",
+    ] {
         big(&format!("repo/{vcs}/store/pack.bin"));
     }
+    // A Fossil or Monotone repository is a single file, kept anywhere.
+    big("repos/project.fossil");
+    big("repos/project.mtn");
     big("repo/src/video.mov");
+    // A user's own folder that merely shares a plain name is scanned as usual.
+    big("repo/cvs/receipts.pdf");
     let engine = Engine::new(services(&f), builtin(&f));
     let paths = |module: &str| -> Vec<String> {
-        scan(&engine, &f, module, vec![f.path()])
+        let mut paths: Vec<String> = scan(&engine, &f, module, vec![f.path()])
             .iter()
             .filter_map(|r| r.resource.path().map(str::to_owned))
-            .collect()
+            .collect();
+        paths.sort();
+        paths
     };
     let large = paths("large");
-    assert_eq!(large.len(), 1, "{large:?}");
-    assert!(large[0].ends_with("repo/src/video.mov"));
-    // Every pack file is an identical copy of the video's zeros, and none is a duplicate.
+    assert_eq!(large.len(), 2, "{large:?}");
+    assert!(large[0].ends_with("repo/cvs/receipts.pdf"));
+    assert!(large[1].ends_with("repo/src/video.mov"));
+    // Every pack file holds the same zeros as the video, and none is a duplicate.
     let duplicates = paths("duplicates");
     assert!(
-        duplicates.iter().all(|p| p.contains("/src/")),
+        duplicates
+            .iter()
+            .all(|p| p.contains("/src/") || p.contains("/cvs/")),
         "{duplicates:?}"
+    );
+}
+
+#[test]
+fn items_in_another_systems_checkout_are_refused() {
+    let f = Fixture::new();
+    let k = ScanControl::default();
+    // Duplicates inside a Mercurial checkout: Mercurial is never asked, so the copy stays.
+    let body = "same logo ".repeat(600);
+    f.dir("site/.hg/store");
+    f.write("site/logo.png", &body);
+    f.write("other/logo.png", &body);
+    // Dependencies inside a Subversion checkout.
+    f.dir("app/.svn");
+    f.write("app/package.json", "{}");
+    f.write("app/node_modules/x/index.js", "x");
+    let engine = Engine::new(services(&f), builtin(&f));
+    let trash = |finding: &Finding| {
+        engine
+            .execute(
+                &ActionRequest {
+                    findings: vec![finding.clone()],
+                    kind: ActionKind::Trash,
+                    context: f.context(),
+                    acknowledged: vec![],
+                    force: true,
+                },
+                &k,
+            )
+            .remove(0)
+    };
+    let duplicates = scan(&engine, &f, "duplicates", vec![f.path()]);
+    let in_checkout = duplicates
+        .iter()
+        .find(|r| {
+            r.resource
+                .path()
+                .is_some_and(|p| p.ends_with("site/logo.png"))
+        })
+        .expect("listed");
+    let result = trash(in_checkout);
+    assert_eq!(result.outcome, Outcome::Failed, "{}", result.message);
+    assert!(
+        result.message.contains("Mercurial checkout"),
+        "{}",
+        result.message
+    );
+    assert!(std::fs::metadata(f.at("site/logo.png")).is_ok());
+
+    let dependencies = scan(&engine, &f, "node", vec![f.path()]);
+    let modules = dependencies
+        .iter()
+        .find(|r| {
+            r.resource
+                .path()
+                .is_some_and(|p| p.ends_with("app/node_modules"))
+        })
+        .expect("listed");
+    let result = trash(modules);
+    assert_eq!(result.outcome, Outcome::Failed, "{}", result.message);
+    assert!(
+        result.message.contains("Subversion checkout"),
+        "{}",
+        result.message
+    );
+    assert!(std::fs::metadata(f.at("app/node_modules/x/index.js")).is_ok());
+}
+
+#[test]
+fn an_ai_worktree_of_another_system_stays() {
+    let f = Fixture::new();
+    f.dir("home/.codex/worktrees/task-jj/.jj/repo");
+    f.write("home/.codex/worktrees/task-jj/src/main.rs", "fn main() {}");
+    let engine = Engine::new(services(&f), builtin(&f));
+    let findings = scan(&engine, &f, "ai", vec![f.at("home")]);
+    let worktree = findings
+        .iter()
+        .find(|r| {
+            r.resource
+                .path()
+                .is_some_and(|p| p.ends_with("worktrees/task-jj"))
+        })
+        .expect("listed");
+    assert!(
+        worktree
+            .blocked_reason
+            .as_deref()
+            .is_some_and(|r| r.contains("Jujutsu checkout")),
+        "{:?}",
+        worktree.blocked_reason
     );
 }
 

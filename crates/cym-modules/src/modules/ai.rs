@@ -1021,20 +1021,27 @@ fn git_blocker(s: &Services, path: &str, k: &ScanControl) -> Option<String> {
     for depth in 0..3 {
         let mut next = vec![];
         for dir in level {
-            if s.exists(&format!("{dir}/.git")) {
-                repos.push(dir);
-            } else if depth < 2 {
+            match super::checkout(s, &dir) {
+                Some("Git") => repos.push(dir),
+                Some(system) => {
+                    return Some(format!(
+                        "This worktree holds a {system} checkout, which CleanYourMac cannot inspect. Check it yourself."
+                    ))
+                }
+                None if depth < 2 => {
                 let mut warnings = vec![];
                 let children = s.children(&dir, &mut warnings);
                 if !warnings.is_empty() {
                     return Some(UNCHECKED.into());
                 }
-                next.extend(
-                    children
-                        .into_iter()
-                        .filter(|e| e.directory)
-                        .map(|e| e.path().to_owned()),
-                );
+                    next.extend(
+                        children
+                            .into_iter()
+                            .filter(|e| e.directory)
+                            .map(|e| e.path().to_owned()),
+                    );
+                }
+                None => {}
             }
         }
         if next.len() + repos.len() > 256 {
@@ -1116,7 +1123,7 @@ fn repo_blocker(s: &Services, path: &str, k: &ScanControl) -> Option<String> {
                     .filter(|e| e.directory)
                     .map(|e| e.path().to_owned()),
             )
-            .find(|d| s.exists(&format!("{d}/.git")));
+            .find(|d| super::checkout(s, d).is_some());
         if let Some(nested) = nested {
             return Some(format!(
                 "This worktree keeps another repository in an ignored folder ({}). Inspect it manually.",

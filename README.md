@@ -126,10 +126,11 @@ When you move an item to the Trash, you can restore it. The disk space becomes f
   - your home, Library, Documents and Desktop folders, and the Applications folders;
   - credentials, for example `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.config`, `~/.netrc`, `~/.npmrc` and Keychains;
   - iCloud Drive and other cloud folders;
-  - all items in `.git` folders and all files with the name `.env`.
+  - version-control data of every system: Git, Mercurial, Sapling, Subversion, Jujutsu, Bazaar, Darcs, Pijul, Fossil, CVS, RCS, SCCS, BitKeeper, Monotone, GNU Arch, Plastic SCM, Team Foundation, Google `repo` and DVC folders, and Fossil and Monotone repository files;
+  - all files with the name `.env`.
 
   The app shows an item but does not let you select it when it cannot read the full size. Put the pointer on a disabled item to see the reason.
-- **The app shows what uses an item.** When an app or a tool uses an item, the app shows the process (name, PID and folder). You can then continue the action. You cannot skip checks that protect your data. For example, the app does not remove files that Git tracks or items that changed after the scan.
+- **The app shows what uses an item.** When an app or a tool uses an item, the app shows the process (name, PID and folder). You can then continue the action. You cannot skip checks that protect your data. For example, the app does not remove files that Git tracks, items inside another version-control system's checkout, or items that changed after the scan.
 - **One failure does not stop the action.** When an item fails, the app continues with the other items. Then it shows how many items it changed and why the other items failed.
 - **You can undo most actions.** You can restore an item that you moved to the Trash from Activity, if the item did not change. These actions are permanent: remove a worktree, reset or delete a simulator, run the cleanup command of a tool, empty the Trash and quit a process. The app identifies them.
 - **A tool's own command does the work where the Trash cannot.** For Docker, Podman, simulator runtimes and SwiftUI preview simulators, the app runs the cleanup command of the tool (for example `docker builder prune`). The app chooses the command from a fixed list and shows it on the item. Nothing goes to the Trash, so you cannot restore it.
@@ -146,7 +147,7 @@ Storage Explorer shows each item directly in the folders that you select. For ea
 
 Large Files finds files of 100 MB or more in the folders that you select. Filter by size, age and last use. Then move the files that you do not need to the Trash.
 
-Files in your Library folder and in hidden folders of your home folder belong to an app or a tool, for example a virtual machine disk, a model, a device backup or a database. Large Files shows them, but you cannot select them. Remove them with their app or tool. Version-control folders (`.git`, `.hg`, `.svn`, `.jj`, `.bzr`) are never searched, on any drive: their files belong to the repository.
+Files in your Library folder and in hidden folders of your home folder belong to an app or a tool, for example a virtual machine disk, a model, a device backup or a database. Large Files shows them, but you cannot select them. Remove them with their app or tool. Version-control data (`.git`, `.hg`, `.svn`, `.jj` and the other systems above) is never searched, on any drive: its files belong to the repository.
 </details>
 
 <details>
@@ -202,7 +203,7 @@ Build Artifacts finds folders that a build makes. A project file must identify e
 - **Python:** test and tool caches, `__pycache__` and `*.egg-info`.
 - **Other languages:** Elixir `_build`, Haskell, Elm.
 
-The next build makes all of these folders again. The exception is the Unreal `Saved` folder (autosaves and crash logs), which has the *Review* badge. A build folder that holds a shipped build or its crash symbols (an `.xcarchive`, `.dSYM`, `.ipa`, `.aab` or an Android `outputs/mapping` folder) is protected like an Xcode archive: you can remove it only from its details, after you confirm. You must close the IDE of the project before an action. The app does not remove folders that contain files that Git tracks. If the tool has its own clean command, each item shows it.
+The next build makes all of these folders again. The exception is the Unreal `Saved` folder (autosaves and crash logs), which has the *Review* badge. A build folder that holds a shipped build or its crash symbols (an `.xcarchive`, `.dSYM`, `.ipa`, `.aab` or an Android `outputs/mapping` folder) is protected like an Xcode archive: you can remove it only from its details, after you confirm. You must close the IDE of the project before an action. The app does not remove folders that contain files that Git tracks. Inside a checkout of another version-control system (Mercurial, Subversion, Jujutsu without Git, and others) it removes nothing, because it asks only Git whether an item is tracked: running another system's tool could run commands that the repository configures. If the tool has its own clean command, each item shows it.
 </details>
 
 <details>

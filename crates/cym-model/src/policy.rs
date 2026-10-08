@@ -124,7 +124,8 @@ const CREDENTIALS: &[&str] = &[
     ".vault-token",
     ".git-credentials",
 ];
-/// Whether the path holds Git metadata, an environment file, or credentials and synced
+/// Whether the path holds version-control metadata or a repository file (of any system in
+/// `VERSION_CONTROL`), an environment file, or credentials and synced
 /// files in any user's home folder (`.ssh`, `.aws`, `.gnupg`, `Library/Keychains`,
 /// `Library/Mobile Documents`, `Library/CloudStorage`), whatever the letter case.
 fn sensitive_name(path: &str) -> bool {
@@ -134,7 +135,7 @@ fn sensitive_name(path: &str) -> bool {
         .filter(|c| !c.is_empty() && *c != ".")
         .any(|c| {
             let named = |n: &str| c.eq_ignore_ascii_case(n);
-            let hit = named(".git")
+            let hit = version_control(c).is_some()
                 || named(".env")
                 || c.get(..5).is_some_and(|p| p.eq_ignore_ascii_case(".env."))
                 || CREDENTIALS.iter().any(|n| named(n))
@@ -314,12 +315,59 @@ pub const DUPLICATE_IGNORE_SUFFIXES: &[&str] = &[".egg-info", ".xcarchive", ".dS
 pub fn duplicate_excluded(path: &str) -> bool {
     system_excluded(path) || path.split('/').any(duplicate_ignored_name)
 }
-/// Version-control metadata folders: their files belong to the repository, never to the
-/// user directly, so file scans do not enter them.
-pub const VERSION_CONTROL: &[&str] = &[".git", ".hg", ".svn", ".jj", ".bzr", "_darcs", ".pijul"];
-/// Whether one path component names a version-control metadata folder, ignoring ASCII case.
-pub fn version_control(name: &str) -> bool {
-    VERSION_CONTROL.iter().any(|v| v.eq_ignore_ascii_case(name))
+/// Version-control systems and the entries that mark a checkout: metadata folders, or files
+/// for Fossil. Their contents belong to the repository, never to the user directly.
+pub const VERSION_CONTROL: &[(&str, &[&str])] = &[
+    ("Git", &[".git"]),
+    ("Mercurial", &[".hg"]),
+    ("Sapling", &[".sl"]),
+    ("Subversion", &[".svn"]),
+    ("Jujutsu", &[".jj"]),
+    ("Bazaar", &[".bzr"]),
+    ("Darcs", &["_darcs"]),
+    ("Pijul", &[".pijul"]),
+    ("Fossil", &[".fslckout", "_FOSSIL_"]),
+    ("CVS", &["CVS"]),
+    ("RCS", &["RCS"]),
+    ("SCCS", &["SCCS"]),
+    ("BitKeeper", &["BitKeeper"]),
+    ("Monotone", &["_MTN"]),
+    ("GNU Arch", &["{arch}"]),
+    ("Plastic SCM", &[".plastic"]),
+    ("Team Foundation", &["$tf"]),
+    ("repo", &[".repo"]),
+    ("DVC", &[".dvc"]),
+];
+/// Extensions of repositories kept as a single file, outside any checkout.
+const REPOSITORY_FILES: &[(&str, &str)] = &[("Fossil", ".fossil"), ("Monotone", ".mtn")];
+/// The version-control system whose metadata one path component names. Hidden names match
+/// in any letter case, as on a case-insensitive volume; plain names such as `CVS` must match
+/// exactly, so a user's own `cvs` folder is not mistaken for one.
+pub fn version_control(name: &str) -> Option<&'static str> {
+    checkout_marker(name).or_else(|| {
+        REPOSITORY_FILES
+            .iter()
+            .find(|(_, ext)| {
+                name.len() > ext.len()
+                    && name.is_char_boundary(name.len() - ext.len())
+                    && name[name.len() - ext.len()..].eq_ignore_ascii_case(ext)
+            })
+            .map(|(system, _)| *system)
+    })
+}
+/// The version-control system whose checkout marker one path component names.
+pub fn checkout_marker(name: &str) -> Option<&'static str> {
+    let matches = |marker: &str| {
+        if marker.starts_with('.') {
+            marker.eq_ignore_ascii_case(name)
+        } else {
+            marker == name
+        }
+    };
+    VERSION_CONTROL
+        .iter()
+        .find(|(_, markers)| markers.iter().any(|m| matches(m)))
+        .map(|(system, _)| *system)
 }
 
 /// Whether one path component names a folder duplicate detection skips; compared without

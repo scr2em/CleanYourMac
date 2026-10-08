@@ -82,11 +82,6 @@ impl ScanModule for LargeFilesModule {
     ) -> Result<()> {
         let mut warnings = vec![];
         let result = s.walk(c, k, &mut warnings, &mut |e| {
-            // A repository's pack files and stores are not the user's files: trashing one
-            // corrupts the repository.
-            if e.directory {
-                return Ok(!policy::version_control(e.name()));
-            }
             if e.regular && e.bytes >= self.minimum_bytes {
                 let mut f = Finding::new(
                     "large",

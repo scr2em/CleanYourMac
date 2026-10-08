@@ -53,16 +53,26 @@ pub(crate) fn shipped_outputs(s: &Services, folder: &str) -> Option<String> {
     None
 }
 
-/// Refuses to move an item that Git tracks inside its repository.
+/// Refuses to move an item that Git tracks inside its repository. Inside a checkout of any
+/// other version-control system it refuses too: only Git is asked, because another tool
+/// could run commands the repository configures, so whether it tracks the item is unknown.
 pub(crate) fn untracked(s: &Services, path: &str, k: &ScanControl) -> Result<()> {
     let directory = parent(path);
     let mut ancestor = Some(Path::new(&directory));
     while let Some(folder) = ancestor {
-        if s.exists(&folder.join(".git").to_string_lossy()) {
-            if Git(s.commands.as_ref()).tracks(&directory, path, k)? {
-                return Err("Git tracks this item in its repository.".into());
+        match super::checkout(s, &folder.to_string_lossy()) {
+            Some("Git") => {
+                if Git(s.commands.as_ref()).tracks(&directory, path, k)? {
+                    return Err("Git tracks this item in its repository.".into());
+                }
+                return Ok(());
             }
-            return Ok(());
+            Some(system) => {
+                return Err(format!(
+                    "This item is in a {system} checkout. CleanYourMac checks only Git, so it cannot confirm {system} does not track it."
+                ))
+            }
+            None => {}
         }
         ancestor = folder.parent();
     }
