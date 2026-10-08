@@ -576,7 +576,7 @@ fn caches_block_go_modules_expand_ide_versions_and_wait_for_owning_apps() {
             "Go module cache",
             "JetBrains IDE caches · IntelliJIdea2024.1",
             "JetBrains IDE caches · PyCharm2024.2",
-            "VS Code cached data",
+            "VS Code · Compiled code cache",
         ]
     );
     let go = report
@@ -593,7 +593,7 @@ fn caches_block_go_modules_expand_ide_versions_and_wait_for_owning_apps() {
     let vscode = report
         .findings
         .iter()
-        .find(|f| f.title == "VS Code cached data")
+        .find(|f| f.title == "VS Code · Compiled code cache")
         .unwrap();
     let k = ScanControl::default();
     assert!(module.preflight(&s, vscode, ActionKind::Trash, &k).is_ok());
@@ -1401,5 +1401,53 @@ fn leftovers_skip_folders_other_tools_list() {
     assert!(listed("/Slack/Cache"), "{paths:?}");
     for elsewhere in ["/Caches/lima", "/Caches/claude-cli-nodejs", "/Cursor/Cache"] {
         assert!(!listed(elsewhere), "{elsewhere}: {paths:?}");
+    }
+}
+
+/// One table names an Electron app's caches: VS Code in Caches & Logs, the editors in AI
+/// Tools and other Electron apps' leftovers find the same folders.
+#[test]
+fn electron_caches_are_named_once() {
+    let f = Fixture::new();
+    let home = f.dir("home");
+    for folder in [
+        "Library/Application Support/Code/DawnGraphiteCache",
+        "Library/Application Support/Code/Crashpad/completed",
+        "Library/Application Support/Code/CachedProfilesData",
+        "Library/Application Support/Slack/Code Cache",
+        "Library/Application Support/Slack/DawnWebGPUCache",
+    ] {
+        f.write(&format!("home/{folder}/blob"), "x");
+    }
+    let module = Arc::new(CachesModule {
+        home: Some(home),
+        ..Default::default()
+    });
+    let report = Engine::new(services(&f), builtin(&f).register(module)).scan_report(
+        &["caches".into()],
+        &f.context(),
+        &ScanControl::default(),
+    );
+    let mut titles: Vec<&str> = report.findings.iter().map(|r| r.title.as_str()).collect();
+    titles.sort();
+    for title in [
+        "VS Code · Crash reports",
+        "VS Code · Graphics cache · DawnGraphiteCache",
+        "VS Code · Profile cache",
+        "Graphics cache · Slack",
+    ] {
+        assert!(titles.contains(&title), "{title}: {titles:?}");
+    }
+    // The editors in AI Tools list the same folders.
+    let cursor = modules::ai::AiToolsModule::default()
+        .tools
+        .into_iter()
+        .find(|t| t.name == "Cursor")
+        .unwrap();
+    for folder in ["Dawn*", "Crashpad/completed", "Service Worker/CacheStorage"] {
+        assert!(
+            cursor.locations.iter().any(|l| l.path == folder),
+            "{folder}"
+        );
     }
 }

@@ -77,28 +77,10 @@ pub fn all() -> Vec<AiTool> {
 
 /// The Chromium caches and logs of an Electron app's data folder.
 fn electron() -> Vec<AiLocation> {
-    let rebuilt = "Rebuilt by the app.";
-    vec![
-        at("Cache", "Web cache", Tier::Safe, rebuilt),
-        at("Code Cache", "Script cache", Tier::Safe, rebuilt),
-        at("GPUCache", "GPU cache", Tier::Safe, rebuilt),
-        at("Dawn*", "Graphics cache", Tier::Safe, rebuilt),
-        at("CachedData", "Compiled code cache", Tier::Safe, rebuilt),
-        at("CachedProfilesData", "Profile cache", Tier::Safe, rebuilt),
-        at(
-            "CachedExtensionVSIXs",
-            "Extension downloads",
-            Tier::Safe,
-            "Extensions are downloaded again when needed.",
-        ),
-        at("logs", "Logs", Tier::Safe, "Logs of past sessions."),
-        at(
-            "Crashpad/completed",
-            "Crash reports",
-            Tier::Safe,
-            "Reports of past crashes.",
-        ),
-    ]
+    crate::modules::electron_folders!("", "")
+        .into_iter()
+        .map(|(folder, name, note, _)| at(folder, name, Tier::Safe, note))
+        .collect()
 }
 
 /// Per-folder state and the chats of AI extensions (Cline, Roo Code, Kilo Code) in a VS Code

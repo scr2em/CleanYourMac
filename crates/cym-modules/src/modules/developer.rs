@@ -724,35 +724,6 @@ impl Default for CachesModule {
                     .note("IDEs rebuild indexes on the next open, and Local History (the IDE's file history) stored here is lost.")
                     .apps(owners::JETBRAINS)
                     .risk(Risk::Review),
-                cache("VS Code", "VS Code cache", "Library/Application Support/Code/Cache")
-                    .apps(owners::VSCODE),
-                cache(
-                    "VS Code",
-                    "VS Code code cache",
-                    "Library/Application Support/Code/Code Cache",
-                )
-                .apps(owners::VSCODE),
-                cache(
-                    "VS Code",
-                    "VS Code cached data",
-                    "Library/Application Support/Code/CachedData",
-                )
-                .apps(owners::VSCODE),
-                cache(
-                    "VS Code",
-                    "VS Code GPU cache",
-                    "Library/Application Support/Code/GPUCache",
-                )
-                .apps(owners::VSCODE),
-                cache(
-                    "VS Code",
-                    "VS Code extension downloads",
-                    "Library/Application Support/Code/CachedExtensionVSIXs",
-                )
-                .apps(owners::VSCODE),
-                cache("VS Code", "VS Code logs", "Library/Application Support/Code/logs")
-                    .note("Logs can help diagnose problems.")
-                    .apps(owners::VSCODE),
                 cache("Unity", "Unity package cache", "Library/Unity/cache").apps(owners::UNITY),
                 // Virtual machines and clusters: images the tools download again. The
                 // machines themselves are listed by Containers & VMs.
@@ -840,7 +811,15 @@ impl Default for CachesModule {
                     .risk(Risk::Review)
                     .app_cache()
                     .blocked("Removing attachments here leaves broken messages. Delete them in Messages, or in System Settings › General › Storage › Messages."),
-            ],
+            ]
+            .into_iter()
+            // VS Code's Electron caches, logs and crash reports, named as for every editor.
+            .chain(
+                super::electron_folders!("Library/Application Support/Code/", "VS Code · ").map(
+                    |(path, name, note, _)| cache("VS Code", name, path).note(note).apps(owners::VSCODE),
+                ),
+            )
+            .collect(),
         }
     }
 }

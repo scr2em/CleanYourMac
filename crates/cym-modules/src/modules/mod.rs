@@ -4,6 +4,78 @@ use crate::{model::*, ports::*, services::Services};
 use rayon::prelude::*;
 use std::{collections::HashSet, sync::Arc};
 
+/// The Chromium caches, logs and crash reports in an Electron app's data folder, written
+/// once for AI Tools' editors, Caches & Logs' VS Code and the leftover rule for other
+/// Electron apps. `$root` goes in front of each folder and `$title` in front of each name.
+/// Each entry is (folder, name, what removing it costs, whether it is a cache).
+macro_rules! electron_folders {
+    ($root:literal, $title:literal) => {
+        [
+            (
+                concat!($root, "Cache"),
+                concat!($title, "Web cache"),
+                "Rebuilt by the app.",
+                true,
+            ),
+            (
+                concat!($root, "Code Cache"),
+                concat!($title, "Script cache"),
+                "Rebuilt by the app.",
+                true,
+            ),
+            (
+                concat!($root, "GPUCache"),
+                concat!($title, "GPU cache"),
+                "Rebuilt by the app.",
+                true,
+            ),
+            (
+                concat!($root, "Dawn*"),
+                concat!($title, "Graphics cache"),
+                "Rebuilt by the app.",
+                true,
+            ),
+            (
+                concat!($root, "Service Worker/CacheStorage"),
+                concat!($title, "Offline web cache"),
+                "Rebuilt by the app; pages download it again.",
+                true,
+            ),
+            (
+                concat!($root, "CachedData"),
+                concat!($title, "Compiled code cache"),
+                "Rebuilt by the app.",
+                true,
+            ),
+            (
+                concat!($root, "CachedProfilesData"),
+                concat!($title, "Profile cache"),
+                "Rebuilt by the app.",
+                true,
+            ),
+            (
+                concat!($root, "CachedExtensionVSIXs"),
+                concat!($title, "Extension downloads"),
+                "Extensions are downloaded again when needed.",
+                true,
+            ),
+            (
+                concat!($root, "logs"),
+                concat!($title, "Logs"),
+                "Logs of past sessions.",
+                false,
+            ),
+            (
+                concat!($root, "Crashpad/completed"),
+                concat!($title, "Crash reports"),
+                "Reports of past crashes.",
+                false,
+            ),
+        ]
+    };
+}
+pub(crate) use electron_folders;
+
 pub mod ai;
 pub mod applications;
 pub mod containers;

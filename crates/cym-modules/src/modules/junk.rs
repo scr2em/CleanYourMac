@@ -19,26 +19,6 @@ pub struct JunkLocation {
     pub app_folder: bool,
 }
 
-/// Chromium caches that Electron apps (Slack, Discord, Figma, Notion and others) keep in
-/// their Application Support folder: (subfolder, name).
-const WEB_CACHES: &[(&str, &str)] = &[
-    ("Library/Application Support/*/Cache", "Web cache"),
-    ("Library/Application Support/*/Code Cache", "Script cache"),
-    ("Library/Application Support/*/GPUCache", "GPU cache"),
-    (
-        "Library/Application Support/*/DawnGraphiteCache",
-        "Graphics cache",
-    ),
-    (
-        "Library/Application Support/*/DawnWebGPUCache",
-        "Graphics cache",
-    ),
-    ("Library/Application Support/*/DawnCache", "Graphics cache"),
-    (
-        "Library/Application Support/*/Service Worker/CacheStorage",
-        "Offline web cache",
-    ),
-];
 /// A folder is an Electron or Chromium app's when it holds one of these.
 const CHROMIUM_MARKERS: &[&str] = &["Code Cache", "GPUCache", "DawnGraphiteCache"];
 /// Browsers, whose profiles are not app caches. Editors and other apps that AI Tools or Caches
@@ -123,11 +103,13 @@ impl Default for MacJunk {
     }
 }
 impl MacJunk {
-    /// The Chromium cache folders of Electron apps, one location per kind of cache.
+    /// The Chromium cache folders that Electron apps (Slack, Discord, Figma, Notion and
+    /// others) keep in their Application Support folder, one location per kind of cache.
     pub fn web_caches() -> Vec<JunkLocation> {
-        WEB_CACHES
-            .iter()
-            .map(|(path, name)| JunkLocation {
+        super::electron_folders!("Library/Application Support/*/", "")
+            .into_iter()
+            .filter(|(_, _, _, cache)| *cache)
+            .map(|(path, name, _, _)| JunkLocation {
                 name,
                 path,
                 reason: "A Chromium cache of an Electron app. The app downloads or compiles it again; it may start a little slower once.",
