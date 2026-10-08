@@ -6,13 +6,16 @@ use std::{collections::HashSet, sync::Arc};
 
 pub mod ai;
 pub mod applications;
+pub mod containers;
 pub mod developer;
+pub mod installers;
 pub mod junk;
 pub mod processes;
 pub mod simulators;
 pub mod storage;
 pub mod toolchains;
 pub mod worktrees;
+pub mod xcode;
 
 pub trait ScanModule: Send + Sync {
     fn descriptor(&self) -> ModuleDescriptor;
@@ -47,6 +50,17 @@ pub trait ScanModule: Send + Sync {
         _control: &ScanControl,
     ) -> Result<()> {
         Ok(())
+    }
+    /// Runs the tool's own cleanup command for a `Resource::Command` finding, chosen again
+    /// from the module's fixed list, and says what it did.
+    fn run(
+        &self,
+        _services: &Services,
+        _finding: &Finding,
+        _context: &ScanContext,
+        _control: &ScanControl,
+    ) -> Result<String> {
+        Err("This tool has no cleanup command.".into())
     }
 }
 
@@ -370,6 +384,25 @@ pub fn glob<'a>(pattern: &str, name: &'a str) -> Option<&'a str> {
         .then(|| &name[prefix.len()..name.len() - suffix.len()]),
     }
 }
+/// Matches a name against a pattern in which each `*` stands for any run of characters.
+pub(crate) fn wildcard(pattern: &str, name: &str) -> bool {
+    let mut pieces = pattern.split('*');
+    let first = pieces.next().unwrap_or_default();
+    let Some(mut rest) = name.strip_prefix(first) else {
+        return false;
+    };
+    let pieces: Vec<&str> = pieces.collect();
+    for (i, piece) in pieces.iter().enumerate() {
+        if i + 1 == pieces.len() {
+            return rest.len() >= piece.len() && rest.ends_with(piece);
+        }
+        match rest.find(piece) {
+            Some(at) => rest = &rest[at + piece.len()..],
+            None => return false,
+        }
+    }
+    rest.is_empty()
+}
 /// Fails while an app whose bundle identifier starts with one of `prefixes` is running.
 pub(crate) fn owners_closed(services: &Services, prefixes: &[&str]) -> Result<()> {
     if prefixes.is_empty() {
@@ -420,13 +453,15 @@ pub fn builtin() -> Registry {
         Arc::new(developer::ArtifactsModule::default()),
         Arc::new(worktrees::WorktreeModule),
         Arc::new(simulators::SimulatorModule),
-        Arc::new(developer::XcodeModule),
+        Arc::new(xcode::XcodeModule::default()),
         Arc::new(developer::CachesModule::default()),
         Arc::new(toolchains::ToolchainsModule::default()),
+        Arc::new(containers::ContainersModule::default()),
         Arc::new(ai::AiToolsModule::default()),
         Arc::new(applications::ApplicationsModule),
         Arc::new(applications::LeftoversModule),
         Arc::new(storage::FolderModule::downloads()),
+        Arc::new(installers::InstallersModule::default()),
         Arc::new(storage::FolderModule::trash()),
         Arc::new(processes::OrphanModule),
     ])

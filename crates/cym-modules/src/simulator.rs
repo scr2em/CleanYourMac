@@ -33,6 +33,21 @@ pub struct Runtime {
     pub bundle_path: Option<String>,
     pub is_available: Option<bool>,
 }
+/// A downloaded runtime image, from `simctl runtime list -j`.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeImage {
+    pub identifier: String,
+    pub runtime_identifier: Option<String>,
+    pub version: Option<String>,
+    pub build: Option<String>,
+    pub size_bytes: Option<u64>,
+    pub path: Option<String>,
+    pub deletable: Option<bool>,
+    pub kind: Option<String>,
+    pub last_used_at: Option<String>,
+    pub platform_identifier: Option<String>,
+}
 #[derive(Deserialize, Debug)]
 pub struct Inventory {
     pub devices: BTreeMap<String, Vec<Device>>,
@@ -62,7 +77,7 @@ pub fn parse_timestamp(text: &str) -> Option<f64> {
 
 pub struct Simctl<'a>(pub &'a dyn CommandRunner);
 impl Simctl<'_> {
-    fn run(&self, args: &[&str], timeout: u64, control: &ScanControl) -> Result<Output> {
+    pub fn run(&self, args: &[&str], timeout: u64, control: &ScanControl) -> Result<Output> {
         let mut arguments = vec!["simctl".to_owned()];
         arguments.extend(args.iter().map(|s| s.to_string()));
         self.0.run(
@@ -81,6 +96,42 @@ impl Simctl<'_> {
             ));
         }
         serde_json::from_slice(&out.data).map_err(|e| e.to_string())
+    }
+    /// Downloaded runtime images by identifier. Older Xcode versions have no such command.
+    pub fn images(&self, control: &ScanControl) -> Result<BTreeMap<String, RuntimeImage>> {
+        let out = self.run(&["runtime", "list", "-j"], 30, control)?;
+        if out.status != 0 {
+            return Err(out.error);
+        }
+        serde_json::from_slice(&out.data).map_err(|e| e.to_string())
+    }
+    /// Deletes one downloaded runtime image after fresh checks: it still exists, Xcode lets
+    /// it be deleted, and no simulator of it is running.
+    pub fn delete_runtime(&self, id: &str, control: &ScanControl) -> Result<()> {
+        uuid::Uuid::parse_str(id).map_err(|_| "Invalid runtime identifier.")?;
+        let image = self
+            .images(control)?
+            .into_values()
+            .find(|i| i.identifier.eq_ignore_ascii_case(id))
+            .ok_or("This runtime is no longer installed. Scan again.")?;
+        if image.deletable != Some(true) {
+            return Err("Xcode does not let this runtime be deleted.".into());
+        }
+        let inventory = self.inventory(control)?;
+        if let Some(runtime) = &image.runtime_identifier {
+            if inventory
+                .devices
+                .get(runtime)
+                .is_some_and(|d| d.iter().any(|d| d.state != "Shutdown"))
+            {
+                return Err("A simulator of this runtime is running. Shut it down first.".into());
+            }
+        }
+        let out = self.run(&["runtime", "delete", &image.identifier], 600, control)?;
+        if out.status != 0 {
+            return Err(out.error);
+        }
+        Ok(())
     }
     /// Erases or deletes one specific, currently shut-down device after a fresh inventory.
     pub fn act(

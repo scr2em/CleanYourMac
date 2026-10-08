@@ -14,6 +14,7 @@ The migration's core work is done. The app runs on the Rust core:
 ## Continue in this order
 
 1. Run `scripts/test-native.sh` on a Mac with a simulator runtime and record the results in VERIFICATION.md.
+   Also check the container and Xcode cleanups with real data: `docker system df --format '{{json .}}'` and `docker context show` on Docker Desktop, OrbStack and Colima; Podman's machine disk folder and `podman system df` output; the fields of `xcrun simctl runtime list -j` (`deletable`, `sizeBytes`, `lastUsedAt`); and that the Electron web caches list no app whose `Cache` folder holds more than a cache.
    Also check AI Tools with real data: a Claude Code session still resumes after its `tool-results` folder is in the Trash; the bundle identifiers of Kiro, Trae, Void and the Codex app (`crates/cym-modules/src/modules/ai/catalog.rs`) match the installed apps; Ollama frees a model's files when it starts after its manifest is in the Trash.
 2. Give each finder its own scope in AppStore: included and excluded paths, query, filters, sort order and scan task. The current global scan task cancels other finders' scans. Known-location tools should filter their inventory by the finder's scope.
 3. Finish the visual pass to match the Figma screens: result summaries directly below search, Overview analytics charts from `Analytics.modules`, orphaned-worktree badges in rows, and size and name sorting. Capture real app screenshots using synthetic data.

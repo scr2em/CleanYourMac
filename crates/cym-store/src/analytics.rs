@@ -8,6 +8,8 @@ fn disk_path(f: &Finding) -> Option<&str> {
     match &f.resource {
         Resource::File { file } | Resource::Worktree { file, .. } => Some(&file.path),
         Resource::Simulator { .. } => f.value("Data path"),
+        // Command data lives at its data path, or at a location outside any scan scope.
+        Resource::Command { .. } => f.value("Data path").or(f.value("Location")),
         _ => None,
     }
 }

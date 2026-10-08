@@ -21,7 +21,7 @@ impl ScanModule for SimulatorModule {
         sink: &mut dyn Sink,
     ) -> Result<()> {
         let inventory = Simctl(s.commands.as_ref()).inventory(k)?;
-        for (runtime, devices) in inventory.devices {
+        for (runtime, devices) in &inventory.devices {
             for device in devices {
                 k.check()?;
                 let path = device.data_path();
@@ -67,6 +67,13 @@ impl ScanModule for SimulatorModule {
                     ),
                     detail("Data path", path),
                 ];
+                if device.is_available == Some(false) {
+                    f.badge = Some("Unavailable".into());
+                    f.reason = format!(
+                        "Unavailable: its runtime is no longer installed, so it cannot start. {}",
+                        f.reason
+                    );
+                }
                 if device.state == "Shutdown" {
                     f.actions = vec![ActionKind::ResetSimulator, ActionKind::DeleteSimulator];
                 } else {
@@ -76,8 +83,80 @@ impl ScanModule for SimulatorModule {
                 sink.finding(f);
             }
         }
+        // Downloaded runtimes, which simctl can delete; bundled ones stay read-only below.
+        let images = Simctl(s.commands.as_ref()).images(k).unwrap_or_default();
+        let mut listed = std::collections::HashSet::new();
+        for image in images.into_values() {
+            k.check()?;
+            if c.limit_to_roots {
+                continue;
+            }
+            let runtime_id = image.runtime_identifier.clone().unwrap_or_default();
+            listed.insert(runtime_id.clone());
+            let name = inventory
+                .runtimes
+                .iter()
+                .find(|r| r.identifier == runtime_id)
+                .map(|r| r.name.clone())
+                .unwrap_or_else(|| {
+                    let platform = image
+                        .platform_identifier
+                        .as_deref()
+                        .and_then(|p| p.rsplit('.').next())
+                        .unwrap_or("Simulator");
+                    format!("{platform} {}", image.version.clone().unwrap_or_default())
+                });
+            let mut f = Finding::new(
+                "simulators",
+                &format!("runtime-image:{}", image.identifier),
+                &name,
+                Resource::Command {
+                    tool: "xcrun".into(),
+                    task: format!("runtime-delete:{}", image.identifier),
+                },
+                "A downloaded simulator runtime. Xcode downloads it again from Settings › Components; simulators of this runtime cannot start until then.",
+            );
+            f.subtitle = "Installed runtime".into();
+            f.bytes = image.size_bytes;
+            f.allocated_bytes = image.size_bytes;
+            f.last_used_at = image
+                .last_used_at
+                .as_deref()
+                .and_then(crate::simulator::parse_timestamp);
+            f.risk = Risk::Review;
+            f.details = vec![
+                detail("Version", image.version.clone().unwrap_or("Unknown".into())),
+                detail("Build", image.build.clone().unwrap_or_default()),
+                detail("Kind", image.kind.clone().unwrap_or_default()),
+                detail("Identifier", image.identifier.clone()),
+                detail(
+                    "Command",
+                    format!("xcrun simctl runtime delete {}", image.identifier),
+                ),
+            ];
+            if let Some(path) = &image.path {
+                f.details.push(detail("Location", path.clone()));
+            }
+            let running = inventory
+                .devices
+                .get(&runtime_id)
+                .is_some_and(|d| d.iter().any(|d| d.state != "Shutdown"));
+            if image.deletable != Some(true) {
+                f.blocked_reason =
+                    Some("Installed with Xcode; manage it in Xcode Settings › Components.".into());
+            } else if running {
+                f.blocked_reason =
+                    Some("A simulator of this runtime is running. Shut it down first.".into());
+            } else {
+                f.actions = vec![ActionKind::RunCommand];
+            }
+            sink.finding(f);
+        }
         for runtime in inventory.runtimes {
             k.check()?;
+            if listed.contains(&runtime.identifier) {
+                continue;
+            }
             let hidden = match &runtime.bundle_path {
                 Some(path) => !c.allows(path),
                 None => c.limit_to_roots,
@@ -117,5 +196,17 @@ impl ScanModule for SimulatorModule {
             sink.finding(f);
         }
         Ok(())
+    }
+    fn run(&self, s: &Services, f: &Finding, _: &ScanContext, k: &ScanControl) -> Result<String> {
+        match &f.resource {
+            Resource::Command { tool, task } if tool == "xcrun" => {
+                let id = task
+                    .strip_prefix("runtime-delete:")
+                    .ok_or("This cleanup is not one the app runs.")?;
+                Simctl(s.commands.as_ref()).delete_runtime(id, k)?;
+                Ok("Runtime deleted. macOS can take a few minutes to free its space.".into())
+            }
+            _ => Err("This cleanup is not one the app runs.".into()),
+        }
     }
 }

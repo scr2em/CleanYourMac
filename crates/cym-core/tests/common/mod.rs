@@ -177,7 +177,7 @@ pub fn process(path: &str, parent: i32, uid: u32) -> Snapshot {
 /// package stores, caches, toolchains) pointed at `fixture/home`. Tests never see, and so can
 /// never act on, the real home folder.
 pub fn builtin(fixture: &Fixture) -> cym_core::modules::Registry {
-    use cym_core::modules::{ai, developer, toolchains};
+    use cym_core::modules::{ai, containers, developer, installers, toolchains, xcode};
     let home = Some(fixture.at("home"));
     cym_core::modules::builtin()
         .register(Arc::new(developer::DependenciesModule {
@@ -191,6 +191,16 @@ pub fn builtin(fixture: &Fixture) -> cym_core::modules::Registry {
         .register(Arc::new(toolchains::ToolchainsModule {
             home: home.clone(),
             ..Default::default()
+        }))
+        .register(Arc::new(xcode::XcodeModule {
+            home: home.clone(),
+            developer_dir: Some(fixture.at("home/Applications/Xcode.app/Contents/Developer")),
+        }))
+        .register(Arc::new(containers::ContainersModule {
+            home: home.clone(),
+        }))
+        .register(Arc::new(installers::InstallersModule {
+            home: home.clone(),
         }))
         .register(Arc::new(ai::AiToolsModule {
             home,

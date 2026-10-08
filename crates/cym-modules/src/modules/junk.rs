@@ -14,7 +14,51 @@ pub struct JunkLocation {
     pub risk: Risk,
     /// The owning app must not be running when the item is removed.
     pub per_app: bool,
+    /// The first `*` names an app's folder in Application Support rather than a bundle
+    /// identifier; the app is matched by name.
+    pub app_folder: bool,
 }
+
+/// Chromium caches that Electron apps (Slack, Discord, Figma, Notion and others) keep in
+/// their Application Support folder: (subfolder, name).
+const WEB_CACHES: &[(&str, &str)] = &[
+    ("Library/Application Support/*/Cache", "Web cache"),
+    ("Library/Application Support/*/Code Cache", "Script cache"),
+    ("Library/Application Support/*/GPUCache", "GPU cache"),
+    (
+        "Library/Application Support/*/DawnGraphiteCache",
+        "Graphics cache",
+    ),
+    (
+        "Library/Application Support/*/DawnWebGPUCache",
+        "Graphics cache",
+    ),
+    (
+        "Library/Application Support/*/Service Worker/CacheStorage",
+        "Offline web cache",
+    ),
+];
+/// A folder is an Electron or Chromium app's when it holds one of these.
+const CHROMIUM_MARKERS: &[&str] = &["Code Cache", "GPUCache", "DawnGraphiteCache"];
+/// App folders reported by other tools: VS Code-style editors and Claude in AI Tools and
+/// Developer Caches, and browsers, whose profiles are not app caches.
+const WEB_CACHE_EXCEPT: &[&str] = &[
+    "Code",
+    "Cursor",
+    "Windsurf",
+    "Kiro",
+    "Trae",
+    "Void",
+    "Claude",
+    "Google",
+    "BraveSoftware",
+    "Microsoft Edge",
+    "Arc",
+    "Vivaldi",
+    "Chromium",
+    "Firefox",
+    "com.operasoftware.Opera",
+];
 
 /// The table of macOS leftover locations, relative to a home folder.
 pub struct MacJunk {
@@ -22,14 +66,14 @@ pub struct MacJunk {
 }
 impl Default for MacJunk {
     fn default() -> Self {
-        Self {
-            locations: vec![
+        let mut locations = vec![
                 JunkLocation {
                     name: "App cache",
                     path: "Library/Caches/*",
                     reason: "Apps recreate their caches as needed; the app may start a little slower once.",
                     risk: Risk::Rebuild,
                     per_app: true,
+                    app_folder: false,
                 },
                 JunkLocation {
                     name: "Sandboxed app cache",
@@ -37,6 +81,7 @@ impl Default for MacJunk {
                     reason: "Apps recreate their caches as needed; the app may start a little slower once.",
                     risk: Risk::Rebuild,
                     per_app: true,
+                    app_folder: false,
                 },
                 JunkLocation {
                     name: "Saved window state",
@@ -44,6 +89,7 @@ impl Default for MacJunk {
                     reason: "Lets an app reopen its windows where you left them; it opens fresh windows instead.",
                     risk: Risk::Rebuild,
                     per_app: true,
+                    app_folder: false,
                 },
                 JunkLocation {
                     name: "Mail downloads",
@@ -51,6 +97,7 @@ impl Default for MacJunk {
                     reason: "Copies of attachments you opened in Mail; the originals stay in your mail.",
                     risk: Risk::Rebuild,
                     per_app: false,
+                    app_folder: false,
                 },
                 JunkLocation {
                     name: "iPhone software updates",
@@ -58,6 +105,7 @@ impl Default for MacJunk {
                     reason: "Device update files, downloaded again when a device needs them.",
                     risk: Risk::Rebuild,
                     per_app: false,
+                    app_folder: false,
                 },
                 JunkLocation {
                     name: "iPad software updates",
@@ -65,6 +113,7 @@ impl Default for MacJunk {
                     reason: "Device update files, downloaded again when a device needs them.",
                     risk: Risk::Rebuild,
                     per_app: false,
+                    app_folder: false,
                 },
                 JunkLocation {
                     name: "Device backup",
@@ -72,12 +121,28 @@ impl Default for MacJunk {
                     reason: "A local backup of an iPhone or iPad. Remove it only if you have a newer backup, here or in iCloud.",
                     risk: Risk::Review,
                     per_app: false,
+                    app_folder: false,
                 },
-            ],
-        }
+            ];
+        locations.extend(Self::web_caches());
+        Self { locations }
     }
 }
 impl MacJunk {
+    /// The Chromium cache folders of Electron apps, one location per kind of cache.
+    pub fn web_caches() -> Vec<JunkLocation> {
+        WEB_CACHES
+            .iter()
+            .map(|(path, name)| JunkLocation {
+                name,
+                path,
+                reason: "A Chromium cache of an Electron app. The app downloads or compiles it again; it may start a little slower once.",
+                risk: Risk::Rebuild,
+                per_app: true,
+                app_folder: true,
+            })
+            .collect()
+    }
     /// Existing folders matching a location, with the first `*` match.
     fn expand(
         &self,
@@ -163,6 +228,32 @@ impl MacJunk {
                 if !c.allows(e.path()) || overlaps(e.path()) {
                     continue;
                 }
+                if location.app_folder {
+                    let app = capture.as_deref().unwrap_or_default();
+                    let folder = format!("{home}/Library/Application Support/{app}");
+                    if WEB_CACHE_EXCEPT.contains(&app)
+                        || !CHROMIUM_MARKERS
+                            .iter()
+                            .any(|m| s.exists(&format!("{folder}/{m}")))
+                    {
+                        continue;
+                    }
+                    candidates.push(
+                        Candidate::new(
+                            e,
+                            &format!("{} Quit {app} first.", location.reason),
+                            vec![ActionKind::Trash],
+                            location.risk,
+                        )
+                        .title(format!("{} · {app}", location.name))
+                        .details(vec![
+                            detail("Ecosystem", "macOS"),
+                            detail("Kind", location.name),
+                            detail("App", app),
+                        ]),
+                    );
+                    continue;
+                }
                 let owner = capture.as_deref().filter(|_| location.per_app).map(bundle);
                 // Apple's own caches are left to review rather than offered as a quick fix.
                 let apple = owner.is_some_and(|b| b.starts_with("com.apple."));
@@ -198,9 +289,23 @@ impl MacJunk {
     pub fn preflight(&self, s: &Services, home: &str, path: &str) -> Option<Result<()>> {
         let (location, capture) = self.locate(home, path)?;
         Some(match capture.as_deref() {
+            Some(app) if location.app_folder => app_closed(s, app),
             Some(capture) if location.per_app => owners_closed(s, &[bundle(capture)]),
             _ => Ok(()),
         })
+    }
+}
+/// Fails while an app named `name` (its bundle's file name) is running.
+fn app_closed(s: &Services, name: &str) -> Result<()> {
+    let running = s.apps.running()?;
+    match running.iter().find(|a| {
+        std::path::Path::new(&a.path)
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.eq_ignore_ascii_case(name))
+    }) {
+        Some(_) => Err(format!("Quit {name} before removing its cache.")),
+        None => Ok(()),
     }
 }
 /// A bundle identifier from a folder name such as `com.apple.Safari.savedState`.

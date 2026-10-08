@@ -51,20 +51,22 @@ public enum Resource: Hashable, Sendable {
     case worktree(file: FileIdentity, repository: String, head: String)
     case worktreeRegistration(path: String, repository: String)
     case simulator(id: String, state: String)
+    /// Data a tool removes with its own command; `task` names an entry in the core's fixed list.
+    case command(tool: String, task: String)
 
     public var path: String? {
         switch self {
         case .file(let file), .worktree(let file, _, _): file.path
         case .worktreeRegistration(let path, _): path
         case .process(let process): process.executable
-        case .simulator: nil
+        case .simulator, .command: nil
         }
     }
 }
 
 // Matches the core's internally tagged representation: {"kind": "file", "file": {...}}.
 extension Resource: Codable {
-    private enum Keys: String, CodingKey { case kind, file, process, repository, head, path, id, state }
+    private enum Keys: String, CodingKey { case kind, file, process, repository, head, path, id, state, tool, task }
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         switch try c.decode(String.self, forKey: .kind) {
@@ -73,6 +75,7 @@ extension Resource: Codable {
         case "worktree": self = .worktree(file: try c.decode(FileIdentity.self, forKey: .file), repository: try c.decode(String.self, forKey: .repository), head: try c.decode(String.self, forKey: .head))
         case "worktreeRegistration": self = .worktreeRegistration(path: try c.decode(String.self, forKey: .path), repository: try c.decode(String.self, forKey: .repository))
         case "simulator": self = .simulator(id: try c.decode(String.self, forKey: .id), state: try c.decode(String.self, forKey: .state))
+        case "command": self = .command(tool: try c.decode(String.self, forKey: .tool), task: try c.decode(String.self, forKey: .task))
         case let kind: throw DecodingError.dataCorruptedError(forKey: .kind, in: c, debugDescription: "Unknown resource kind \(kind)")
         }
     }
@@ -88,6 +91,8 @@ extension Resource: Codable {
             try c.encode("worktreeRegistration", forKey: .kind); try c.encode(path, forKey: .path); try c.encode(repository, forKey: .repository)
         case .simulator(let id, let state):
             try c.encode("simulator", forKey: .kind); try c.encode(id, forKey: .id); try c.encode(state, forKey: .state)
+        case .command(let tool, let task):
+            try c.encode("command", forKey: .kind); try c.encode(tool, forKey: .tool); try c.encode(task, forKey: .task)
         }
     }
 }
@@ -115,7 +120,7 @@ public struct Recommendation: Codable, Identifiable, Hashable, Sendable {
 }
 
 public enum ActionKind: String, Codable, CaseIterable, Sendable {
-    case trash, removeWorktree, resetSimulator, deleteSimulator, terminate, forceQuit, emptyTrash
+    case trash, removeWorktree, resetSimulator, deleteSimulator, terminate, forceQuit, emptyTrash, runCommand
     public var label: String {
         switch self {
         case .trash: "Move to Trash"
@@ -125,6 +130,7 @@ public enum ActionKind: String, Codable, CaseIterable, Sendable {
         case .terminate: "Terminate"
         case .forceQuit: "Force Quit"
         case .emptyTrash: "Empty Trash"
+        case .runCommand: "Run Cleanup"
         }
     }
     public var consequence: String {
@@ -136,6 +142,7 @@ public enum ActionKind: String, Codable, CaseIterable, Sendable {
         case .terminate: "Requests a graceful exit with SIGTERM. A process may have unsaved work. No automatic force quit follows."
         case .forceQuit: "Sends SIGKILL to the selected process. Unsaved work may be lost. This cannot be undone."
         case .emptyTrash: "Permanently removes the specifically reviewed Trash items. This cannot be undone."
+        case .runCommand: "Runs the tool's own cleanup command shown on each item, such as docker builder prune. The tool removes the data itself, so nothing goes to the Trash and it cannot be restored."
         }
     }
 }

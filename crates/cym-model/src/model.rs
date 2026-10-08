@@ -51,6 +51,12 @@ pub enum Resource {
         id: String,
         state: String,
     },
+    /// Data a tool removes with its own command. `task` names an entry in the owning
+    /// module's fixed list; the command line itself is never stored or taken from input.
+    Command {
+        tool: String,
+        task: String,
+    },
 }
 impl Finding {
     /// The path that decides whether this finding is in a scan's scope: the folder an action
@@ -59,7 +65,7 @@ impl Finding {
     pub fn scope_path(&self) -> Option<&str> {
         match &self.resource {
             Resource::Process { .. } => None,
-            Resource::Simulator { .. } => self.value("Data path"),
+            Resource::Simulator { .. } | Resource::Command { .. } => self.value("Data path"),
             resource => resource.path(),
         }
     }
@@ -70,7 +76,7 @@ impl Resource {
             Self::File { file } | Self::Worktree { file, .. } => Some(&file.path),
             Self::Process { process } => Some(&process.executable),
             Self::WorktreeRegistration { path, .. } => Some(path),
-            Self::Simulator { .. } => None,
+            Self::Simulator { .. } | Self::Command { .. } => None,
         }
     }
 }
@@ -93,6 +99,8 @@ pub enum ActionKind {
     Terminate,
     ForceQuit,
     EmptyTrash,
+    /// Runs the owning tool's own cleanup command, such as `docker builder prune`.
+    RunCommand,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Detail {

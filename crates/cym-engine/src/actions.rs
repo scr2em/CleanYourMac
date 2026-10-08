@@ -155,6 +155,10 @@ fn apply(
                 "Simulator deleted."
             })
         }
+        (ActionKind::RunCommand, Resource::Command { .. }) => {
+            let message = module.run(services, f, c, control)?;
+            done(&message)
+        }
         (ActionKind::Terminate | ActionKind::ForceQuit, Resource::Process { process }) => {
             let outcome = orphans::signal(
                 services,

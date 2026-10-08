@@ -27,7 +27,9 @@ CleanYourMac finds items that use disk space on your Mac. Examples are large dow
 | **Exact duplicates** | Find identical files. The app keeps one original of each file. The app does not search system, build or dependency folders. |
 | **Project dependencies and build output** | See the projects that have large dependency folders (`node_modules`, Python environments, Pods, `vendor` and more) and generated files. The search stops at each dependency folder. |
 | **Git worktrees** | See the branch, local changes, locks and size of each worktree. A badge shows registrations that have no folder. |
-| **Simulators and Xcode data** | See simulator app data, DerivedData and device support. Xcode archives are protected. |
+| **Simulators and Xcode data** | See simulator app data, runtimes, DerivedData, device support, preview simulators and extra Xcode installs. Xcode archives are protected. |
+| **Containers and virtual machines** | See the real size of the disks of Docker, OrbStack, Colima, Lima and Podman. Free space inside them with their own cleanup commands. |
+| **Installers** | Find macOS installers, Xcode archives, disk images and packages that you already installed from. |
 | **Toolchains, SDKs and caches** | Find installed language versions, SDK components, virtual devices, package caches and logs. |
 | **AI tools** | Find the caches, session transcripts and downloaded models of Claude Code, Codex, Gemini CLI, Cursor, Ollama and other AI tools. Each item has a risk tier. |
 | **Applications and possible leftovers** | See each application and its related files as separate items. The app shows when the owner of a file is not certain. |
@@ -126,7 +128,8 @@ When you move an item to the Trash, you can restore it. The disk space becomes f
   The app shows an item but does not let you select it when it cannot read the full size. Put the pointer on a disabled item to see the reason.
 - **The app shows what uses an item.** When an app or a tool uses an item, the app shows the process (name, PID and folder). You can then continue the action. You cannot skip checks that protect your data. For example, the app does not remove files that Git tracks or items that changed after the scan.
 - **One failure does not stop the action.** When an item fails, the app continues with the other items. Then it shows how many items it changed and why the other items failed.
-- **You can undo most actions.** You can restore an item that you moved to the Trash from Activity, if the item did not change. These actions are permanent: remove a worktree, reset or delete a simulator, empty the Trash and quit a process. The app identifies them.
+- **You can undo most actions.** You can restore an item that you moved to the Trash from Activity, if the item did not change. These actions are permanent: remove a worktree, reset or delete a simulator, run the cleanup command of a tool, empty the Trash and quit a process. The app identifies them.
+- **A tool's own command does the work where the Trash cannot.** For Docker, Podman, simulator runtimes and SwiftUI preview simulators, the app runs the cleanup command of the tool (for example `docker builder prune`). The app chooses the command from a fixed list and shows it on the item. Nothing goes to the Trash, so you cannot restore it.
 - **Badges show the cost of an action.** *Rebuild* means that the item comes back automatically or with one command. *Review* means that you must examine the item first. *Permanent* means that you cannot undo the action.
 
 <details>
@@ -214,15 +217,26 @@ The app shows the ignored files first, because the removal deletes them. A regis
 <details>
 <summary><strong>Simulators</strong>: devices and runtimes</summary>
 
-Simulators reads the simulator list of Xcode. For each device, it shows the runtime, state, app-data size and the date of the last boot. You can reset or delete a device only when it is shut down. The app shows runtimes for information only. Use Xcode to manage runtimes.
+Simulators reads the simulator list of Xcode. For each device, it shows the runtime, state, app-data size and the date of the last boot. You can reset or delete a device only when it is shut down. A device whose runtime is not installed has the *Unavailable* badge.
+
+Each downloaded runtime shows its size and the date of last use. The app deletes a runtime with `xcrun simctl runtime delete`, because macOS protects the runtime files. The app does not delete a runtime while a simulator of it runs. Runtimes that come with Xcode are for information only.
 </details>
 
 <details>
 <summary><strong>Xcode Data</strong>: DerivedData, device support and archives</summary>
 
-Xcode Data shows each folder in DerivedData and iOS DeviceSupport. Xcode makes both again when necessary. For DerivedData, the app shows when Xcode last opened the folder.
+Xcode Data shows:
+- each folder in DerivedData, with the date that Xcode last opened it;
+- device support for iOS, watchOS, tvOS, visionOS and macOS;
+- the documentation cache and index, and the shared simulator caches;
+- device logs, with the *Review* badge;
+- the data of apps removed from a simulator that the simulator did not clean up (`Dead` folders), with the *Review* badge;
+- SwiftUI preview simulators. The app removes them with `xcrun simctl --set previews delete all`;
+- Xcode installations other than the one that `xcode-select` selects. The selected Xcode stays.
 
-Archives are protected. An archive can be the only copy of a build that you shipped. It also contains the debug symbols that you need to read its crash reports. You can move an archive to the Trash from its details, after you confirm that you accept this loss. The app does not move items while Xcode, `xcodebuild` or the Swift compiler runs.
+Xcode makes all of these again when necessary, except device logs and other Xcode versions.
+
+Archives are protected. An archive can be the only copy of a build that you shipped. It also contains the debug symbols that you need to read its crash reports. You can move an archive to the Trash from its details, after you confirm that you accept this loss. The app does not move items while Xcode, Simulator, `xcodebuild` or the Swift compiler runs.
 </details>
 
 <details>
@@ -236,7 +250,8 @@ Archives are protected. An archive can be the only copy of a build that you ship
   - saved window state;
   - Mail downloads;
   - iPhone and iPad software updates;
-  - device backups, with the *Review* badge.
+  - device backups, with the *Review* badge;
+  - the Chromium caches of Electron apps such as Slack, Discord, Figma and Notion (web, script, GPU and offline caches). The app identifies an Electron app from its cache folders. It never touches their login data and local storage.
 
   The caches of Apple apps have the *Review* badge. You must close an app before the app moves its cache.
 </details>
@@ -251,6 +266,29 @@ Toolchains & SDKs shows each installed version, with its size and the uninstall 
 - **Android:** system images, NDK, build tools and virtual devices.
 
 You cannot select a version that is in use. A version is in use when it is the default or global version, when `.tool-versions` or a mise configuration pins it, or when an Android virtual device uses it. You cannot select a virtual device while its emulator runs.
+</details>
+
+<details>
+<summary><strong>Containers & VMs</strong>: Docker, OrbStack, Colima, Lima and Podman</summary>
+
+Container engines keep all images, containers and volumes in one virtual disk. The app shows the real size of each disk. The file reports a larger size, because it is sparse. A disk never goes to the Trash, because that deletes all its contents.
+
+To free space inside a disk, the app uses the command of the engine. It asks the engine how much each kind of data can free (`docker system df`):
+
+| Item | Command | Badge |
+| --- | --- | --- |
+| Build cache | `docker builder prune --force` | *Rebuild* |
+| Unused images | `docker image prune --all --force` | *Review* |
+| Stopped containers | `docker container prune --force` | *Review* |
+| Unused volumes | None. Volumes can hold databases. Remove them in Docker. | For information only |
+
+Podman items use the same `podman` commands. Docker commands reach the engine that the current Docker context names (Docker Desktop, OrbStack, Colima or Rancher Desktop). Before a command runs, the app checks that the context did not change. The engine must run to measure and clean its data. The download caches of Lima and Colima go to the Trash.
+</details>
+
+<details>
+<summary><strong>Installers</strong>: installers that you already used</summary>
+
+Installers shows macOS installer apps in the Applications folders, and `.dmg`, `.pkg`, `.xip` and `.iso` files in Downloads and on the Desktop, with the date that you last opened them. The app does not move an installer that runs. You can download each installer again from its publisher.
 </details>
 
 <details>

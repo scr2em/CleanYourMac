@@ -9,7 +9,9 @@
 //! Settings, credentials, instructions, skills, agents, commands, plugins and memory are never
 //! listed. Session transcripts are read to show their project, first prompt and dates, and to
 //! flag sessions whose project folder no longer exists.
-use super::{add_files, descriptor, flush, glob, owners_closed, Candidate, LastUsed, ScanModule};
+use super::{
+    add_files, descriptor, flush, glob, owners_closed, wildcard, Candidate, LastUsed, ScanModule,
+};
 use crate::{model::*, policy, ports::*, services::Services};
 use std::{collections::HashSet, path::Path};
 
@@ -271,25 +273,6 @@ fn empty(s: &Services, path: &str) -> bool {
         .all(|e| e.name() == ".DS_Store")
 }
 
-/// Matches a name against a pattern in which each `*` stands for any run of characters.
-fn wildcard(pattern: &str, name: &str) -> bool {
-    let mut pieces = pattern.split('*');
-    let first = pieces.next().unwrap_or_default();
-    let Some(mut rest) = name.strip_prefix(first) else {
-        return false;
-    };
-    let pieces: Vec<&str> = pieces.collect();
-    for (i, piece) in pieces.iter().enumerate() {
-        if i + 1 == pieces.len() {
-            return rest.len() >= piece.len() && rest.ends_with(piece);
-        }
-        match rest.find(piece) {
-            Some(at) => rest = &rest[at + piece.len()..],
-            None => return false,
-        }
-    }
-    rest.is_empty()
-}
 fn now() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

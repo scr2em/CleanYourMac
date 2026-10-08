@@ -11,6 +11,30 @@ use std::{
 };
 
 pub const APPROVED: &[&str] = &["/usr/bin/git", "/usr/bin/xcrun", "/bin/launchctl"];
+/// Container command-line tools, where their installers put them.
+pub const CONTAINER_TOOLS: &[&str] = &[
+    "/usr/local/bin/docker",
+    "/opt/homebrew/bin/docker",
+    "/Applications/Docker.app/Contents/Resources/bin/docker",
+    "/Applications/OrbStack.app/Contents/MacOS/xbin/docker",
+    "/usr/local/bin/podman",
+    "/opt/homebrew/bin/podman",
+    "/opt/podman/bin/podman",
+];
+/// The same, relative to the home folder.
+pub const HOME_CONTAINER_TOOLS: &[&str] = &[
+    ".orbstack/bin/docker",
+    ".docker/bin/docker",
+    ".rd/bin/docker",
+];
+/// Whether an executable is one this runner may start.
+pub fn approved(executable: &str) -> bool {
+    APPROVED.contains(&executable)
+        || CONTAINER_TOOLS.contains(&executable)
+        || HOME_CONTAINER_TOOLS
+            .iter()
+            .any(|t| executable == format!("{}/{t}", policy::home()))
+}
 const LIMIT: usize = 4_194_304;
 
 pub struct SystemRunner;
@@ -31,15 +55,20 @@ fn run(
     timeout: Duration,
     control: &ScanControl,
 ) -> Result<Output> {
-    if !APPROVED.contains(&executable) {
+    if !approved(executable) {
         return Err("Unapproved executable".into());
     }
+    // A tool finds its own helpers (credential helpers, plugins) beside it.
+    let folder = std::path::Path::new(executable)
+        .parent()
+        .and_then(|p| p.to_str())
+        .unwrap_or("/usr/bin");
     control.check()?;
     let mut child = Command::new(executable)
         .args(args)
         .env_clear()
         .env("HOME", policy::home())
-        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+        .env("PATH", format!("{folder}:/usr/bin:/bin:/usr/sbin:/sbin"))
         .env("LC_ALL", "C")
         .env("LANG", "C")
         .env("GIT_OPTIONAL_LOCKS", "0")
