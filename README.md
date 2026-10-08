@@ -252,7 +252,7 @@ Each item shows the CPU use, memory use, working folder and executable. **Quit**
 
 ## Appearance
 
-The app has its own design, *Soft Studio*: rounded type, soft cards and pill-shaped controls. The default palette is Paper & Walnut, with light paper surfaces and warm brown accents. In Settings, you can select a different palette: Honey & Espresso, Ember, Terracotta & Navy, Cream & Mauve or Linen & Rose. Each palette has a light and a dark appearance.
+The app has its own design, *Soft Studio*: rounded type, soft cards and pill-shaped controls. The default palette is White & Gray, with white surfaces on light gray and a graphite accent. In Settings, you can select a different palette: Paper & Walnut, Honey & Espresso, Ember, Terracotta & Navy, Cream & Mauve or Linen & Rose. Each palette has a light and a dark version. In Settings, select System, Light or Dark. System follows the setting of your Mac.
 
 ## License and contributions
 

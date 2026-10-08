@@ -143,6 +143,18 @@ public final class AppStore {
     public var menuBarEnabled = false { didSet { persist(); configureMonitor() } }
     /// The Comfy palette; colors resolve against it at draw time.
     public var theme: ComfyTheme = ComfyTheme.current { didSet { ComfyTheme.current = theme; persist() } }
+    /// Light, dark, or following the system; every palette has both appearances.
+    public enum Appearance: String, CaseIterable, Sendable {
+        case system = "System", light = "Light", dark = "Dark"
+        @MainActor func apply() {
+            NSApplication.shared.appearance = switch self {
+            case .system: nil
+            case .light: NSAppearance(named: .aqua)
+            case .dark: NSAppearance(named: .darkAqua)
+            }
+        }
+    }
+    public var appearance: Appearance = .system { didSet { appearance.apply(); persist() } }
     public var forceEligible = Set<String>()
     public var restoredIDs = Set<UUID>()
     public var storageNavigation: [String] = []
@@ -197,7 +209,13 @@ public final class AppStore {
         ignoredNames = defaults.stringArray(forKey: "ignoredProcessNames") ?? ["ssh-agent", "gpg-agent", "keyboxd", "dirmngr"]
         disabledModules = defaults.stringArray(forKey: "disabledModules") ?? []
         menuBarEnabled = !demo && defaults.bool(forKey: "menuBarEnabled")
-        theme = defaults.string(forKey: "theme").flatMap(ComfyTheme.init(rawValue:)) ?? .walnut
+        theme = defaults.string(forKey: "theme").flatMap(ComfyTheme.init(rawValue:)) ?? ComfyTheme.standard
+        // Paper & Walnut was the default before White & Gray; move people who kept it, once.
+        if defaults.integer(forKey: "themeDefaultsVersion") < 2 {
+            if theme == .walnut { theme = ComfyTheme.standard }
+            defaults.set(2, forKey: "themeDefaultsVersion")
+        }
+        appearance = defaults.string(forKey: "appearance").flatMap(Appearance.init(rawValue:)) ?? .system
         scanPlace = defaults.string(forKey: "scanPlace").flatMap(ScanPlace.init(rawValue:)) ?? .wholeMac
         lastScanAt = defaults.object(forKey: "lastScanAt") as? Date
         ComfyTheme.current = theme
@@ -457,6 +475,7 @@ public final class AppStore {
         defaults.set(roots, forKey: "scanRoots"); defaults.set(exclusions, forKey: "excludedPaths")
         defaults.set(ignoredNames, forKey: "ignoredProcessNames"); defaults.set(disabledModules, forKey: "disabledModules")
         defaults.set(menuBarEnabled, forKey: "menuBarEnabled"); defaults.set(theme.rawValue, forKey: "theme")
+        defaults.set(appearance.rawValue, forKey: "appearance")
         defaults.set(scanPlace.rawValue, forKey: "scanPlace"); defaults.set(lastScanAt, forKey: "lastScanAt")
     }
     /// Scans the folders the user picks from now on, instead of the previous ones.

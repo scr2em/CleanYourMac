@@ -822,6 +822,11 @@ public struct PreferencesView: View {
 
     private var appearance: some View {
         Form {
+            Section("Appearance") {
+                PillSegments(selection: $store.appearance, options: AppStore.Appearance.allCases.map { ChoiceOption($0, $0.rawValue) })
+                Text("Every palette has a light and a dark version. System follows your Mac's setting.")
+                    .font(TypeStyle.caption).foregroundStyle(Palette.muted)
+            }
             Section("Palette") {
                 Picker("Palette", selection: $store.theme) {
                     ForEach(ComfyTheme.allCases) { theme in

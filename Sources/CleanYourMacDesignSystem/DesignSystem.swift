@@ -34,13 +34,31 @@ public enum TypeStyle {
 }
 /// Named Comfy palettes. Colors resolve at draw time, so switching applies on the next render.
 public enum ComfyTheme: String, CaseIterable, Identifiable, Sendable {
-    case walnut = "Paper & Walnut", honey = "Honey & Espresso", ember = "Ember", terracotta = "Terracotta & Navy", mauve = "Cream & Mauve", rose = "Linen & Rose"
+    case porcelain = "White & Gray", walnut = "Paper & Walnut", honey = "Honey & Espresso", ember = "Ember", terracotta = "Terracotta & Navy", mauve = "Cream & Mauve", rose = "Linen & Rose"
     public var id: String { rawValue }
-    nonisolated(unsafe) public static var current: ComfyTheme = .walnut
+    /// White & Gray: the default since it suits any desktop.
+    public static let standard: ComfyTheme = .porcelain
+    nonisolated(unsafe) public static var current: ComfyTheme = .standard
 
     /// Light and dark sRGB values, mirroring docs/brand/tokens.json.
     func hex(_ token: Palette.Token) -> (light: UInt32, dark: UInt32) {
         switch (self, token) {
+        // White & Gray: white surfaces on light gray, a graphite accent; near-black in dark.
+        case (.porcelain, .canvas): (0xFFFFFF, 0x161618)
+        case (.porcelain, .sidebar): (0xF3F3F5, 0x1C1C1F)
+        case (.porcelain, .sidebarSelection): (0xE4E4E8, 0x2E2E33)
+        case (.porcelain, .surface): (0xFFFFFF, 0x1F1F22)
+        case (.porcelain, .elevated): (0xFFFFFF, 0x29292D)
+        case (.porcelain, .border): (0xE6E6EA, 0x34343A)
+        case (.porcelain, .borderStrong): (0xC8C8CE, 0x4A4A52)
+        case (.porcelain, .track): (0xF0F0F3, 0x2A2A2F)
+        case (.porcelain, .accent): (0x2F2F33, 0xE4E4E8)
+        case (.porcelain, .onAccent): (0xFFFFFF, 0x161618)
+        case (.porcelain, .accentText): (0x3A3A40, 0xD6D6DC)
+        case (.porcelain, .accentSymbol): (0x5E5E66, 0xB4B4BC)
+        case (.porcelain, .selection): (0xEFEFF2, 0x2E2E33)
+        case (.porcelain, .ink): (0x1C1C1F, 0xF2F2F5)
+        case (.porcelain, .muted): (0x6A6A72, 0xA4A4AC)
         // Paper & Walnut: #FCFCFB paper with the brown ramp (docs/brand/tokens.json → ramps.brown).
         case (.walnut, .canvas): (0xFCFCFB, 0x161210)
         case (.walnut, .sidebar): (0xF6F3EF, 0x1D1814)
