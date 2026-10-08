@@ -7,6 +7,14 @@ It follows the app's Soft Studio identity:
 - **Shape:** 20-point cards and a 22-point page sheet floating on the sidebar colour; pill buttons and chips; icon tiles.
 - **Depth:** a two-layer soft shadow.
 
+## Colors
+
+Colors are two collections, like the app's palette and appearance settings:
+- **`Comfy · Palettes`:** one mode per palette (White & Gray, the default, then Paper & Walnut, Honey & Espresso, Ember, Terracotta & Navy, Cream & Mauve and Linen & Rose). It holds `light/<token>` and `dark/<token>` for every color. These variables are hidden from pickers.
+- **`Comfy · Colors`:** the variables that layers use (`color/canvas`, `color/accent` and so on). It has two modes, Light and Dark, which point to `light/<token>` and `dark/<token>` of the palette in use.
+
+To show a frame in a palette, set its `Comfy · Palettes` mode. To show it light or dark, set its `Comfy · Colors` mode. The current screens use White & Gray; the archived screens use Paper & Walnut. Figma's plan allows 10 modes per collection, so this split leaves room for three more palettes.
+
 ## Fonts
 
 The app uses SF Pro Rounded for titles, labels and figures, and SF Pro for running text. Figma cannot render SF Pro in the plugin API, so the text styles use stand-ins:
