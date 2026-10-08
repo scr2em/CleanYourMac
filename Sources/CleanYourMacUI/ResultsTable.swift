@@ -143,6 +143,7 @@ private struct ResultCell: View {
                 icon: Display.icon(moduleID: row.moduleID, path: row.path, brand: row.brand, symbol: symbol),
                 active: store.inspectedID == row.id,
                 eligible: row.eligible && !store.isApplying,
+                disabledReason: store.notSelectable(row),
                 checked: Binding(get: { store.selectedIDs.contains(row.id) }, set: { store.select(row.id, checked: $0) })
             ) { store.click(row, at: index, Self.click); focus() }
             // In Storage Explorer a folder opens with a double-click, as in Finder.

@@ -228,6 +228,20 @@ public final class AppStore {
         recommendations = await core.recommendations()
         diskSpace = DiskSpace.current()
     }
+    // MARK: Why controls are unavailable, shown on hover
+
+    public var whileApplying: String? { isApplying ? "Wait for the current action to finish." : nil }
+    public var whileScanning: String? { isScanning ? "Available when the scan finishes." : nil }
+    public var inDemo: String? { demo ? "Turned off in the demo; nothing on your Mac is changed." : nil }
+    /// The first reason that applies.
+    public func reason(_ reasons: String?...) -> String? { reasons.lazy.compactMap { $0 }.first }
+    /// Why a row's checkbox cannot be ticked.
+    public func notSelectable(_ row: CleanYourMacCore.ResultRow) -> String? {
+        if let busy = whileApplying { return busy }
+        guard !row.eligible else { return nil }
+        return row.blockedReason ?? "Listed for information; nothing can be done with it here."
+    }
+
     /// When the app becomes active again: forget results deleted elsewhere in the meantime
     /// (in Finder, a terminal or another app) and refresh totals, fixes and disk space.
     public func refreshOnReturn() async {

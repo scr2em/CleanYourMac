@@ -211,17 +211,32 @@ public enum Opacity {
 }
 public enum ButtonKind: Equatable { case primary, secondary, destructive }
 
+public extension View {
+    /// Disables the view and, while it is disabled, says why on hover (and to VoiceOver).
+    /// Disabled controls do not reliably show their own tooltips, so a transparent layer
+    /// carries the explanation.
+    func disabled(_ disabled: Bool, because reason: String?) -> some View {
+        self.disabled(disabled).overlay {
+            if disabled, let reason, !reason.isEmpty {
+                Color.clear.contentShape(Rectangle()).help(reason).accessibilityLabel(reason)
+            }
+        }
+    }
+}
+
 public struct ActionButton: View {
     private let title: String
     private let kind: ButtonKind
     private let disabled: Bool
+    private let reason: String?
     private let action: () -> Void
-    public init(_ title: String, kind: ButtonKind = .secondary, disabled: Bool = false, action: @escaping () -> Void) {
-        self.title = title; self.kind = kind; self.disabled = disabled; self.action = action
+    /// `reason` explains on hover why the button is disabled.
+    public init(_ title: String, kind: ButtonKind = .secondary, disabled: Bool = false, reason: String? = nil, action: @escaping () -> Void) {
+        self.title = title; self.kind = kind; self.disabled = disabled; self.reason = reason; self.action = action
     }
     public var body: some View {
         Button(title, role: kind == .destructive ? .destructive : nil, action: action)
-            .buttonStyle(ComfyButtonStyle(kind: kind)).disabled(disabled)
+            .buttonStyle(ComfyButtonStyle(kind: kind)).disabled(disabled, because: reason)
     }
 }
 
@@ -314,18 +329,21 @@ public struct EmptyState: View {
 public struct FindingRow: View {
     private let title: String, subtitle: String, value: String, badge: String, icon: RowIcon
     private let active: Bool, eligible: Bool
+    private let disabledReason: String?
     @Binding private var checked: Bool
     private let inspect: () -> Void
-    public init(title: String, subtitle: String, value: String, badge: String, icon: RowIcon, active: Bool, eligible: Bool, checked: Binding<Bool>, inspect: @escaping () -> Void) {
+    /// `disabledReason` explains on hover why the checkbox cannot be ticked.
+    public init(title: String, subtitle: String, value: String, badge: String, icon: RowIcon, active: Bool, eligible: Bool, disabledReason: String? = nil, checked: Binding<Bool>, inspect: @escaping () -> Void) {
         self.title = title; self.subtitle = subtitle; self.value = value; self.badge = badge; self.icon = icon
-        self.active = active; self.eligible = eligible; _checked = checked; self.inspect = inspect
+        self.active = active; self.eligible = eligible; self.disabledReason = disabledReason; _checked = checked; self.inspect = inspect
     }
     public init(title: String, subtitle: String, value: String, badge: String, symbol: String, active: Bool, eligible: Bool, checked: Binding<Bool>, inspect: @escaping () -> Void) {
         self.init(title: title, subtitle: subtitle, value: value, badge: badge, icon: .symbol(symbol), active: active, eligible: eligible, checked: checked, inspect: inspect)
     }
     public var body: some View {
         HStack(spacing: Space.md) {
-            Toggle("Select \(title) for review", isOn: $checked).labelsHidden().toggleStyle(.checkbox).disabled(!eligible)
+            Toggle("Select \(title) for review", isOn: $checked).labelsHidden().toggleStyle(.checkbox)
+                .disabled(!eligible, because: disabledReason)
             Button(action: inspect) {
                 HStack(spacing: Space.md) {
                     RowIconView(icon: icon)

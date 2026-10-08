@@ -119,8 +119,8 @@ private struct ScanPlacePicker: View {
                 ForEach(AppStore.ScanPlace.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented).labelsHidden().fixedSize()
-            .disabled(store.isScanning)
-            if store.scanPlace == .folders { ActionButton("Choose folders", disabled: store.isScanning) { store.addRoot() } }
+            .disabled(store.isScanning, because: store.whileScanning)
+            if store.scanPlace == .folders { ActionButton("Choose folders", disabled: store.isScanning, reason: store.whileScanning) { store.addRoot() } }
         }
     }
 }
@@ -142,7 +142,7 @@ private struct ScanHero: View {
                 .font(TypeStyle.secondary).foregroundStyle(.secondary).multilineTextAlignment(.center)
             ScanOrb("Scan", subtitle: store.scanPlace.rawValue, phase: store.isScanning ? .scanning(progress: store.scanFraction) : .idle) { store.scan() }
                 .matchedGeometryEffect(id: "orb", in: orb)
-                .disabled(store.isApplying || store.demo)
+                .disabled(store.isApplying || store.demo, because: store.reason(store.inDemo, store.whileApplying))
             if store.isScanning {
                 VStack(spacing: Space.sm) {
                     Text(store.progress).font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
@@ -175,7 +175,7 @@ private struct ScanSummary: View {
             HStack(spacing: Space.lg) {
                 ScanOrb("Scan again", phase: store.isScanning ? .scanning(progress: store.scanFraction) : .idle, diameter: Layout.scanOrbCompact) { store.scan() }
                     .matchedGeometryEffect(id: "orb", in: orb)
-                    .disabled(store.isApplying || store.demo)
+                    .disabled(store.isApplying || store.demo, because: store.reason(store.inDemo, store.whileApplying))
                 VStack(alignment: .leading, spacing: Space.xs) {
                     Text("Found \(Display.bytes(store.overview.diskBytes)) in \(Display.items(store.overview.findings))\(store.isScanning ? " so far" : "")")
                         .font(TypeStyle.headline).contentTransition(.numericText())
@@ -233,7 +233,7 @@ private struct RecommendationsView: View {
                     }
                     Spacer()
                     if store.recommendations.contains(where: { $0.action == .trash }) {
-                        ActionButton("Review all", kind: .primary, disabled: store.isApplying || store.isScanning) { store.reviewAllRecommendations() }
+                        ActionButton("Review all", kind: .primary, disabled: store.isApplying || store.isScanning, reason: store.reason(store.whileApplying, store.whileScanning)) { store.reviewAllRecommendations() }
                     }
                 }
                 ForEach(store.recommendations) { fix in RecommendationCard(store: store, fix: fix) }
@@ -273,7 +273,7 @@ private struct RecommendationCard: View {
                     } else {
                         HStack(spacing: Space.xs) {
                             ProgressView().controlSize(.small)
-                            Text("Still scanning").font(TypeStyle.caption).foregroundStyle(.secondary)
+                            Text(store.isApplying ? "Action running" : "Still scanning").font(TypeStyle.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -326,7 +326,7 @@ private struct ScopeView: View {
             Text(usesRoots ? store.context.roots.map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: " · ") : scopeDescription)
                 .font(TypeStyle.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
             Spacer()
-            if usesRoots { ActionButton("Choose folders", disabled: store.isScanning || store.isApplying) { store.addRoot() } }
+            if usesRoots { ActionButton("Choose folders", disabled: store.isScanning || store.isApplying, reason: store.reason(store.whileScanning, store.whileApplying)) { store.addRoot() } }
         }
     }
     private var scopeDescription: String {
@@ -351,7 +351,7 @@ private struct FinderView: View {
                 PageHeader(store.currentModule?.name ?? "Findings", subtitle: store.currentModule?.summary ?? "")
                 ScopeView(store: store, usesRoots: store.currentModule?.usesRoots ?? true)
                 if store.selectedModuleID == "storage", !store.storageNavigation.isEmpty {
-                    ActionButton("Back to parent", disabled: store.isScanning) { store.browseBack() }
+                    ActionButton("Back to parent", disabled: store.isScanning, reason: store.whileScanning) { store.browseBack() }
                 }
                 HStack(spacing: Space.md) {
                     TextField("Search results", text: $store.search).textFieldStyle(.roundedBorder)
@@ -363,7 +363,7 @@ private struct FinderView: View {
                     .help(sortDirectionLabel)
                     .accessibilityLabel(sortDirectionLabel)
                     if store.isScanning { ActionButton("Cancel") { store.cancelScan() } }
-                    else { ActionButton("Scan", kind: .primary, disabled: store.isApplying || store.demo) { store.scan() } }
+                    else { ActionButton("Scan", kind: .primary, disabled: store.isApplying || store.demo, reason: store.reason(store.inDemo, store.whileApplying)) { store.scan() } }
                 }
                 SearchSummary(store: store)
                 // Processes have no file dates or disk size; every other tool can be filtered.
@@ -486,12 +486,12 @@ private struct SelectionBar: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
-            .disabled(store.eligibleTotal == 0 || store.isApplying)
+            .disabled(store.eligibleTotal == 0 || store.isApplying, because: store.reason(store.whileApplying, store.eligibleTotal == 0 ? "Nothing listed here can be acted on." : nil))
             .help(store.selectionState == .all ? "Clear the selection" : "Select every item that can be acted on")
             .accessibilityLabel(title)
             if !store.selectedIDs.isEmpty {
                 Text("\(store.selectedIDs.count.formatted()) selected").font(TypeStyle.caption).foregroundStyle(Palette.muted)
-                Button("Clear") { store.deselectAll() }.buttonStyle(.borderless).font(TypeStyle.caption).disabled(store.isApplying)
+                Button("Clear") { store.deselectAll() }.buttonStyle(.borderless).font(TypeStyle.caption).disabled(store.isApplying, because: store.whileApplying)
             }
             Spacer()
             Text("⌘-click to add · ⇧-click for a range · ⌘A for all · Esc to clear")
@@ -524,9 +524,9 @@ private struct SelectionFooter: View {
                 Text(summary).font(TypeStyle.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if !store.selectedIDs.isEmpty { ActionButton("Clear", disabled: store.isApplying) { store.selectedIDs.removeAll() } }
+            if !store.selectedIDs.isEmpty { ActionButton("Clear", disabled: store.isApplying, reason: store.whileApplying) { store.selectedIDs.removeAll() } }
             ForEach(store.availableActions, id: \.self) { action in
-                ActionButton("Review " + action.label, kind: action == .trash ? .primary : .destructive, disabled: store.isApplying || store.isScanning) { store.reviewSelection(action) }
+                ActionButton("Review " + action.label, kind: action == .trash ? .primary : .destructive, disabled: store.isApplying || store.isScanning, reason: store.reason(store.whileApplying, store.whileScanning)) { store.reviewSelection(action) }
             }
         }
         .padding(Space.lg)
@@ -571,7 +571,7 @@ private struct InspectorView: View {
                     ForEach(Array(finding.details.enumerated()), id: \.offset) { _, detail in KeyValueRow(detail.label, detail.value) }
                     ActionButton("Reveal in Finder") { store.reveal(id: finding.id, path: finding.resource.path) }
                     if finding.moduleID == "storage", let path = finding.resource.path, store.core.isDirectory(path) {
-                        ActionButton("Inspect folder", kind: .primary, disabled: store.isScanning || store.demo) { store.browse(path) }
+                        ActionButton("Inspect folder", kind: .primary, disabled: store.isScanning || store.demo, reason: store.reason(store.inDemo, store.whileScanning)) { store.browse(path) }
                     }
                     if case .process = finding.resource { ActionButton("Ignore process name") { store.ignore(processName: finding.title, id: finding.id) } }
                     else { ActionButton("Protect this path") { store.protect(path: finding.resource.path, id: finding.id) } }
@@ -606,8 +606,8 @@ private struct ReviewView: View {
             HStack {
                 if store.isApplying { ProgressView().controlSize(.small); Text("Applying reviewed actions…").font(TypeStyle.caption) }
                 Spacer()
-                ActionButton("Cancel", disabled: store.isApplying) { store.review = nil }
-                ActionButton(draft.kind.label, kind: .destructive, disabled: store.isApplying || store.demo) { Task { await store.apply(draft) } }
+                ActionButton("Cancel", disabled: store.isApplying, reason: store.whileApplying) { store.review = nil }
+                ActionButton(draft.kind.label, kind: .destructive, disabled: store.isApplying || store.demo, reason: store.reason(store.inDemo, store.whileApplying)) { Task { await store.apply(draft) } }
             }
         }.padding(Space.xl).frame(width: Layout.reviewWidth, height: Layout.reviewHeight).interactiveDismissDisabled(store.isApplying)
     }
@@ -619,7 +619,7 @@ private struct ActivityView: View {
         VStack(alignment: .leading, spacing: Space.xl) {
             HStack {
                 PageHeader("Activity", subtitle: "Local action outcomes. Process command arguments are not stored.")
-                if !store.history.isEmpty { ActionButton("Clear history", disabled: store.isApplying || store.demo) { Task { await store.clearHistory() } } }
+                if !store.history.isEmpty { ActionButton("Clear history", disabled: store.isApplying || store.demo, reason: store.reason(store.inDemo, store.whileApplying)) { Task { await store.clearHistory() } } }
             }
             if store.history.isEmpty { EmptyState("No actions yet", message: "Reviewed actions and their results appear here.", symbol: "clock") }
             else {
@@ -638,7 +638,7 @@ private struct ActivityView: View {
                                     if let warning = row.journalWarning { Text(warning).font(TypeStyle.caption).foregroundStyle(Palette.warning) }
                                     if let path = row.originalPath { Text(path).font(TypeStyle.code).textSelection(.enabled) }
                                     if let trash = row.trashPath, row.trashIdentity != nil, FileManager.default.fileExists(atPath: trash), !store.restoredIDs.contains(row.id) {
-                                        ActionButton("Restore", disabled: store.demo || store.isApplying) { Task { await store.restore(row) } }
+                                        ActionButton("Restore", disabled: store.demo || store.isApplying, reason: store.reason(store.inDemo, store.whileApplying)) { Task { await store.restore(row) } }
                                     }
                                 }
                             }
@@ -712,7 +712,7 @@ public struct PreferencesView: View {
                     TextField("Executable name", text: $ignoredName, prompt: Text("Executable name"))
                         .labelsHidden()
                         .onSubmit(ignore)
-                    Button("Ignore", action: ignore).disabled(ignoredName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Button("Ignore", action: ignore).disabled(ignoredName.trimmingCharacters(in: .whitespaces).isEmpty, because: "Type an executable name first.")
                 }
             }
         }

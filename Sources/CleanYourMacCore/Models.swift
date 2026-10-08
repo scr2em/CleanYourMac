@@ -271,9 +271,11 @@ public struct ResultRow: Identifiable, Codable, Hashable, Sendable {
     public let eligible: Bool
     /// The ecosystem's logo slug, when the core knows one.
     public let brand: String?
+    /// Why no action is offered, when one is blocked.
+    public let blockedReason: String?
     public var isProcess: Bool { pid != nil }
     private enum CodingKeys: String, CodingKey {
-        case id, moduleID = "moduleId", title, subtitle, path, pid, bytes, allocatedBytes, cpuPercent, memoryBytes, modifiedAt, lastUsedAt, risk, badge, blocked, eligible, brand
+        case id, moduleID = "moduleId", title, subtitle, path, pid, bytes, allocatedBytes, cpuPercent, memoryBytes, modifiedAt, lastUsedAt, risk, badge, blocked, eligible, brand, blockedReason
     }
 }
 
