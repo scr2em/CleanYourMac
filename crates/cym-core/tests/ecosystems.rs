@@ -525,7 +525,8 @@ fn toolchains_list_versions_and_block_the_ones_in_use() {
         .collect();
     rows.sort();
     let expected: Vec<(String, String, bool)> = [
-        ("Android", "Old", true),
+        // Old's lock file is stale: no emulator is running.
+        ("Android", "Old", false),
         ("Android", "Pixel", false),
         ("Android", "android-30 · default · x86_64", false),
         ("Android", "android-34 · google_apis · arm64-v8a", true),
@@ -632,6 +633,17 @@ fn virtual_devices_are_blocked_while_an_emulator_runs() {
         .as_deref()
         .unwrap()
         .contains("qemu-system-aarch64"));
+    // With an emulator running, a device holding lock files is the one it runs.
+    let old = report
+        .findings
+        .iter()
+        .find(|f| f.title == "Android virtual device Old")
+        .unwrap();
+    assert!(old
+        .blocked_reason
+        .as_deref()
+        .unwrap()
+        .starts_with("The emulator is running this device"));
 }
 
 #[test]

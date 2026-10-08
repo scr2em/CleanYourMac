@@ -24,7 +24,8 @@ pub enum InUse {
     Volta(&'static str),
     /// Android system images named by a virtual device's `config.ini` in this folder.
     AvdImages(&'static str),
-    /// Lock files inside the folder, left by a running Android emulator.
+    /// Lock files inside the folder while an Android emulator is running (stale locks from
+    /// a crash are ignored).
     Locked,
     /// A running process whose name starts with one of these prefixes.
     Process(&'static [&'static str]),
@@ -283,7 +284,7 @@ impl Default for ToolchainsModule {
                     ".android/avd/*.avd",
                     "Apps and data on the device are lost. Deleting it in Device Manager also removes its .ini entry.",
                 )
-                .in_use(&[InUse::Locked, InUse::Process(&["qemu-system-", "emulator"])])
+                .in_use(&[InUse::Locked, InUse::Process(EMULATOR)])
                 .command("avdmanager delete avd -n {0}")
                 .apps(owners::ANDROID)
                 .risk(Risk::Review),
@@ -510,20 +511,21 @@ impl ToolchainsModule {
                             avd.name().trim_end_matches(".avd")
                         )
                     }),
+                // A crashed emulator or Android Studio leaves its lock files behind, so they
+                // mean "in use" only while an emulator is actually running.
                 InUse::Locked => s
                     .children(path, &mut vec![])
                     .iter()
                     .any(|e| e.name().ends_with(".lock"))
-                    .then(|| "The emulator appears to be running this device.".into()),
-                InUse::Process(prefixes) => s
-                    .processes
-                    .pids()
-                    .into_iter()
-                    .filter_map(|pid| s.processes.inspect(pid))
-                    .find(|p| {
-                        let name = p.name.to_lowercase();
-                        prefixes.iter().any(|prefix| name.starts_with(prefix))
-                    })
+                    .then(|| running(s, EMULATOR))
+                    .flatten()
+                    .map(|p| {
+                        format!(
+                            "The emulator is running this device ({} PID {}).",
+                            p.name, p.identity.pid
+                        )
+                    }),
+                InUse::Process(prefixes) => running(s, prefixes)
                     .map(|p| format!("Close {} (PID {}) first.", p.name, p.identity.pid)),
             };
             if found.is_some() {
@@ -532,6 +534,20 @@ impl ToolchainsModule {
         }
         None
     }
+}
+
+/// Process-name prefixes of the Android emulator.
+const EMULATOR: &[&str] = &["qemu-system-", "emulator"];
+/// The first running process whose name starts with one of `prefixes`.
+fn running(s: &Services, prefixes: &[&str]) -> Option<Snapshot> {
+    s.processes
+        .pids()
+        .into_iter()
+        .filter_map(|pid| s.processes.inspect(pid))
+        .find(|p| {
+            let name = p.name.to_lowercase();
+            prefixes.iter().any(|prefix| name.starts_with(prefix))
+        })
 }
 
 impl ScanModule for ToolchainsModule {
