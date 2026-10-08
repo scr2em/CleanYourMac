@@ -366,4 +366,4 @@ CleanYourMac has the [MIT license](LICENSE). It does not need a subscription. It
 
 To report a problem or to suggest an idea, [open an issue](https://github.com/scr2em/CleanYourMac/issues).
 
-To contribute, read the [development guide](docs/DEVELOPMENT.md), the [architecture](docs/ARCHITECTURE.md) and the [module guide](docs/MODULES.md).
+To contribute, read the [development guide](docs/DEVELOPMENT.md), the [architecture](docs/ARCHITECTURE.md) and the [module guide](docs/MODULES.md). [How each tool behaves](docs/MODULE_BEHAVIOR.md) lists, in one table, what every tool scans, skips and defaults to.
