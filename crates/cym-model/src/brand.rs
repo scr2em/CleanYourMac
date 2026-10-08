@@ -98,11 +98,9 @@ pub fn of(f: &Finding) -> Option<&'static str> {
     if let Some((_, slug)) = MODULES.iter().find(|(m, _)| *m == f.module_id) {
         return Some(slug);
     }
-    if f.module_id == "node" {
-        return f
-            .value("Package manager")
-            .and_then(for_ecosystem)
-            .or(Some("nodedotjs"));
+    // A known package manager (pnpm, Yarn, Bun) is more specific than its ecosystem.
+    if let Some(slug) = f.value("Package manager").and_then(for_ecosystem) {
+        return Some(slug);
     }
     let ecosystem = f.value("Ecosystem")?;
     if ecosystem.eq_ignore_ascii_case("machine learning") {

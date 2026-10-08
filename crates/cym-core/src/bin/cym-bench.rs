@@ -75,7 +75,7 @@ fn main() {
     for (module, label) in [
         ("large", "Scan · Large Files"),
         ("duplicates", "Scan · Exact Duplicates"),
-        ("node", "Scan · Node Dependencies"),
+        ("node", "Scan · Dependencies"),
         ("artifacts", "Scan · Build Artifacts"),
         ("storage", "Scan · Storage Explorer"),
     ] {

@@ -47,7 +47,7 @@ fn node_finder_lists_projects_and_skips_package_manager_folders() {
         "store/.pnpm/refractor@5.0.0/node_modules/refractor/index.js",
         "x",
     );
-    let node = modules::developer::NodeModule {
+    let node = modules::developer::DependenciesModule {
         home: Some(f.path()),
         ..Default::default()
     };

@@ -20,7 +20,7 @@ Your Mac collects things you no longer need: oversized downloads, old project de
 | --- | --- |
 | **Big files & downloads** | Sort by size, search by name or path, and narrow results by size or age. |
 | **Exact duplicates** | Find verified identical files while keeping an original. System, build, and dependency folders are skipped. |
-| **Project dependencies & build outputs** | See which projects hold bulky node_modules and generated files. Node searches stop at each dependency folder. |
+| **Project dependencies & build outputs** | See which projects hold bulky dependencies (node_modules, Python environments, Pods, vendor folders and more) and generated files. Searches stop at each dependency folder. |
 | **Git worktrees** | Inspect branches, local changes, locks, and sizes. Badges highlight orphaned registrations. |
 | **Simulators & Xcode data** | Review simulator app data, DerivedData, and device support. Xcode archives stay protected. |
 | **Toolchains, SDKs & caches** | Find installed language versions, SDK components, virtual devices, package caches, and logs. |

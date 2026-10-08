@@ -379,7 +379,7 @@ pub fn builtin() -> Registry {
         Arc::new(storage::StorageModule),
         Arc::new(storage::LargeFilesModule::default()),
         Arc::new(storage::DuplicatesModule::default()),
-        Arc::new(developer::NodeModule::default()),
+        Arc::new(developer::DependenciesModule::default()),
         Arc::new(developer::ArtifactsModule::default()),
         Arc::new(worktrees::WorktreeModule),
         Arc::new(simulators::SimulatorModule),

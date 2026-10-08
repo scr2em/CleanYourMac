@@ -42,7 +42,7 @@ pub const RULES: &[Rule] = &[
         id: "idle-dependencies",
         module: "node",
         title: "Dependencies of inactive projects",
-        detail: "node_modules of projects untouched for 30 days or more. Reinstall them with the project's package manager when you return.",
+        detail: "node_modules, Python environments, Pods and other installed packages of projects untouched for 30 days or more. Reinstall them with the project's package manager when you return.",
         action: ActionKind::Trash,
         risks: &[Risk::Rebuild],
         idle_days: Some(30),

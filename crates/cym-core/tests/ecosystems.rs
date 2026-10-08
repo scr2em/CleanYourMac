@@ -4,7 +4,7 @@ use cym_core::{
     model::*,
     modules::{
         self,
-        developer::{ArtifactsModule, CachesModule},
+        developer::{ArtifactsModule, CachesModule, DependenciesModule},
         toolchains::ToolchainsModule,
         ScanModule,
     },
@@ -13,9 +13,13 @@ use cym_core::{
 };
 use std::{fs, os::unix::fs::symlink, sync::Arc};
 
+/// The ecosystem of a build artifact, or of installed dependencies.
 fn ecosystem(f: &Fixture, module: &ArtifactsModule, path: &str) -> Option<&'static str> {
+    let (s, path) = (services(f), f.at(path));
+    let dependencies = DependenciesModule::default();
     module
-        .matches(&services(f), &f.at(path))
+        .matches(&s, &path)
+        .or_else(|| dependencies.matches(&s, &path))
         .map(|m| m.rule.ecosystem)
 }
 
@@ -142,7 +146,9 @@ fn react_native_layouts_use_the_project_root_as_evidence() {
     f.write("rn/android/app/build.gradle", "x");
     f.dir("rn/android/app/build");
     f.dir("rn/android/lib/build");
-    let pods = module.matches(&s, &f.at("rn/ios/Pods")).unwrap();
+    let dependencies = DependenciesModule::default();
+    assert_eq!(module.matches(&s, &f.at("rn/ios/Pods")), None);
+    let pods = dependencies.matches(&s, &f.at("rn/ios/Pods")).unwrap();
     assert_eq!(pods.rule.ecosystem, "React Native");
     assert_eq!(pods.project, f.at("rn"));
     assert_eq!(pods.relative, "ios/Pods");
@@ -154,7 +160,7 @@ fn react_native_layouts_use_the_project_root_as_evidence() {
     assert_eq!(ecosystem(&f, &module, "rn/android/lib/build"), None);
     // Without the app manifest, Pods are still identified by the Podfile beside them.
     fs::remove_file(f.at("rn/app.json")).unwrap();
-    let pods = module.matches(&s, &f.at("rn/ios/Pods")).unwrap();
+    let pods = dependencies.matches(&s, &f.at("rn/ios/Pods")).unwrap();
     assert_eq!(pods.rule.ecosystem, "CocoaPods");
     assert_eq!(pods.project, f.at("rn/ios"));
     // Pods without a lockfile beside them are never offered.
@@ -201,12 +207,7 @@ fn artifact_scan_reports_ecosystems_and_skips_dependency_stores() {
     );
     let mut titles: Vec<_> = report.findings.iter().map(|f| f.title.as_str()).collect();
     titles.sort();
-    assert_eq!(
-        titles,
-        [".venv", "Saved", "ios/build"],
-        "{:?}",
-        report.warnings
-    );
+    assert_eq!(titles, ["Saved", "ios/build"], "{:?}", report.warnings);
     let ios = report
         .findings
         .iter()
@@ -227,8 +228,67 @@ fn artifact_scan_reports_ecosystems_and_skips_dependency_stores() {
         f.brand.as_deref()
     };
     assert_eq!(brand("ios/build"), Some("react"));
-    assert_eq!(brand(".venv"), Some("python"));
     assert_eq!(brand("Saved"), Some("unrealengine"));
+}
+
+#[test]
+fn dependencies_cover_every_ecosystem_once_and_without_descending() {
+    let f = Fixture::new();
+    f.write("app/package.json", "{}");
+    f.write("app/yarn.lock", "x");
+    f.write("app/node_modules/dep/index.js", "x");
+    f.write("app/pyproject.toml", "x");
+    f.write("app/.venv/pyvenv.cfg", "home = /usr/bin");
+    // Nothing inside an installed environment is listed separately.
+    f.write("app/.venv/lib/tool/package.json", "{}");
+    f.write("app/.venv/lib/tool/node_modules/x/index.js", "x");
+    f.write("app/ios/Podfile", "x");
+    f.write("app/ios/Podfile.lock", "x");
+    f.write("app/ios/Pods/Lib/a.m", "x");
+    f.write("site/composer.json", "{}");
+    f.write("site/composer.lock", "{}");
+    f.write("site/vendor/autoload.php", "<?php");
+    f.write("site/vendor/pkg/composer.json", "{}");
+    f.write("site/vendor/pkg/composer.lock", "{}");
+    f.write("site/vendor/pkg/vendor/autoload.php", "<?php");
+    // A folder named like a dependency store without its project's evidence is left alone.
+    f.write("notes/vendor/autoload.php", "<?php");
+    let engine = Engine::new(services(&f), modules::builtin());
+    let report = engine.scan_report(&["node".into()], &f.context(), &ScanControl::default());
+    let mut found: Vec<_> = report
+        .findings
+        .iter()
+        .map(|r| {
+            (
+                r.title.as_str(),
+                r.value("Artifact").unwrap(),
+                r.brand.as_deref().unwrap_or_default(),
+            )
+        })
+        .collect();
+    found.sort();
+    assert_eq!(
+        found,
+        [
+            ("app", ".venv", "python"),
+            ("app", "node_modules", "yarn"),
+            ("ios", "Pods", "cocoapods"),
+            ("site", "vendor", "composer"),
+        ],
+        "{:?}",
+        report.warnings
+    );
+    assert!(report.findings.iter().all(|r| r.risk == Risk::Rebuild
+        && r.actions == vec![ActionKind::Trash]
+        && r.blocked_reason.is_none()));
+    let pods = report.findings.iter().find(|r| r.title == "ios").unwrap();
+    assert_eq!(pods.value("Official command"), Some("pod install"));
+    // Build Artifacts neither lists nor searches inside installed dependencies.
+    f.write("app/.venv/lib/__pycache__/m.pyc", "x");
+    f.write("app/.venv/lib/m.py", "x");
+    let artifacts =
+        engine.scan_report(&["artifacts".into()], &f.context(), &ScanControl::default());
+    assert!(artifacts.findings.is_empty(), "{:?}", artifacts.findings);
 }
 
 #[test]

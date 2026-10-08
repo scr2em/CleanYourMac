@@ -23,7 +23,7 @@ The migration's core work is done. The app runs on the Rust core:
 - No MacPaw CLI, code, assets, binaries, or service dependency.
 - No Protection, Cloud Cleanup, Email Cleanup, or CleanMyMac/MacPaw Performance feature port.
 - Composable, registered feature modules and a governed joyful/comfy design system in SwiftUI and Figma.
-- Node discovery stops at each node_modules directory; never descends to find nested node_modules.
+- Dependency discovery (the `node` module, titled Dependencies) stops at each node_modules, virtual environment, Pods, vendor or deps folder; it never descends to find nested ones. Build Artifacts skips those folders too, so nothing is listed twice.
 - Duplicate scanning skips system directories and language build/dependency/package stores. Rust policy lists the ignored directory names; test coverage is still needed.
 - Orphaned worktrees need a visible badge. Missing Git registrations are inspection-only; do not blindly prune them.
 - Every finder retains independent included/excluded paths, name query, sorting and scans. Result summaries sit immediately below the search box.

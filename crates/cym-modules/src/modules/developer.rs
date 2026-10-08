@@ -41,156 +41,6 @@ fn untracked(s: &Services, path: &str, k: &ScanControl) -> Result<()> {
     Ok(())
 }
 
-/// `node_modules` folders grouped by owning project. Traversal stops at each `node_modules`
-/// and never descends to find nested dependency folders.
-pub struct NodeModule {
-    /// Package manager name and the lockfile that identifies it, in priority order.
-    pub lockfiles: Vec<(&'static str, &'static str)>,
-    /// Package managers' own stores, caches and global installs, relative to the home
-    /// folder. Their `node_modules` belong to the tool, not a project, so they are not
-    /// searched; Caches & Logs and Toolchains & SDKs cover them.
-    pub tool_folders: Vec<&'static str>,
-    /// Folder names that are always a package manager's store, wherever they appear.
-    pub tool_folder_names: Vec<&'static str>,
-    /// The home folder `tool_folders` are relative to; the user's when `None`.
-    pub home: Option<String>,
-}
-impl Default for NodeModule {
-    fn default() -> Self {
-        Self {
-            tool_folders: vec![
-                ".npm",
-                ".pnpm-store",
-                ".bun",
-                ".yarn",
-                ".nvm",
-                ".fnm",
-                ".volta",
-                ".asdf",
-                ".cache/pnpm",
-                ".cache/yarn",
-                ".cache/node",
-                ".local/share/pnpm",
-                ".local/share/fnm",
-                ".local/share/mise",
-                "Library/pnpm",
-                "Library/Caches/pnpm",
-                "Library/Caches/Yarn",
-                "Library/Caches/node-gyp",
-                "Library/Application Support/fnm",
-            ],
-            tool_folder_names: vec![".pnpm", ".pnpm-store", "_cacache", "_npx"],
-            home: None,
-            lockfiles: vec![
-                ("pnpm", "pnpm-lock.yaml"),
-                ("Yarn", "yarn.lock"),
-                ("Bun", "bun.lock"),
-                ("Bun", "bun.lockb"),
-                ("npm", "package-lock.json"),
-            ],
-        }
-    }
-}
-impl ScanModule for NodeModule {
-    fn descriptor(&self) -> ModuleDescriptor {
-        descriptor(
-            "node",
-            "Node Dependencies",
-            "Developer",
-            "shippingbox",
-            "Find node_modules by project without descending into dependencies.",
-            true,
-        )
-    }
-    fn scan(
-        &self,
-        s: &Services,
-        c: &ScanContext,
-        k: &ScanControl,
-        sink: &mut dyn Sink,
-    ) -> Result<()> {
-        let mut candidates = vec![];
-        let mut context = c.clone();
-        // A chosen root that is itself a node_modules folder is a candidate, not a place to search.
-        context.roots.retain(|root| {
-            if name(root) != "node_modules" {
-                return true;
-            }
-            if c.allows(root) && !policy::system_excluded(root) {
-                if let Some(e) = s.entry(root).ok().filter(|e| e.directory) {
-                    candidates.push(e);
-                }
-            }
-            false
-        });
-        let home = self.home.clone().unwrap_or_else(policy::home);
-        let tool_folders: Vec<String> = self
-            .tool_folders
-            .iter()
-            .map(|f| format!("{home}/{f}"))
-            .collect();
-        let mut warnings = vec![];
-        let walked = s.walk(&context, k, &mut warnings, &mut |e| {
-            if !e.directory {
-                return Ok(true);
-            }
-            if e.name() == "node_modules" {
-                candidates.push(e.clone());
-                return Ok(false);
-            }
-            // Package managers' stores and caches (pnpm's virtual store, npm's cache and npx
-            // folders, Bun's and Yarn's caches, version managers' global installs) hold
-            // node_modules that no project owns.
-            Ok(!self.tool_folder_names.contains(&e.name())
-                && !tool_folders.iter().any(|f| f == e.path()))
-        });
-        flush(sink, &mut warnings);
-        walked?;
-        // A node_modules with no package.json beside it has no project to rebuild it from;
-        // it is left out rather than listed as an item nobody can act on.
-        let candidates = candidates
-            .into_iter()
-            .filter(|e| s.is_file(&format!("{}/package.json", parent(e.path()))))
-            .map(|e| {
-                let project = parent(e.path());
-                let manager = self
-                    .lockfiles
-                    .iter()
-                    .find(|(_, lock)| s.is_file(&format!("{project}/{lock}")))
-                    .map(|(n, _)| *n)
-                    .unwrap_or("Unknown");
-                Candidate::new(
-                    e,
-                    "Project dependencies can be reinstalled, but local patches or edits may be lost. Manifests and lockfiles are preserved.",
-                    vec![ActionKind::Trash],
-                    Risk::Rebuild,
-                )
-                .title(name(&project))
-                .last_used(LastUsed::Project {
-                    folder: project.clone(),
-                })
-                .details(vec![
-                    detail("Project", project.clone()),
-                    detail("Package manager", manager),
-                    detail("Artifact", "node_modules"),
-                ])
-            })
-            .collect();
-        add_files(s, sink, "node", candidates, k)
-    }
-    fn in_use(&self, s: &Services, f: &Finding, _: ActionKind) -> Option<String> {
-        active_project_tools(s, &parent(f.resource.path()?))
-    }
-    fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, k: &ScanControl) -> Result<()> {
-        let path = f.resource.path().ok_or("Missing path")?;
-        let project = parent(path);
-        if !s.is_file(&format!("{project}/package.json")) {
-            return Err("The owning package.json is no longer available.".into());
-        }
-        untracked(s, path, k)
-    }
-}
-
 /// A generated folder, the project files that prove what produced it, and what rebuilding
 /// costs. A folder name alone is never evidence.
 ///
@@ -343,12 +193,15 @@ const PODS: &[&str] = &["Podfile", "Podfile.lock"];
 const PODS_REBUILD: &str = "Restored by pod install.";
 
 /// Generated folders identified by name and owning-project evidence. Traversal never enters
-/// a matched folder or a `prune` folder; `node_modules` belongs to the Node module.
+/// a matched folder, a `prune` folder or installed dependencies, which belong to the
+/// Dependencies module.
 pub struct ArtifactsModule {
     /// Checked in order; the first rule with evidence wins.
     pub rules: Vec<ArtifactRule>,
     /// Folder names never descended into.
     pub prune: Vec<&'static str>,
+    /// Installed dependencies, which are neither listed nor searched here.
+    pub dependencies: Vec<ArtifactRule>,
 }
 impl Default for ArtifactsModule {
     fn default() -> Self {
@@ -356,17 +209,6 @@ impl Default for ArtifactsModule {
             rules: vec![
                 // Mobile projects with nested native folders come before generic rules. The
                 // ios and android folders themselves are never candidates.
-                rule(
-                    "React Native",
-                    "installed pods",
-                    &["ios/Pods"],
-                    APP_CONFIG,
-                    PODS_REBUILD,
-                )
-                .requires(&["package.json"])
-                .beside(PODS)
-                .command("pod install")
-                .apps(owners::XCODE),
                 rule(
                     "React Native",
                     "iOS build output",
@@ -397,16 +239,6 @@ impl Default for ArtifactsModule {
                 ),
                 rule(
                     "Capacitor",
-                    "installed pods",
-                    &["ios/App/Pods"],
-                    CAPACITOR,
-                    PODS_REBUILD,
-                )
-                .beside(PODS)
-                .command("pod install")
-                .apps(owners::XCODE),
-                rule(
-                    "Capacitor",
                     "Android build output",
                     &["android/build", "android/app/build", "android/.gradle"],
                     CAPACITOR,
@@ -415,16 +247,6 @@ impl Default for ArtifactsModule {
                 .beside(&["build.gradle*"])
                 .command("./gradlew clean")
                 .apps(owners::ANDROID),
-                rule(
-                    "Flutter / Dart",
-                    "installed pods",
-                    &["ios/Pods", "macos/Pods"],
-                    &["pubspec.yaml"],
-                    PODS_REBUILD,
-                )
-                .beside(PODS)
-                .command("pod install")
-                .apps(owners::XCODE),
                 rule(
                     "Flutter / Dart",
                     "build output or tool cache",
@@ -488,14 +310,6 @@ impl Default for ArtifactsModule {
                     "Cached task results are recomputed on the next run.",
                 ),
                 rule(
-                    "Yarn",
-                    "unplugged packages",
-                    &[".yarn/unplugged"],
-                    &[".yarnrc.yml"],
-                    "Restored by yarn install. The committed .yarn/cache is never offered.",
-                )
-                .requires(&["package.json"]),
-                rule(
                     "Storybook",
                     "static build",
                     &["storybook-static"],
@@ -511,25 +325,6 @@ impl Default for ArtifactsModule {
                     "Regenerated by the project's build or test scripts.",
                 ),
                 // Apple platforms.
-                rule(
-                    "CocoaPods",
-                    "installed pods",
-                    &["Pods"],
-                    &["Podfile"],
-                    PODS_REBUILD,
-                )
-                .requires(&["Podfile.lock"])
-                .command("pod install")
-                .apps(owners::XCODE),
-                rule(
-                    "Carthage",
-                    "built dependencies",
-                    &["Carthage/Build"],
-                    &["Cartfile"],
-                    "Restored by carthage bootstrap; rebuilding can take a while.",
-                )
-                .requires(&["Cartfile.resolved"])
-                .apps(owners::XCODE),
                 rule(
                     "SwiftPM",
                     "build output",
@@ -637,14 +432,6 @@ impl Default for ArtifactsModule {
                 // Python.
                 rule(
                     "Python",
-                    "virtual environment",
-                    &[".venv", "venv", "env"],
-                    PYTHON,
-                    "Recreate it and reinstall packages; anything installed by hand is lost.",
-                )
-                .inside(&["pyvenv.cfg"]),
-                rule(
-                    "Python",
                     "test environments",
                     &[".tox"],
                     &["tox.ini", "pyproject.toml", "setup.cfg"],
@@ -681,13 +468,13 @@ impl Default for ArtifactsModule {
                 // Other languages and tools.
                 rule(
                     "Elixir",
-                    "build output or dependencies",
-                    &["_build", "deps", ".elixir_ls"],
+                    "build output",
+                    &["_build", ".elixir_ls"],
                     &["mix.exs"],
-                    "Restored by mix deps.get and mix compile.",
+                    "Rebuilt by the next mix compile.",
                 )
                 .requires(&["mix.lock"])
-                .command("mix clean --deps"),
+                .command("mix clean"),
                 rule(
                     "Haskell (Stack)",
                     "build output",
@@ -711,78 +498,63 @@ impl Default for ArtifactsModule {
                     &["elm.json"],
                     "Rebuilt by the next elm make.",
                 ),
-                rule(
-                    "Ruby (Bundler)",
-                    "installed gems",
-                    &["vendor/bundle"],
-                    &["Gemfile"],
-                    "Restored by bundle install.",
-                )
-                .requires(&["Gemfile.lock"]),
-                rule(
-                    "PHP (Composer)",
-                    "installed packages",
-                    &["vendor"],
-                    &["composer.json"],
-                    "Restored by composer install; local edits to packages are lost.",
-                )
-                .requires(&["composer.lock"])
-                .inside(&["autoload.php"]),
-                rule(
-                    "Terraform",
-                    "providers and modules",
-                    &[".terraform"],
-                    &["*.tf"],
-                    "Restored by terraform init.",
-                ),
             ],
             prune: vec!["node_modules", "site-packages"],
+            dependencies: dependency_rules(),
         }
     }
 }
 impl ArtifactsModule {
     /// The first rule whose names and evidence match the folder at `path`.
     pub fn matches(&self, s: &Services, path: &str) -> Option<ArtifactMatch<'_>> {
-        let parts: Vec<&str> = path.split('/').collect();
-        let last = *parts.last()?;
-        let containing = parent(path);
-        for rule in &self.rules {
-            for pattern in rule.names {
-                let wanted: Vec<&str> = pattern.split('/').collect();
-                if glob(wanted[wanted.len() - 1], last).is_none()
-                    || wanted.len() >= parts.len()
-                    || !wanted
-                        .iter()
-                        .rev()
-                        .zip(parts.iter().rev())
-                        .all(|(p, n)| glob(p, n).is_some())
-                {
-                    continue;
-                }
-                let split = parts.len() - wanted.len();
-                let project = parts[..split].join("/");
-                let all = |folder: &str, files: &[&str]| {
-                    files.iter().all(|f| present(s, folder, f).is_some())
-                };
-                if project.is_empty()
-                    || !all(&project, rule.requires)
-                    || !all(&containing, rule.beside)
-                    || !all(path, rule.inside)
-                {
-                    continue;
-                }
-                if let Some(evidence) = rule.evidence.iter().find_map(|f| present(s, &project, f)) {
-                    return Some(ArtifactMatch {
-                        rule,
-                        relative: parts[split..].join("/"),
-                        project,
-                        evidence,
-                    });
-                }
+        match_rules(&self.rules, s, path)
+    }
+}
+/// The first of `rules` whose names and evidence match the folder at `path`.
+pub fn match_rules<'a>(
+    rules: &'a [ArtifactRule],
+    s: &Services,
+    path: &str,
+) -> Option<ArtifactMatch<'a>> {
+    let parts: Vec<&str> = path.split('/').collect();
+    let last = *parts.last()?;
+    let containing = parent(path);
+    for rule in rules {
+        for pattern in rule.names {
+            let wanted: Vec<&str> = pattern.split('/').collect();
+            if glob(wanted[wanted.len() - 1], last).is_none()
+                || wanted.len() >= parts.len()
+                || !wanted
+                    .iter()
+                    .rev()
+                    .zip(parts.iter().rev())
+                    .all(|(p, n)| glob(p, n).is_some())
+            {
+                continue;
+            }
+            let split = parts.len() - wanted.len();
+            let project = parts[..split].join("/");
+            let all = |folder: &str, files: &[&str]| {
+                files.iter().all(|f| present(s, folder, f).is_some())
+            };
+            if project.is_empty()
+                || !all(&project, rule.requires)
+                || !all(&containing, rule.beside)
+                || !all(path, rule.inside)
+            {
+                continue;
+            }
+            if let Some(evidence) = rule.evidence.iter().find_map(|f| present(s, &project, f)) {
+                return Some(ArtifactMatch {
+                    rule,
+                    relative: parts[split..].join("/"),
+                    project,
+                    evidence,
+                });
             }
         }
-        None
     }
+    None
 }
 impl ScanModule for ArtifactsModule {
     fn descriptor(&self) -> ModuleDescriptor {
@@ -809,6 +581,9 @@ impl ScanModule for ArtifactsModule {
                 return Ok(false);
             }
             if e.directory {
+                if match_rules(&self.dependencies, s, e.path()).is_some() {
+                    return Ok(false);
+                }
                 if let Some(m) = self.matches(s, e.path()) {
                     let rule = m.rule;
                     let mut reason = format!("{} {}. {}", rule.ecosystem, rule.kind, rule.rebuild);
@@ -847,6 +622,327 @@ impl ScanModule for ArtifactsModule {
         let path = f.resource.path().ok_or("Missing path")?;
         self.matches(s, path)
             .ok_or("The owning project's evidence is no longer available.")?;
+        untracked(s, path, k)
+    }
+}
+
+/// Installed dependencies other than `node_modules`, identified like build output: by folder
+/// name and evidence from the project that installs them. More specific layouts come first.
+pub fn dependency_rules() -> Vec<ArtifactRule> {
+    vec![
+        rule(
+            "React Native",
+            "installed pods",
+            &["ios/Pods"],
+            APP_CONFIG,
+            PODS_REBUILD,
+        )
+        .requires(&["package.json"])
+        .beside(PODS)
+        .command("pod install")
+        .apps(owners::XCODE),
+        rule(
+            "Capacitor",
+            "installed pods",
+            &["ios/App/Pods"],
+            CAPACITOR,
+            PODS_REBUILD,
+        )
+        .beside(PODS)
+        .command("pod install")
+        .apps(owners::XCODE),
+        rule(
+            "Flutter / Dart",
+            "installed pods",
+            &["ios/Pods", "macos/Pods"],
+            &["pubspec.yaml"],
+            PODS_REBUILD,
+        )
+        .beside(PODS)
+        .command("pod install")
+        .apps(owners::XCODE),
+        rule(
+            "Yarn",
+            "unplugged packages",
+            &[".yarn/unplugged"],
+            &[".yarnrc.yml"],
+            "Restored by yarn install. The committed .yarn/cache is never offered.",
+        )
+        .requires(&["package.json"]),
+        rule(
+            "CocoaPods",
+            "installed pods",
+            &["Pods"],
+            &["Podfile"],
+            PODS_REBUILD,
+        )
+        .requires(&["Podfile.lock"])
+        .command("pod install")
+        .apps(owners::XCODE),
+        rule(
+            "Carthage",
+            "built dependencies",
+            &["Carthage/Build"],
+            &["Cartfile"],
+            "Restored by carthage bootstrap; rebuilding can take a while.",
+        )
+        .requires(&["Cartfile.resolved"])
+        .apps(owners::XCODE),
+        rule(
+            "Python",
+            "virtual environment",
+            &[".venv", "venv", "env"],
+            PYTHON,
+            "Recreate it and reinstall packages; anything installed by hand is lost.",
+        )
+        .inside(&["pyvenv.cfg"]),
+        rule(
+            "Ruby (Bundler)",
+            "installed gems",
+            &["vendor/bundle"],
+            &["Gemfile"],
+            "Restored by bundle install.",
+        )
+        .requires(&["Gemfile.lock"]),
+        rule(
+            "PHP (Composer)",
+            "installed packages",
+            &["vendor"],
+            &["composer.json"],
+            "Restored by composer install; local edits to packages are lost.",
+        )
+        .requires(&["composer.lock"])
+        .inside(&["autoload.php"]),
+        rule(
+            "Terraform",
+            "providers and modules",
+            &[".terraform"],
+            &["*.tf"],
+            "Restored by terraform init.",
+        ),
+        rule(
+            "Elixir",
+            "dependencies",
+            &["deps"],
+            &["mix.exs"],
+            "Restored by mix deps.get.",
+        )
+        .requires(&["mix.lock"])
+        .command("mix deps.clean --all"),
+        rule(
+            "Bower",
+            "installed packages",
+            &["bower_components"],
+            &["bower.json"],
+            "Restored by bower install.",
+        ),
+        rule(
+            "R (renv)",
+            "project library",
+            &["renv/library"],
+            &["renv.lock"],
+            "Restored by renv::restore().",
+        ),
+    ]
+}
+
+/// Installed dependencies by project: `node_modules`, Python virtual environments, CocoaPods,
+/// Carthage, Bundler and Composer vendor folders, Elixir deps and more. Traversal stops at
+/// each one and never descends to find nested dependency folders.
+pub struct DependenciesModule {
+    /// Dependency folders other than `node_modules`; the first rule with evidence wins.
+    pub rules: Vec<ArtifactRule>,
+    /// Package manager name and the lockfile that identifies it, in priority order.
+    pub lockfiles: Vec<(&'static str, &'static str)>,
+    /// Package managers' own stores, caches and global installs, relative to the home
+    /// folder. Their `node_modules` belong to the tool, not a project, so they are not
+    /// searched; Caches & Logs and Toolchains & SDKs cover them.
+    pub tool_folders: Vec<&'static str>,
+    /// Folder names that are always a package manager's store, wherever they appear.
+    pub tool_folder_names: Vec<&'static str>,
+    /// The home folder `tool_folders` are relative to; the user's when `None`.
+    pub home: Option<String>,
+}
+impl Default for DependenciesModule {
+    fn default() -> Self {
+        Self {
+            rules: dependency_rules(),
+            tool_folders: vec![
+                ".npm",
+                ".pnpm-store",
+                ".bun",
+                ".yarn",
+                ".nvm",
+                ".fnm",
+                ".volta",
+                ".asdf",
+                ".cache/pnpm",
+                ".cache/yarn",
+                ".cache/node",
+                ".local/share/pnpm",
+                ".local/share/fnm",
+                ".local/share/mise",
+                "Library/pnpm",
+                "Library/Caches/pnpm",
+                "Library/Caches/Yarn",
+                "Library/Caches/node-gyp",
+                "Library/Application Support/fnm",
+            ],
+            tool_folder_names: vec![".pnpm", ".pnpm-store", "_cacache", "_npx"],
+            home: None,
+            lockfiles: vec![
+                ("pnpm", "pnpm-lock.yaml"),
+                ("Yarn", "yarn.lock"),
+                ("Bun", "bun.lock"),
+                ("Bun", "bun.lockb"),
+                ("npm", "package-lock.json"),
+            ],
+        }
+    }
+}
+impl DependenciesModule {
+    /// The rule matching a dependency folder other than `node_modules`.
+    pub fn matches(&self, s: &Services, path: &str) -> Option<ArtifactMatch<'_>> {
+        match_rules(&self.rules, s, path)
+    }
+    fn node_modules(&self, s: &Services, e: Entry) -> Candidate {
+        let project = parent(e.path());
+        let manager = self
+            .lockfiles
+            .iter()
+            .find(|(_, lock)| s.is_file(&format!("{project}/{lock}")))
+            .map(|(n, _)| *n)
+            .unwrap_or("Unknown");
+        Candidate::new(
+            e,
+            "Project dependencies can be reinstalled, but local patches or edits may be lost. Manifests and lockfiles are preserved.",
+            vec![ActionKind::Trash],
+            Risk::Rebuild,
+        )
+        .title(name(&project))
+        .last_used(LastUsed::Project {
+            folder: project.clone(),
+        })
+        .details(vec![
+            detail("Project", project),
+            detail("Ecosystem", "Node.js"),
+            detail("Package manager", manager),
+            detail("Artifact", "node_modules"),
+        ])
+    }
+    fn matched(e: Entry, m: ArtifactMatch<'_>) -> Candidate {
+        let rule = m.rule;
+        let mut reason = format!("{} {}. {}", rule.ecosystem, rule.kind, rule.rebuild);
+        let mut details = vec![
+            detail("Project", m.project.clone()),
+            detail("Ecosystem", rule.ecosystem),
+            detail("Evidence", m.evidence),
+            detail("Artifact", m.relative),
+        ];
+        if let Some(command) = rule.command {
+            reason += &format!(" Official command: `{command}`.");
+            details.push(detail("Official command", command));
+        }
+        Candidate::new(e, &reason, vec![ActionKind::Trash], rule.risk)
+            .title(name(&m.project))
+            .details(details)
+            .last_used(LastUsed::Project { folder: m.project })
+    }
+}
+impl ScanModule for DependenciesModule {
+    fn descriptor(&self) -> ModuleDescriptor {
+        // The ID predates other ecosystems and is kept so saved settings and history still match.
+        descriptor(
+            "node",
+            "Dependencies",
+            "Developer",
+            "shippingbox",
+            "Installed packages by project, such as node_modules, Python environments, Pods and vendor folders, found without descending into them.",
+            true,
+        )
+    }
+    fn scan(
+        &self,
+        s: &Services,
+        c: &ScanContext,
+        k: &ScanControl,
+        sink: &mut dyn Sink,
+    ) -> Result<()> {
+        let mut candidates = vec![];
+        let mut context = c.clone();
+        // A chosen root that is itself a node_modules folder is a candidate, not a place to search.
+        context.roots.retain(|root| {
+            if name(root) != "node_modules" {
+                return true;
+            }
+            if c.allows(root) && !policy::system_excluded(root) {
+                if let Some(e) = s.entry(root).ok().filter(|e| e.directory) {
+                    candidates.push(e);
+                }
+            }
+            false
+        });
+        let home = self.home.clone().unwrap_or_else(policy::home);
+        let tool_folders: Vec<String> = self
+            .tool_folders
+            .iter()
+            .map(|f| format!("{home}/{f}"))
+            .collect();
+        let mut matched = vec![];
+        let mut warnings = vec![];
+        let walked = s.walk(&context, k, &mut warnings, &mut |e| {
+            if !e.directory {
+                return Ok(true);
+            }
+            if e.name() == "node_modules" {
+                candidates.push(e.clone());
+                return Ok(false);
+            }
+            // Package managers' stores and caches (pnpm's virtual store, npm's cache and npx
+            // folders, Bun's and Yarn's caches, version managers' global installs) hold
+            // node_modules that no project owns.
+            if self.tool_folder_names.contains(&e.name())
+                || tool_folders.iter().any(|f| f == e.path())
+            {
+                return Ok(false);
+            }
+            if let Some(m) = self.matches(s, e.path()) {
+                matched.push(Self::matched(e.clone(), m));
+                return Ok(false);
+            }
+            Ok(true)
+        });
+        flush(sink, &mut warnings);
+        walked?;
+        // A node_modules with no package.json beside it has no project to rebuild it from;
+        // it is left out rather than listed as an item nobody can act on.
+        let candidates = candidates
+            .into_iter()
+            .filter(|e| s.is_file(&format!("{}/package.json", parent(e.path()))))
+            .map(|e| self.node_modules(s, e))
+            .chain(matched)
+            .collect();
+        add_files(s, sink, "node", candidates, k)
+    }
+    fn in_use(&self, s: &Services, f: &Finding, _: ActionKind) -> Option<String> {
+        let path = f.resource.path()?;
+        match self.matches(s, path) {
+            Some(m) => owners_closed(s, m.rule.apps)
+                .err()
+                .or_else(|| active_project_tools(s, &m.project)),
+            None => active_project_tools(s, &parent(path)),
+        }
+    }
+    fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, k: &ScanControl) -> Result<()> {
+        let path = f.resource.path().ok_or("Missing path")?;
+        if name(path) == "node_modules" {
+            if !s.is_file(&format!("{}/package.json", parent(path))) {
+                return Err("The owning package.json is no longer available.".into());
+            }
+        } else {
+            self.matches(s, path)
+                .ok_or("The owning project's evidence is no longer available.")?;
+        }
         untracked(s, path, k)
     }
 }
