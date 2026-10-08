@@ -10,7 +10,23 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub const APPROVED: &[&str] = &["/usr/bin/git", "/usr/bin/xcrun", "/bin/launchctl"];
+pub const APPROVED: &[&str] = &[
+    "/usr/bin/git",
+    "/usr/bin/xcrun",
+    "/bin/launchctl",
+    "/usr/bin/tmutil",
+    "/usr/bin/ditto",
+    "/usr/bin/unzip",
+];
+/// Package managers that keep old versions or unreachable packages, where their installers
+/// put them. Started only through a trusted chain, as the container tools are.
+pub const PACKAGE_TOOLS: &[&str] = &[
+    "/opt/homebrew/bin/brew",
+    "/usr/local/bin/brew",
+    // `nix` itself: `nix-store` and `nix-collect-garbage` are links to it that choose their
+    // command by name, which starting the resolved program would lose.
+    "/nix/var/nix/profiles/default/bin/nix",
+];
 /// Container command-line tools, where their installers put them.
 pub const CONTAINER_TOOLS: &[&str] = &[
     "/usr/local/bin/docker",
@@ -40,7 +56,7 @@ fn program_in(executable: &str, home: &str) -> Option<String> {
     if APPROVED.contains(&executable) {
         return Some(executable.to_owned());
     }
-    if CONTAINER_TOOLS.contains(&executable) {
+    if CONTAINER_TOOLS.contains(&executable) || PACKAGE_TOOLS.contains(&executable) {
         // Homebrew's folders belong to the user; the program and every folder above it must
         // still be safe from other users. The resolved program is the one started.
         let target = std::fs::canonicalize(executable).ok()?;

@@ -743,9 +743,11 @@ public enum Display {
         case "downloads": .green
         case "installers": .teal
         case "trash": .gray
+        case "system": .indigo
         case "node": .brown
         case "artifacts": .indigo
         case "worktrees": .orange
+        case "projects": .green
         case "simulators": .cyan
         case "xcode": .blue
         case "caches": .yellow

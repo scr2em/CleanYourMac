@@ -120,7 +120,7 @@ public struct Recommendation: Codable, Identifiable, Hashable, Sendable {
 }
 
 public enum ActionKind: String, Codable, CaseIterable, Sendable {
-    case trash, removeWorktree, resetSimulator, deleteSimulator, terminate, forceQuit, emptyTrash, runCommand
+    case trash, removeWorktree, resetSimulator, deleteSimulator, terminate, forceQuit, emptyTrash, runCommand, archive
     public var label: String {
         switch self {
         case .trash: "Move to Trash"
@@ -131,6 +131,7 @@ public enum ActionKind: String, Codable, CaseIterable, Sendable {
         case .forceQuit: "Force Quit"
         case .emptyTrash: "Empty Trash"
         case .runCommand: "Run Cleanup"
+        case .archive: "Hibernate Project"
         }
     }
     public var consequence: String {
@@ -143,6 +144,7 @@ public enum ActionKind: String, Codable, CaseIterable, Sendable {
         case .forceQuit: "Sends SIGKILL to the selected process. Unsaved work may be lost. This cannot be undone."
         case .emptyTrash: "Permanently removes the specifically reviewed Trash items. This cannot be undone."
         case .runCommand: "Runs the tool's own cleanup command shown on each item, such as docker builder prune. The tool removes the data itself, so nothing goes to the Trash and it cannot be restored."
+        case .archive: "Compresses each project folder, Git history and uncommitted work included, into a .zip file beside it and checks the archive. Then it moves the folder to Trash. Open the .zip file in Finder to bring the project back. Disk space is freed after Trash is emptied."
         }
     }
 }
