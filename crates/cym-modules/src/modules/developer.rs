@@ -180,17 +180,17 @@ impl ScanModule for ArtifactsModule {
     }
     fn in_use(&self, s: &Services, f: &Finding, _: ActionKind) -> Option<String> {
         let m = self.matches(s, f.resource.path()?)?;
-        owners_closed(s, m.rule.apps)
-            .err()
-            .or_else(|| active_project_tools(s, &m.project))
+        active_project_tools(s, &m.project)
     }
     fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, k: &ScanControl) -> Result<()> {
         let path = f.resource.path().ok_or("Missing path")?;
         if in_app_home_folder(path, &self.home()) {
             return Err(APP_DATA.into());
         }
-        self.matches(s, path)
+        let m = self
+            .matches(s, path)
             .ok_or("The owning project's evidence is no longer available.")?;
+        owners_closed(s, m.rule.apps)?;
         untracked(s, path, k)
     }
 }
@@ -450,31 +450,27 @@ impl ScanModule for DependenciesModule {
     }
     fn in_use(&self, s: &Services, f: &Finding, _: ActionKind) -> Option<String> {
         let path = f.resource.path()?;
-        if let Some(store) = self.store(path) {
-            return owners_closed(s, store.apps).err().or_else(|| {
-                let active = orphans::active_tools(s, None);
-                (!active.is_empty()).then(|| {
-                    format!(
-                        "Developer tools are running that may be installing from this store:{}",
-                        orphans::list(&active)
-                    )
-                })
+        if self.store(path).is_some() {
+            let active = orphans::active_tools(s, None);
+            return (!active.is_empty()).then(|| {
+                format!(
+                    "Developer tools are running that may be installing from this store:{}",
+                    orphans::list(&active)
+                )
             });
         }
         match self.matches(s, path) {
-            Some(m) => owners_closed(s, m.rule.apps)
-                .err()
-                .or_else(|| active_project_tools(s, &m.project)),
+            Some(m) => active_project_tools(s, &m.project),
             None => active_project_tools(s, &parent(path)),
         }
     }
     fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, k: &ScanControl) -> Result<()> {
         let path = f.resource.path().ok_or("Missing path")?;
         if let Some(store) = self.store(path) {
-            return match store.blocked {
-                Some(reason) => Err(reason.into()),
-                None => Ok(()),
-            };
+            if let Some(reason) = store.blocked {
+                return Err(reason.into());
+            }
+            return owners_closed(s, store.apps);
         }
         if in_app_home_folder(path, &self.home()) {
             return Err(APP_DATA.into());
@@ -487,8 +483,10 @@ impl ScanModule for DependenciesModule {
                 return Err("The owning package.json or deno.json is no longer available.".into());
             }
         } else {
-            self.matches(s, path)
+            let m = self
+                .matches(s, path)
                 .ok_or("The owning project's evidence is no longer available.")?;
+            owners_closed(s, m.rule.apps)?;
         }
         untracked(s, path, k)
     }
@@ -1064,19 +1062,12 @@ impl ScanModule for CachesModule {
     }
     fn in_use(&self, s: &Services, f: &Finding, _: ActionKind) -> Option<String> {
         let path = f.resource.path()?;
-        // The scan lists a macOS leftover only where no cache above claims the folder, so
-        // the leftover check applies only then. It needs just its app closed.
-        let location = self.location(path);
-        if location.is_none() {
-            if let Some(result) = self.mac.preflight(s, &self.home(), path) {
-                return result.err();
-            }
-        }
-        if let Some(reason) = location.and_then(|l| owners_closed(s, l.apps).err()) {
-            return Some(reason);
-        }
-        if location.is_some_and(|l| l.app_cache) {
-            return None;
+        // Owning apps are checked in `preflight`. A macOS leftover or an app's own cache
+        // waits only for its app, not for developer tools.
+        match self.location(path) {
+            None if self.mac.lists(&self.home(), path) => return None,
+            Some(l) if l.app_cache => return None,
+            _ => {}
         }
         let active = orphans::active_tools(s, None);
         (!active.is_empty()).then(|| {
@@ -1086,11 +1077,18 @@ impl ScanModule for CachesModule {
             )
         })
     }
-    fn preflight(&self, _: &Services, f: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
+    fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
         let path = f.resource.path().ok_or("Missing path")?;
-        if let Some(reason) = self.location(path).and_then(|l| l.blocked) {
-            return Err(reason.into());
+        // The scan lists a macOS leftover only where no cache above claims the folder, so
+        // the leftover's app check applies only then.
+        match self.location(path) {
+            Some(location) => {
+                if let Some(reason) = location.blocked {
+                    return Err(reason.into());
+                }
+                owners_closed(s, location.apps)
+            }
+            None => self.mac.preflight(s, &self.home(), path).unwrap_or(Ok(())),
         }
-        Ok(())
     }
 }

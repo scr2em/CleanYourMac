@@ -606,11 +606,11 @@ fn caches_block_go_modules_expand_ide_versions_and_wait_for_owning_apps() {
         }])),
         ..s
     };
-    // A running owner is an overridable "in use" reason, not a hard refusal.
-    assert!(module
+    // A running owner refuses the action; it is not an "in use" reason to override.
+    assert!(module.in_use(&running, vscode, ActionKind::Trash).is_none());
+    let error = module
         .preflight(&running, vscode, ActionKind::Trash, &k)
-        .is_ok());
-    let error = module.in_use(&running, vscode, ActionKind::Trash).unwrap();
+        .unwrap_err();
     assert!(error.contains("Visual Studio Code"), "{error}");
 }
 
@@ -968,11 +968,11 @@ fn caches_include_mac_leftovers_without_repeating_developer_caches() {
         }])),
         ..s
     };
-    // A running owner is an overridable "in use" reason, not a hard refusal.
-    assert!(module
+    // A running owner refuses the action; it is not an "in use" reason to override.
+    assert!(module.in_use(&running, editor, ActionKind::Trash).is_none());
+    let error = module
         .preflight(&running, editor, ActionKind::Trash, &k)
-        .is_ok());
-    let error = module.in_use(&running, editor, ActionKind::Trash).unwrap();
+        .unwrap_err();
     assert!(error.contains("Quit Editor"), "{error}");
 }
 
@@ -1097,7 +1097,9 @@ fn caches_list_browser_game_and_media_app_caches_by_profile() {
         }])),
         ..s
     };
-    let error = module.in_use(&running, script, ActionKind::Trash).unwrap();
+    let error = module
+        .preflight(&running, script, ActionKind::Trash, &ScanControl::default())
+        .unwrap_err();
     assert!(error.contains("Google Chrome"), "{error}");
 }
 
@@ -1274,8 +1276,8 @@ fn one_classifier_decides_what_a_project_folder_is() {
     }
 }
 
-/// Caches & Logs checks the app that owns each cache the way its scan classified it: an
-/// editor's cache waits for the editor, not for a leftover rule that happens to match too.
+/// Caches & Logs checks the app that owns each cache the way its scan classified it, and
+/// refuses while it runs: an editor's cache waits for the editor, not for a leftover rule that happens to match too.
 #[test]
 fn caches_wait_for_the_app_the_scan_named() {
     let f = Fixture::new();
@@ -1303,8 +1305,11 @@ fn caches_wait_for_the_app_the_scan_named() {
     };
     let code = find("/Code/Code Cache");
     let chrome = find("/Caches/Google/Chrome");
-    assert!(module.in_use(&s, code, ActionKind::Trash).is_none());
-    assert!(module.in_use(&s, chrome, ActionKind::Trash).is_none());
+    let idle = ScanControl::default();
+    assert!(module.preflight(&s, code, ActionKind::Trash, &idle).is_ok());
+    assert!(module
+        .preflight(&s, chrome, ActionKind::Trash, &idle)
+        .is_ok());
     let running = |bundle_id: &str, path: &str| Services {
         apps: Arc::new(FakeApps(vec![RunningApp {
             pid: 7,
@@ -1317,10 +1322,15 @@ fn caches_wait_for_the_app_the_scan_named() {
         "com.microsoft.VSCode",
         "/Applications/Visual Studio Code.app",
     );
-    let reason = module.in_use(&vscode, code, ActionKind::Trash).unwrap();
+    let k = ScanControl::default();
+    let reason = module
+        .preflight(&vscode, code, ActionKind::Trash, &k)
+        .unwrap_err();
     assert!(reason.contains("Visual Studio Code"), "{reason}");
     let google = running("com.google.Chrome", "/Applications/Google Chrome.app");
-    let reason = module.in_use(&google, chrome, ActionKind::Trash).unwrap();
+    let reason = module
+        .preflight(&google, chrome, ActionKind::Trash, &k)
+        .unwrap_err();
     assert!(reason.contains("Google Chrome"), "{reason}");
 }
 

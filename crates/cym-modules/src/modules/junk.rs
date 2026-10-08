@@ -293,6 +293,14 @@ impl MacJunk {
         }
         Ok(candidates)
     }
+    /// Whether `path` is a leftover this table lists, as `preflight` would check it.
+    pub fn lists(&self, home: &str, path: &str) -> bool {
+        self.locate(home, path).is_some()
+            || path
+                .rsplit_once('/')
+                .and_then(|(vendor, _)| self.locate(home, vendor))
+                .is_some_and(|(l, vendor)| vendor.is_some() && l.per_app && !l.app_folder)
+    }
     /// Checks before removing a leftover: `None` when the path is not one.
     pub fn preflight(&self, s: &Services, home: &str, path: &str) -> Option<Result<()>> {
         if let Some((location, capture)) = self.locate(home, path) {

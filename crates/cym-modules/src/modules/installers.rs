@@ -125,23 +125,21 @@ impl ScanModule for InstallersModule {
         }
         add_files(s, sink, "installers", candidates, k)
     }
-    fn in_use(&self, s: &Services, f: &Finding, _: ActionKind) -> Option<String> {
-        let path = f.resource.path()?;
-        let running = match s.apps.running() {
-            Ok(running) => running,
-            Err(e) => {
-                return Some(format!(
-                    "Cannot check whether this installer is running: {e}"
-                ))
-            }
-        };
-        running
+    fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
+        let path = f.resource.path().ok_or("Missing path")?;
+        let running = s
+            .apps
+            .running()
+            .map_err(|e| format!("Cannot check whether this installer is running: {e}"))?;
+        if let Some(a) = running
             .iter()
             .find(|a| policy::canonical(&a.path) == policy::canonical(path))
-            .map(|a| format!("This installer is running (PID {}). Quit it first.", a.pid))
-    }
-    fn preflight(&self, _: &Services, f: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
-        let path = f.resource.path().ok_or("Missing path")?;
+        {
+            return Err(format!(
+                "This installer is running (PID {}). Quit it first.",
+                a.pid
+            ));
+        }
         if path.ends_with(".app") {
             let (id, _) = bundle(path).ok_or("This app can no longer be read.")?;
             if !id.starts_with(INSTALL_ASSISTANT) {

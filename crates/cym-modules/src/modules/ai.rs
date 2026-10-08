@@ -954,9 +954,6 @@ impl ScanModule for AiToolsModule {
     fn in_use(&self, s: &Services, f: &Finding, _: ActionKind) -> Option<String> {
         let path = f.resource.path()?;
         let (tool, root) = self.owner(s, path)?;
-        if let Err(reason) = owners_closed(s, tool.apps) {
-            return Some(reason);
-        }
         if tool.sessions == Some(Sessions::Claude) {
             let live = live_sessions(s, &root);
             if !live.names.is_empty() {
@@ -986,6 +983,8 @@ impl ScanModule for AiToolsModule {
         let (tool, root) = self
             .owner(s, path)
             .ok_or("This item is no longer inside an AI tool's data folder.")?;
+        // Its app (Claude, Cursor, an editor) uses this data while it runs.
+        owners_closed(s, tool.apps)?;
         // A running session's own files are never moved, whatever the user confirms.
         if tool.sessions == Some(Sessions::Claude) {
             let live = live_sessions(s, &root);
