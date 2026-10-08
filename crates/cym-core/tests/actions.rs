@@ -1,6 +1,8 @@
 mod common;
 use common::*;
-use cym_core::{analytics::analytics, model::*, modules, ports::*, Engine, Services};
+use cym_core::{
+    analytics::analytics, model::*, modules, modules::ScanModule, ports::*, Engine, Services,
+};
 use std::{fs, sync::Arc};
 
 fn engine(f: &Fixture) -> Engine {
@@ -130,6 +132,69 @@ fn changed_folder_is_not_moved() {
         .remove(0);
     assert_eq!(result.outcome, Outcome::Failed);
     assert!(fs::metadata(&folder).is_ok());
+}
+
+struct PanickingModule;
+impl ScanModule for PanickingModule {
+    fn descriptor(&self) -> ModuleDescriptor {
+        ModuleDescriptor::new("panics", "Panics", "Developer", "folder", "", true)
+    }
+    fn scan(&self, _: &Services, _: &ScanContext, _: &ScanControl, _: &mut dyn Sink) -> Result<()> {
+        Ok(())
+    }
+    fn preflight(&self, _: &Services, _: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
+        panic!("fixture panic")
+    }
+}
+
+#[test]
+fn a_failure_in_the_middle_of_a_batch_does_not_stop_the_rest() {
+    let f = Fixture::new();
+    let e = Engine::new(
+        services(&f),
+        modules::builtin().register(Arc::new(PanickingModule)),
+    );
+    for project in ["a", "b", "c"] {
+        f.write(&format!("{project}/package.json"), "{}");
+        f.write(&format!("{project}/node_modules/x/index.js"), "x");
+    }
+    let mut findings = e
+        .scan_report(&["node".into()], &f.context(), &ScanControl::default())
+        .findings;
+    findings.sort_by(|a, b| a.resource.path().cmp(&b.resource.path()));
+    // The second project changes after the scan, so its revalidation fails.
+    f.write("b/node_modules/x/late.js", "late");
+    // An item from a module that panics sits between the others.
+    let path = f.write("panics/file", "x");
+    let s = services(&f);
+    findings.insert(
+        2,
+        file_finding("panic", "panics", s.entry(&path).unwrap().identity),
+    );
+
+    let results = e.execute(
+        &ActionRequest {
+            findings,
+            kind: ActionKind::Trash,
+            context: f.context(),
+            acknowledged: vec![],
+            force: false,
+        },
+        &ScanControl::default(),
+    );
+    let outcomes: Vec<_> = results.iter().map(|r| r.outcome).collect();
+    assert_eq!(
+        outcomes,
+        [
+            Outcome::Applied,
+            Outcome::Failed,
+            Outcome::Failed,
+            Outcome::Applied
+        ]
+    );
+    assert!(fs::metadata(f.at("a/node_modules")).is_err());
+    assert!(fs::metadata(f.at("b/node_modules")).is_ok());
+    assert!(fs::metadata(f.at("c/node_modules")).is_err());
 }
 
 #[test]

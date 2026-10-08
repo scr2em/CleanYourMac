@@ -21,21 +21,27 @@ pub fn execute(
             |message: &str| row(&finding, request.kind, Outcome::Failed, message, None, None);
         // Eligibility and scope first; then whether something is using the item, which the
         // user may override; then the module's own checks and fresh validation in `apply`.
-        let in_use = (!request.force)
-            .then(|| registry.get(&finding.module_id))
-            .flatten()
-            .and_then(|module| module.in_use(services, &finding, request.kind));
-        let mut result = match check(&finding, request) {
-            Err(message) => failed(&message),
-            Ok(()) => match in_use {
+        // One item failing, even by a panic in a module, never stops the rest of the batch.
+        let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if let Err(message) = check(&finding, request) {
+                return failed(&message);
+            }
+            let in_use = (!request.force)
+                .then(|| registry.get(&finding.module_id))
+                .flatten()
+                .and_then(|module| module.in_use(services, &finding, request.kind));
+            match in_use {
                 Some(reason) => ActionResult {
                     overridable: true,
                     ..failed(&reason)
                 },
                 None => apply(services, registry, &finding, request, control)
                     .unwrap_or_else(|message| failed(&message)),
-            },
-        };
+            }
+        }));
+        let mut result = attempt.unwrap_or_else(|_| {
+            failed("An unexpected error stopped this item; the item was left unchanged or partly moved. Check it in Finder.")
+        });
         // Persist after each item so an interrupted batch keeps its completed outcomes.
         if let Err(e) = services.journal.append(std::slice::from_ref(&result)) {
             result.journal_warning = Some(format!(

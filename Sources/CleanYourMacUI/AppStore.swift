@@ -530,20 +530,40 @@ public final class AppStore {
         isApplying = false; review = nil
         resultsChanged()
         await refreshOverview()
-        // Items skipped only because something uses them can be forced; other failures are final.
-        let busy = results.filter { $0.outcome == .failed && $0.overridable == true }
-        if !busy.isEmpty, !draft.force {
-            var reasons: [String] = []
-            for message in busy.map(\.message) where !reasons.contains(message) { reasons.append(message) }
+        // The core attempts every item, so one failure never stops the rest. Items skipped only
+        // because something uses them can be forced; other failures are final and listed.
+        let busy = draft.force ? [] : results.filter { $0.outcome == .failed && $0.overridable == true }
+        let busyIDs = Set(busy.map(\.id))
+        let failed = results.filter { $0.outcome == .failed && !busyIDs.contains($0.id) }
+        let finished = Self.batchSummary(results, failed: failed.count + busy.count)
+        let failures = failed.isEmpty ? "" : (failed.count == 1 ? "1 item could not be changed:" : "\(failed.count) items could not be changed:")
+            + "\n" + Self.listed(failed.map { "\($0.title): \($0.message)" })
+        if !busy.isEmpty {
             let count = busy.count == 1 ? "This item is" : "\(busy.count) items are"
             inUse = InUseDraft(
                 ids: busy.compactMap(\.findingID), kind: draft.kind, acknowledged: draft.acknowledged,
-                message: "\(count) in use.\n\n" + reasons.joined(separator: "\n\n")
+                message: [finished, "\(count) in use.\n\n" + Self.unique(busy.map(\.message)).joined(separator: "\n\n"), failures]
+                    .filter { !$0.isEmpty }.joined(separator: "\n\n")
                     + (draft.kind == .trash ? "\n\nForcing it can disrupt the programs using it. Items moved to the Trash can be restored from Activity." : "")
             )
-        }
-        if let failed = results.first(where: { $0.outcome == .failed && $0.overridable != true }) { error = failed.message }
-        else if let warning = results.compactMap(\.journalWarning).first, inUse == nil { error = warning }
+        } else if !failed.isEmpty {
+            error = results.count == 1 ? failed[0].message : [finished, failures].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        } else if let warning = results.compactMap(\.journalWarning).first { error = warning }
+    }
+    /// "38 of 40 items done." for a batch where some items failed; empty otherwise.
+    private static func batchSummary(_ results: [ActionResult], failed: Int) -> String {
+        let done = results.filter { $0.outcome == .applied || $0.outcome == .skipped }.count
+        guard failed > 0, results.count > 1 else { return "" }
+        return "\(done) of \(results.count) items done. Every item was attempted; the others were left as they were."
+    }
+    private static func unique(_ messages: [String]) -> [String] {
+        var seen = Set<String>()
+        return messages.filter { seen.insert($0).inserted }
+    }
+    /// Up to eight lines, then a count of the rest.
+    private static func listed(_ lines: [String]) -> String {
+        let shown = lines.prefix(8).map { "• " + $0 }
+        return (shown + (lines.count > 8 ? ["and \(lines.count - 8) more, listed in Activity."] : [])).joined(separator: "\n")
     }
     private func mergeHistory(_ rows: [ActionResult]) {
         var seen = Set<UUID>()
