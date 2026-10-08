@@ -56,9 +56,6 @@ fn main() {
     }
     let context = ScanContext {
         roots,
-        ignored_process_names: ["ssh-agent", "gpg-agent", "keyboxd", "dirmngr"]
-            .map(String::from)
-            .into(),
         ..Default::default()
     };
     let mut report = engine.scan_report(

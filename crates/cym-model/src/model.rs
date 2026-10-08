@@ -184,16 +184,37 @@ impl Finding {
             .map(|d| d.value.as_str())
     }
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// Process names Orphan Processes leaves out unless the user changes the list: the
+/// security agents macOS and GnuPG start on demand, which are meant to outlive what
+/// started them. The app, the CLI and any client that sends no list start from these.
+pub const DEFAULT_IGNORED_PROCESSES: &[&str] = &["ssh-agent", "gpg-agent", "keyboxd", "dirmngr"];
+fn default_ignored_processes() -> Vec<String> {
+    DEFAULT_IGNORED_PROCESSES
+        .iter()
+        .map(|&n| n.into())
+        .collect()
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanContext {
     pub roots: Vec<String>,
     #[serde(default)]
     pub exclusions: Vec<String>,
-    #[serde(default)]
+    /// `DEFAULT_IGNORED_PROCESSES` when a client sends none; an empty list ignores nothing.
+    #[serde(default = "default_ignored_processes")]
     pub ignored_process_names: Vec<String>,
     #[serde(default)]
     pub limit_to_roots: bool,
+}
+impl Default for ScanContext {
+    fn default() -> Self {
+        Self {
+            roots: vec![],
+            exclusions: vec![],
+            ignored_process_names: default_ignored_processes(),
+            limit_to_roots: false,
+        }
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

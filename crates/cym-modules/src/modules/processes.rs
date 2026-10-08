@@ -40,6 +40,8 @@ const DETACHED: &[&str] = &[
     "jupyter-lab",
     "ssh-agent",
     "gpg-agent",
+    "keyboxd",
+    "dirmngr",
 ];
 /// Whether a process name is one of `DETACHED` (see `orphans::named`).
 pub fn detached_by_design(name: &str) -> bool {

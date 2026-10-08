@@ -623,3 +623,24 @@ fn whole_reads_never_return_a_prefix() {
     // A prefix is still available on purpose, for the start of a long log.
     assert_eq!(s.fs.read(&large, 10).unwrap().len(), 10);
 }
+
+/// Every client starts from one list of ignored process names, and can clear it.
+#[test]
+fn ignored_processes_default_in_one_place() {
+    let sent: ScanContext = serde_json::from_str(r#"{"roots":["/x"]}"#).unwrap();
+    assert_eq!(sent.ignored_process_names, DEFAULT_IGNORED_PROCESSES);
+    assert_eq!(
+        ScanContext::default().ignored_process_names,
+        DEFAULT_IGNORED_PROCESSES
+    );
+    let cleared: ScanContext =
+        serde_json::from_str(r#"{"roots":["/x"],"ignoredProcessNames":[]}"#).unwrap();
+    assert!(cleared.ignored_process_names.is_empty());
+    // Removed from the list, they are still never offered to quit.
+    for agent in DEFAULT_IGNORED_PROCESSES {
+        assert!(
+            cym_core::modules::processes::detached_by_design(agent),
+            "{agent}"
+        );
+    }
+}
