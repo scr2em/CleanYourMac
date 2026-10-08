@@ -116,4 +116,4 @@ Switch the Comfy · Typography collection to "Apple SF" on a Mac that has those 
 - Code Connect mappings.
 - Screens for the other modules, the Review sheet, and the Settings Protection and Modules tabs.
 
-`design/figma/build.js` and `docs/design-concepts/` are earlier offline artifacts kept for reference.
+`design/figma/build.js` is an earlier offline artifact kept for reference. `docs/design-concepts/` holds current renders of seven screens from 03 · App screens, the same images as `docs/screenshots/`.
