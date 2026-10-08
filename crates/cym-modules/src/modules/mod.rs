@@ -4,6 +4,7 @@ use crate::{model::*, ports::*, services::Services};
 use rayon::prelude::*;
 use std::{collections::HashSet, sync::Arc};
 
+pub mod ai;
 pub mod applications;
 pub mod developer;
 pub mod junk;
@@ -407,6 +408,7 @@ pub fn builtin() -> Registry {
         Arc::new(developer::XcodeModule),
         Arc::new(developer::CachesModule::default()),
         Arc::new(toolchains::ToolchainsModule::default()),
+        Arc::new(ai::AiToolsModule::default()),
         Arc::new(applications::ApplicationsModule),
         Arc::new(applications::LeftoversModule),
         Arc::new(storage::FolderModule::downloads()),
