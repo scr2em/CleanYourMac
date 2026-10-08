@@ -1,11 +1,11 @@
-use super::project::{package_tree, projects};
+use super::project_folders::{self, package_tree};
 use super::{
     add_files, descriptor, flush, glob, owners, owners_closed, Candidate, LastUsed, ScanModule,
 };
 use crate::{git::Git, model::*, orphans, policy, ports::*, services::Services};
 use std::path::Path;
 
-pub use super::project::{
+pub use super::project_folders::{
     build_output_rules, dependency_rules, match_rules, ArtifactMatch, ArtifactRule,
 };
 
@@ -117,7 +117,7 @@ impl ArtifactsModule {
     }
     /// The first rule whose names and evidence match the folder at `path`.
     pub fn matches(&self, s: &Services, path: &str) -> Option<ArtifactMatch<'static>> {
-        projects().build_output(s, path)
+        project_folders::rules().build_output(s, path)
     }
 }
 impl ScanModule for ArtifactsModule {
@@ -146,7 +146,7 @@ impl ScanModule for ArtifactsModule {
                 return Ok(false);
             }
             if e.directory {
-                if projects().dependency(s, e.path()).is_some() {
+                if project_folders::rules().dependency(s, e.path()).is_some() {
                     return Ok(false);
                 }
                 if let Some(m) = self.matches(s, e.path()) {
@@ -271,7 +271,7 @@ impl Default for DependenciesModule {
 impl DependenciesModule {
     /// The rule matching a dependency folder other than `node_modules`.
     pub fn matches(&self, s: &Services, path: &str) -> Option<ArtifactMatch<'static>> {
-        projects().dependency(s, path)
+        project_folders::rules().dependency(s, path)
     }
     fn home(&self) -> String {
         self.home.clone().unwrap_or_else(policy::home)
@@ -428,7 +428,7 @@ impl ScanModule for DependenciesModule {
             }
             // Build output (`.next`, `target`, …) belongs to Build Artifacts; packages it holds,
             // such as `.next/standalone/node_modules`, are part of the build.
-            if projects().build_output(s, e.path()).is_some() {
+            if project_folders::rules().build_output(s, e.path()).is_some() {
                 return Ok(false);
             }
             Ok(true)
@@ -440,7 +440,7 @@ impl ScanModule for DependenciesModule {
         let mut found: Vec<Candidate> = candidates
             .into_iter()
             .filter_map(|e| {
-                let runtime = projects().node_runtime(s, &parent(e.path()))?;
+                let runtime = project_folders::rules().node_runtime(s, &parent(e.path()))?;
                 Some(self.node_modules(s, e, runtime))
             })
             .collect();
@@ -495,7 +495,10 @@ impl ScanModule for DependenciesModule {
             return Err(APP_DATA.into());
         }
         if name(path) == "node_modules" {
-            if projects().node_runtime(s, &parent(path)).is_none() {
+            if project_folders::rules()
+                .node_runtime(s, &parent(path))
+                .is_none()
+            {
                 return Err("The owning package.json or deno.json is no longer available.".into());
             }
         } else {

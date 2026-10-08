@@ -1209,7 +1209,7 @@ fn toolchains_list_conda_environments_uv_pythons_and_ide_jdks() {
 fn one_classifier_decides_what_a_project_folder_is() {
     let f = Fixture::new();
     let s = services(&f);
-    let projects = modules::project::projects();
+    let projects = modules::project_folders::rules();
     f.write("web/package.json", "{}");
     f.write("web/node_modules/x/index.js", "");
     f.write("web/dist/app.js", "");
@@ -1267,10 +1267,10 @@ fn one_classifier_decides_what_a_project_folder_is() {
         "lib.egg-info",
         ".pnpm-store",
     ] {
-        assert!(modules::project::generated_name(name), "{name}");
+        assert!(modules::project_folders::generated_name(name), "{name}");
     }
     for name in ["src", ".git", "package.json"] {
-        assert!(!modules::project::generated_name(name), "{name}");
+        assert!(!modules::project_folders::generated_name(name), "{name}");
     }
 }
 

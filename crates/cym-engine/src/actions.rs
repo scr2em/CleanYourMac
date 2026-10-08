@@ -176,6 +176,25 @@ fn apply(
                 "Simulator deleted."
             })
         }
+        (ActionKind::Archive, Resource::File { file }) => {
+            services.validate(file, c, &module.action_roots(), control)?;
+            let archive = module.archive(services, f, control)?;
+            // The folder must be the one archived: unchanged while the archive was made.
+            if let Err(e) = services.validate(file, c, &module.action_roots(), control) {
+                let _ = services.fs.remove(&archive);
+                return Err(format!("The project changed while it was archived, so it stays and the archive was removed: {e}"));
+            }
+            let destination = services.trash.move_to_trash(&file.path)?;
+            let identity = services.snapshot(&destination, control).ok();
+            Ok(row(
+                f,
+                request.kind,
+                Outcome::Applied,
+                &format!("Archived to {archive} and checked it; the folder is in the Trash. Open the archive in Finder to bring the project back."),
+                Some(destination),
+                identity,
+            ))
+        }
         (ActionKind::RunCommand, Resource::Command { .. }) => {
             let message = module.run(services, f, c, control)?;
             done(&message)

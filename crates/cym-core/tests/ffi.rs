@@ -33,7 +33,7 @@ fn c_abi_round_trips_requests_scans_and_errors() {
         assert!(!engine.is_null());
         let modules = call(engine, json!({"method": "modules"}));
         assert_eq!(modules["ok"], true);
-        assert_eq!(modules["result"].as_array().unwrap().len(), 18);
+        assert_eq!(modules["result"].as_array().unwrap().len(), 20);
         assert_eq!(modules["result"][0]["usesRoots"], true);
         let unknown = call(engine, json!({"method": "nope"}));
         assert_eq!(unknown["ok"], false);

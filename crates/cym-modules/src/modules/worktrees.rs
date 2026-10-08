@@ -207,8 +207,8 @@ impl ScanModule for WorktreeModule {
         let walked = s.walk(c, k, &mut warnings, &mut |e| {
             // Build output and installed packages hold no worktrees of the user's.
             if !e.directory
-                || super::project::package_tree(e.name())
-                || super::project::projects().rebuildable(s, e.path())
+                || super::project_folders::package_tree(e.name())
+                || super::project_folders::rules().rebuildable(s, e.path())
             {
                 return Ok(false);
             }

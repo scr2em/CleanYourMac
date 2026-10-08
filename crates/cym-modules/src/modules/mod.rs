@@ -11,9 +11,11 @@ pub mod developer;
 pub mod installers;
 pub mod junk;
 pub mod processes;
-pub mod project;
+pub mod project_folders;
+pub mod projects;
 pub mod simulators;
 pub mod storage;
+pub mod system;
 pub mod toolchains;
 pub mod worktrees;
 pub mod xcode;
@@ -62,6 +64,16 @@ pub trait ScanModule: Send + Sync {
         _control: &ScanControl,
     ) -> Result<String> {
         Err("This tool has no cleanup command.".into())
+    }
+    /// Compresses an `Archive` finding's folder into a checked archive beside it and returns
+    /// the archive's path. The executor moves the folder to the Trash afterwards.
+    fn archive(
+        &self,
+        _services: &Services,
+        _finding: &Finding,
+        _control: &ScanControl,
+    ) -> Result<String> {
+        Err("This tool does not archive items.".into())
     }
 }
 
@@ -237,7 +249,7 @@ pub(crate) fn project_activity(s: &Services, folder: &str) -> Option<f64> {
         .into_iter()
         .flatten()
         // Version-control metadata changes with every commit, so it counts as activity.
-        .filter(|e| !project::generated_name(e.name()))
+        .filter(|e| !project_folders::generated_name(e.name()))
         .map(|e| e.modified())
         .reduce(f64::max)
 }
@@ -489,6 +501,7 @@ pub fn builtin() -> Registry {
         Arc::new(developer::DependenciesModule::default()),
         Arc::new(developer::ArtifactsModule::default()),
         Arc::new(worktrees::WorktreeModule),
+        Arc::new(projects::ProjectsModule::default()),
         Arc::new(simulators::SimulatorModule),
         Arc::new(xcode::XcodeModule::default()),
         Arc::new(developer::CachesModule::default()),
@@ -500,6 +513,7 @@ pub fn builtin() -> Registry {
         Arc::new(storage::FolderModule::downloads()),
         Arc::new(installers::InstallersModule::default()),
         Arc::new(storage::FolderModule::trash()),
+        Arc::new(system::SystemModule::default()),
         Arc::new(processes::OrphanModule),
     ])
     .expect("Built-in module IDs are unique")

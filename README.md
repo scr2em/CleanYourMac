@@ -27,10 +27,12 @@ CleanYourMac finds items that use disk space on your Mac. Examples are large dow
 | **Exact duplicates** | Find identical files. The app keeps one original of each file. The app does not search system, build or dependency folders. |
 | **Project dependencies and build output** | See the projects that have large dependency folders (`node_modules`, Python environments, Pods, `vendor` and more) and generated files. The search stops at each dependency folder. |
 | **Git worktrees** | See the branch, local changes, locks and size of each worktree. A badge shows registrations that have no folder. |
+| **Idle projects and Git data** | Hibernate a project that you have not changed for 180 days into a checked `.zip` file. Pack the loose objects of a repository with `git gc`. |
+| **System Data** | Remove Time Machine local snapshots. See how much space Apple Intelligence models, macOS update downloads, the GarageBand and Logic sound library and aerial videos use, and where macOS lets you remove them. |
 | **Simulators and Xcode data** | See simulator app data, runtimes, DerivedData, device support, preview simulators and extra Xcode installs. Xcode archives are protected. |
 | **Containers and virtual machines** | See the real size of the disks of Docker, OrbStack, Colima, Lima and Podman, and of UTM, Parallels, VMware Fusion, VirtualBox and Tart virtual machines. Free space inside the engines with their own cleanup commands. |
 | **Installers** | Find macOS installers, Xcode archives, disk images and packages that you already installed from. |
-| **Toolchains, SDKs and caches** | Find installed language versions, SDK components, virtual devices, package caches and logs. |
+| **Toolchains, SDKs and caches** | Find installed language versions, SDK components, virtual devices, package caches and logs. Remove old Homebrew versions and unused Nix store paths with their own commands. |
 | **AI tools** | Find the caches, session transcripts and downloaded models of Claude Code, Codex, Gemini CLI, Cursor, Ollama and other AI tools. Each item has a risk tier. |
 | **Applications and possible leftovers** | See each application and its related files as separate items. The app shows when the owner of a file is not certain. |
 | **Orphan processes** | See processes that their parent left running, with CPU and memory use. Then you can quit them. |
@@ -221,6 +223,15 @@ The app shows the ignored files first, because the removal deletes them. A regis
 </details>
 
 <details>
+<summary><strong>Projects</strong>: idle projects and unpacked Git data</summary>
+
+Projects shows the Git projects in the folders that you select. It does not look in `~/Library` or in hidden folders of your home folder, where apps and tools keep their own repositories.
+
+- **Idle projects:** a project without a commit or a change to its files for 180 days. *Hibernate Project* compresses the whole folder, with its Git history and uncommitted work, into `<name>.zip` next to it (`ditto`). The app checks the archive (`unzip -t`), and then moves the folder to the Trash. To get the project back, open the `.zip` file in Finder, or restore the folder from Activity while it is in the Trash. The app does not hibernate a project when a `.zip` file with that name exists, or while Git or a developer tool works in it. Remove the dependencies and build output first to make the archive smaller.
+- **Unpacked Git objects:** a repository with 100 MB or more of loose or temporary objects. *Run Cleanup* runs `git gc`, which packs them. Git keeps unreachable objects for two weeks, and branches, stashes and reflogs stay. The app does not run Git in a repository whose settings run programs.
+</details>
+
+<details>
 <summary><strong>Simulators</strong>: devices and runtimes</summary>
 
 Simulators reads the simulator list of Xcode. For each device, it shows the runtime, state, app-data size and the date of the last boot. You can reset or delete a device only when it is shut down. A device whose runtime is not installed has the *Unavailable* badge.
@@ -275,6 +286,7 @@ Toolchains & SDKs shows each installed version, with its size and the uninstall 
 - **Swift toolchains.**
 - **Managers for many tools:** SDKMAN, asdf and mise.
 - **Android:** system images, NDK, build tools and virtual devices.
+- **Package managers:** old Homebrew versions and downloads (`brew cleanup --dry-run` measures them, `brew cleanup` removes them), and Nix store paths that nothing uses (`nix store gc --dry-run`, then `nix store gc`). Old Nix generations stay, so rollbacks still work.
 
 You cannot select a version that is in use. A version is in use when it is the default or global version, when `.tool-versions` or a mise configuration pins it, or when an Android virtual device uses it. You cannot select a virtual device while its emulator runs.
 </details>
@@ -347,6 +359,16 @@ The app never shows settings, credentials, instructions (`CLAUDE.md`, `AGENTS.md
 <summary><strong>Downloads</strong> and <strong>Trash</strong></summary>
 
 **Downloads** shows each item in your Downloads folder, with the date that you last opened it. **Trash** shows the items in your Trash. When you empty the Trash, the removal is permanent. Neither shows Finder's own `.DS_Store` and `.localized` files.
+</details>
+
+<details>
+<summary><strong>System Data</strong>: snapshots and data that macOS manages</summary>
+
+Settings shows these items as System Data:
+- **Time Machine local snapshots:** backups that Time Machine keeps on the startup disk while the backup disk is not connected. The app shows how many there are and their dates. macOS does not give the size of each snapshot. *Run Cleanup* runs `tmutil thinlocalsnapshots`, which removes the snapshots that macOS lets go. The backups on your Time Machine disk stay. This action is permanent.
+- **For information only:** Apple Intelligence and other on-device models, macOS update downloads (`/Library/Updates`), the GarageBand and Logic sound library, and aerial screen saver and wallpaper videos. The app shows their size and where macOS lets you remove them. The app does not change them, because the system protects these folders.
+
+System Data does not show items when you scan only the folders that you select.
 </details>
 
 <details>

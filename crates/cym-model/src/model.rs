@@ -101,6 +101,8 @@ pub enum ActionKind {
     EmptyTrash,
     /// Runs the owning tool's own cleanup command, such as `docker builder prune`.
     RunCommand,
+    /// Compresses a folder into a checked archive beside it, then moves the folder to Trash.
+    Archive,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Detail {

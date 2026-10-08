@@ -71,6 +71,16 @@ pub fn sample(names: &[String], limit: usize) -> String {
 pub struct Git<'a>(pub &'a dyn CommandRunner);
 impl Git<'_> {
     pub fn run(&self, repository: &str, args: &[&str], control: &ScanControl) -> Result<Output> {
+        self.run_for(repository, args, Duration::from_secs(20), control)
+    }
+    /// `run` with a longer deadline, for maintenance such as `gc`.
+    pub fn run_for(
+        &self,
+        repository: &str,
+        args: &[&str],
+        timeout: Duration,
+        control: &ScanControl,
+    ) -> Result<Output> {
         let mut arguments: Vec<String> = [
             "-c",
             "core.fsmonitor=false",
@@ -87,8 +97,7 @@ impl Git<'_> {
         .map(|s| s.to_string())
         .collect();
         arguments.extend(args.iter().map(|s| s.to_string()));
-        self.0
-            .run("/usr/bin/git", &arguments, Duration::from_secs(20), control)
+        self.0.run("/usr/bin/git", &arguments, timeout, control)
     }
     /// A setting in the repository's own configuration that makes `status`, `log` or
     /// `worktree remove` run a program (a clean filter, a text converter, a signature

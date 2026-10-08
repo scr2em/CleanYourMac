@@ -43,7 +43,7 @@ fn last(path: &str) -> &str {
 }
 
 /// The rule tables, built once. Every module reads the same copy.
-pub struct Projects {
+pub struct ProjectFolders {
     pub build_output: Vec<ArtifactRule>,
     pub dependencies: Vec<ArtifactRule>,
     /// Names, or `*` patterns, of the files and folders that make a folder a project: every
@@ -51,11 +51,11 @@ pub struct Projects {
     markers: Vec<(&'static str, bool)>,
 }
 /// The shared rule tables.
-pub fn projects() -> &'static Projects {
-    static PROJECTS: OnceLock<Projects> = OnceLock::new();
-    PROJECTS.get_or_init(Projects::new)
+pub fn rules() -> &'static ProjectFolders {
+    static RULES: OnceLock<ProjectFolders> = OnceLock::new();
+    RULES.get_or_init(ProjectFolders::new)
 }
-impl Projects {
+impl ProjectFolders {
     fn new() -> Self {
         let build_output = build_output_rules();
         let dependencies = dependency_rules();

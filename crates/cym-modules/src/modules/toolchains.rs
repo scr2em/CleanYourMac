@@ -1,7 +1,7 @@
 //! Installed language toolchains, SDK components and virtual devices, one finding per version.
 use super::{add_files, descriptor, flush, glob, owners, owners_closed, Candidate, ScanModule};
 use crate::{model::*, policy, ports::*, services::Services};
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 /// How a version manager records what is in use. Paths are relative to the home folder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -139,12 +139,16 @@ pub struct ToolchainsModule {
     /// The home folder the locations are relative to; `None` uses the current user's.
     pub home: Option<String>,
     pub locations: Vec<ToolchainLocation>,
+    /// Package-manager programs to look for (Homebrew, Nix); `command::PACKAGE_TOOLS` when
+    /// `None` and `home` is the current user's. Tests point these at fixture files.
+    pub package_tools: Option<Vec<String>>,
 }
 impl Default for ToolchainsModule {
     fn default() -> Self {
         const SDK: &str = "Reinstall with Android Studio's SDK Manager if a project needs it.";
         Self {
             home: None,
+            package_tools: None,
             locations: vec![
                 versions(
                     "Rust",
@@ -338,6 +342,181 @@ impl Default for ToolchainsModule {
     }
 }
 
+/// A package manager that keeps old versions or unreachable packages, and its own cleanup.
+struct PackageManager {
+    tool: &'static str,
+    task: &'static str,
+    title: &'static str,
+    /// The program that measures, and the one that cleans: the file name of an entry in
+    /// the package tools.
+    measure: &'static str,
+    run: &'static str,
+    args: &'static [&'static str],
+    seconds: u64,
+    done: &'static str,
+}
+const MANAGERS: &[PackageManager] = &[
+    PackageManager {
+        tool: "brew",
+        task: "cleanup",
+        title: "Homebrew old versions",
+        measure: "brew",
+        run: "brew",
+        args: &["cleanup"],
+        seconds: 1800,
+        done: "Homebrew removed old versions and stale downloads.",
+    },
+    PackageManager {
+        tool: "nix",
+        task: "collect-garbage",
+        title: "Nix store garbage",
+        measure: "nix",
+        run: "nix",
+        args: &["--extra-experimental-features", "nix-command", "store", "gc"],
+        seconds: 3600,
+        done: "Nix removed store paths that nothing uses. Old generations stay, so rollbacks still work.",
+    },
+];
+impl PackageManager {
+    /// What the cleanup would free now, as a finding, or `None` when it frees nothing.
+    fn measure(&self, s: &Services, exe: &str, k: &ScanControl) -> Result<Option<Finding>> {
+        let (bytes, count, reason, details) = match self.tool {
+            "brew" => {
+                let out = s.commands.run(
+                    exe,
+                    &["cleanup".into(), "--dry-run".into()],
+                    Duration::from_secs(300),
+                    k,
+                )?;
+                if out.status != 0 {
+                    return Err(out.error.trim().chars().take(240).collect());
+                }
+                let text = String::from_utf8_lossy(&out.data);
+                let Some(bytes) = brew_freed(&text) else {
+                    return Ok(None);
+                };
+                let removed: Vec<&str> = text
+                    .lines()
+                    .filter_map(|l| l.strip_prefix("Would remove: "))
+                    .collect();
+                let versions = removed
+                    .iter()
+                    .filter(|l| l.contains("/Cellar/") || l.contains("/Caskroom/"))
+                    .count();
+                (
+                    bytes,
+                    removed.len(),
+                    "Older versions of formulae and casks that newer ones replaced, and downloads Homebrew no longer needs. Pinned formulae and the versions in use stay.",
+                    vec![
+                        detail("Ecosystem", "Homebrew"),
+                        detail("Old versions", versions.to_string()),
+                        detail("Items", removed.len().to_string()),
+                        detail("Command", "brew cleanup"),
+                    ],
+                )
+            }
+            _ => {
+                let args: Vec<String> = [
+                    "--extra-experimental-features",
+                    "nix-command",
+                    "store",
+                    "gc",
+                    "--dry-run",
+                ]
+                .iter()
+                .map(|a| (*a).to_owned())
+                .collect();
+                let out = s.commands.run(exe, &args, Duration::from_secs(300), k)?;
+                if out.status != 0 {
+                    return Err(out.error.trim().chars().take(240).collect());
+                }
+                // Paths may come on either stream, alone or quoted in a message.
+                let text = format!("{}\n{}", String::from_utf8_lossy(&out.data), out.error);
+                let dead = nix_paths(&text);
+                let mut bytes = 0;
+                for path in dead.iter().take(100_000) {
+                    k.check()?;
+                    if let Ok(size) = s.sizer.size(path, k) {
+                        bytes += size.allocated;
+                    }
+                }
+                (
+                    bytes,
+                    dead.len(),
+                    "Store paths that no profile, generation or running program uses. Old generations stay, so rollbacks still work.",
+                    vec![
+                        detail("Ecosystem", "Nix"),
+                        detail("Store paths", dead.len().to_string()),
+                        detail("Command", "nix store gc"),
+                    ],
+                )
+            }
+        };
+        if count == 0 || bytes == 0 {
+            return Ok(None);
+        }
+        let mut f = Finding::new(
+            "toolchains",
+            &format!("{}:{}", self.tool, self.task),
+            self.title,
+            Resource::Command {
+                tool: self.tool.into(),
+                task: self.task.into(),
+            },
+            reason,
+        );
+        f.subtitle = format!("{count} items · {exe}");
+        f.bytes = Some(bytes);
+        f.allocated_bytes = Some(bytes);
+        f.risk = Risk::Review;
+        f.details = details;
+        f.actions = vec![ActionKind::RunCommand];
+        Ok(Some(f))
+    }
+}
+/// The store paths named in `nix store gc --dry-run` output, once each.
+pub fn nix_paths(output: &str) -> Vec<&str> {
+    let mut paths: Vec<&str> = output
+        .lines()
+        .filter_map(|l| {
+            let start = l.find("/nix/store/")?;
+            let rest = &l[start..];
+            let end = rest
+                .find(|c: char| c.is_whitespace() || c == '\'' || c == '"')
+                .unwrap_or(rest.len());
+            Some(&rest[..end])
+        })
+        .filter(|p| p.len() > "/nix/store/".len())
+        .collect();
+    paths.sort_unstable();
+    paths.dedup();
+    paths
+}
+/// The space `brew cleanup --dry-run` says it would free: "This operation would free
+/// approximately 1.2GB of disk space." Homebrew counts in powers of 1024.
+pub fn brew_freed(output: &str) -> Option<u64> {
+    let line = output
+        .lines()
+        .find(|l| l.contains("would free approximately"))?;
+    let amount = line
+        .split("approximately")
+        .nth(1)?
+        .split_whitespace()
+        .next()?;
+    let split = amount.find(|c: char| !(c.is_ascii_digit() || c == '.'))?;
+    let (number, unit) = amount.split_at(split);
+    let number: f64 = number.parse().ok()?;
+    let scale = match unit {
+        "B" => 1.0,
+        "KB" => 1024.0,
+        "MB" => 1024.0 * 1024.0,
+        "GB" => 1024.0 * 1024.0 * 1024.0,
+        "TB" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        _ => return None,
+    };
+    Some((number * scale) as u64)
+}
+
 /// Values in a small TOML file as (section, key, quoted strings on the right-hand side).
 fn toml_values(text: &str) -> Vec<(String, String, Vec<String>)> {
     let mut section = String::new();
@@ -381,6 +560,22 @@ fn version_key(name: &str) -> Vec<u64> {
 }
 
 impl ToolchainsModule {
+    /// The first installed package-manager program with this file name.
+    fn package_tool(&self, name: &str) -> Option<String> {
+        // A fixture home folder (`home` set) never reaches the real package managers.
+        let tools = match (&self.package_tools, &self.home) {
+            (Some(tools), _) => tools.clone(),
+            (None, Some(_)) => vec![],
+            (None, None) => crate::adapters::command::PACKAGE_TOOLS
+                .iter()
+                .map(|t| (*t).to_owned())
+                .collect(),
+        };
+        tools
+            .into_iter()
+            .filter(|t| t.rsplit('/').next() == Some(name))
+            .find(|t| std::fs::metadata(t).is_ok_and(|m| m.is_file()))
+    }
     fn home(&self) -> String {
         self.home.clone().unwrap_or_else(policy::home)
     }
@@ -668,9 +863,66 @@ impl ScanModule for ToolchainsModule {
             }
         }
         flush(sink, &mut warnings);
-        add_files(s, sink, "toolchains", candidates, k)
+        add_files(s, sink, "toolchains", candidates, k)?;
+        // Old package versions and unreachable packages, removed by the managers themselves.
+        if !c.limit_to_roots {
+            for manager in MANAGERS {
+                k.check()?;
+                let Some(exe) = self.package_tool(manager.measure) else {
+                    continue;
+                };
+                match manager.measure(s, &exe, k) {
+                    Ok(Some(f)) => sink.finding(f),
+                    Ok(None) => {}
+                    Err(e) => sink.warning(format!("{} could not be measured: {e}", manager.title)),
+                }
+            }
+        }
+        Ok(())
+    }
+    fn run(&self, s: &Services, f: &Finding, _: &ScanContext, k: &ScanControl) -> Result<String> {
+        let Resource::Command { tool, task } = &f.resource else {
+            return Err("This cleanup is not one the app runs.".into());
+        };
+        let manager = MANAGERS
+            .iter()
+            .find(|m| m.tool == tool && m.task == task)
+            .ok_or("This cleanup is not one the app runs.")?;
+        let exe = self
+            .package_tool(manager.run)
+            .ok_or(format!("{} is no longer installed.", manager.title))?;
+        let args: Vec<String> = manager.args.iter().map(|a| (*a).to_owned()).collect();
+        let out = s
+            .commands
+            .run(&exe, &args, Duration::from_secs(manager.seconds), k)?;
+        if out.status != 0 {
+            return Err(out.error.trim().chars().take(400).collect());
+        }
+        Ok(manager.done.into())
     }
     fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, _: &ScanControl) -> Result<()> {
+        if let Resource::Command { tool, .. } = &f.resource {
+            // The manager must not be installing or upgrading at the same time.
+            let busy: Vec<_> = s
+                .processes
+                .pids()
+                .into_iter()
+                .filter_map(|pid| s.processes.inspect(pid))
+                .filter(|p| match tool.as_str() {
+                    "brew" => p.name == "brew" || p.identity.executable.ends_with("/brew"),
+                    "nix" => p.name.starts_with("nix") && p.name != "nix-daemon",
+                    _ => false,
+                })
+                .map(|p| format!("{} (PID {})", p.name, p.identity.pid))
+                .collect();
+            return match busy.is_empty() {
+                true => Ok(()),
+                false => Err(format!(
+                    "Wait for {} to finish first.",
+                    busy[..busy.len().min(3)].join(", ")
+                )),
+            };
+        }
         let path = f.resource.path().ok_or("Missing path")?;
         let (location, _) = self
             .locate(path)

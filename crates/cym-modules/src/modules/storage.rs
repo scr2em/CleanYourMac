@@ -100,7 +100,7 @@ impl ScanModule for LargeFilesModule {
         sink: &mut dyn Sink,
     ) -> Result<()> {
         let mut warnings = vec![];
-        let projects = super::project::projects();
+        let projects = super::project_folders::rules();
         let result = s.walk(c, k, &mut warnings, &mut |e| {
             // A file inside build output or installed packages is part of that build; Build
             // Artifacts and Dependencies offer the whole folder instead.
@@ -221,7 +221,7 @@ impl ScanModule for DuplicatesModule {
     ) -> Result<()> {
         let mut warnings = vec![];
         let mut sizes = vec![];
-        let projects = super::project::projects();
+        let projects = super::project_folders::rules();
         let mut context = c.clone();
         // A root inside build output or installed packages is not searched at all.
         context.roots.retain(|r| {
