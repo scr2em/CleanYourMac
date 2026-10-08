@@ -110,6 +110,32 @@ impl XcodeModule {
             .unwrap_or(&developer)
             .to_owned()
     }
+    /// The Xcode that always stays: the one xcode-select selects or, when it selects the
+    /// Command Line Tools or something else, the newest installed version.
+    fn kept(&self, installs: &[(Entry, String)]) -> Option<(String, &'static str)> {
+        let selected = policy::canonical(&self.selected());
+        if installs
+            .iter()
+            .any(|(e, _)| policy::canonical(e.path()) == selected)
+        {
+            return Some((selected, "This is the Xcode that xcode-select selects."));
+        }
+        let number =
+            |v: &str| -> Vec<u64> { v.split('.').map(|p| p.parse().unwrap_or(0)).collect() };
+        installs
+            .iter()
+            .max_by(|(a, x), (b, y)| {
+                number(x)
+                    .cmp(&number(y))
+                    .then_with(|| b.path().cmp(a.path()))
+            })
+            .map(|(e, _)| {
+                (
+                    policy::canonical(e.path()),
+                    "xcode-select does not select an installed Xcode, so the newest one stays.",
+                )
+            })
+    }
     /// Installed Xcode apps, by bundle identifier, with their versions.
     fn installs(&self, s: &Services) -> Vec<(Entry, String)> {
         let home = self.home();
@@ -268,11 +294,15 @@ impl ScanModule for XcodeModule {
         let installs = self.installs(s);
         if installs.len() > 1 {
             let selected = policy::canonical(&self.selected());
+            let kept = self.kept(&installs);
             for (e, version) in installs {
                 if !c.allows(e.path()) {
                     continue;
                 }
-                let current = policy::canonical(e.path()) == selected;
+                let current = kept
+                    .as_ref()
+                    .filter(|(path, _)| *path == policy::canonical(e.path()))
+                    .map(|(_, reason)| *reason);
                 let modified = e.modified();
                 let candidate = Candidate::new(
                     e,
@@ -283,11 +313,7 @@ impl ScanModule for XcodeModule {
                 .title(format!("Xcode {version}"))
                 .details(vec![detail("Kind", "Xcode installation"), detail("Version", version.clone())])
                 .last_used(LastUsed::At(modified));
-                candidates.push(if current {
-                    candidate.blocked(Some("This is the Xcode that xcode-select selects."))
-                } else {
-                    candidate
-                });
+                candidates.push(candidate.blocked(current));
             }
         }
         flush(sink, &mut warnings);
@@ -379,8 +405,16 @@ impl ScanModule for XcodeModule {
             if id != XCODE {
                 return Err("Only Xcode installations are removed here.".into());
             }
-            if policy::canonical(path) == policy::canonical(&self.selected()) {
-                return Err("This is the Xcode that xcode-select selects.".into());
+            let installs = self.installs(s);
+            match self.kept(&installs) {
+                Some((kept, reason)) if kept == policy::canonical(path) => {
+                    return Err(reason.into())
+                }
+                None => return Err("No Xcode installation could be read.".into()),
+                _ if installs.len() < 2 => {
+                    return Err("This is the only Xcode installation.".into())
+                }
+                _ => {}
             }
         }
         Ok(())

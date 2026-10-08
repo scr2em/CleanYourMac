@@ -216,18 +216,36 @@ impl MacJunk {
         home: &str,
         covered: &[String],
     ) -> Result<Vec<Candidate>> {
-        let overlaps = |path: &str| {
-            covered
-                .iter()
-                .any(|c| policy::contains(path, c) || policy::contains(c, path))
-        };
+        let inside = |path: &str| covered.iter().any(|c| policy::contains(path, c));
+        let holds = |path: &str| covered.iter().any(|c| policy::contains(c, path));
         let mut candidates = vec![];
         for location in &self.locations {
             k.check()?;
+            let mut found = vec![];
             for (e, capture) in self.expand(s, home, location) {
-                if !c.allows(e.path()) || overlaps(e.path()) {
+                if !c.allows(e.path()) || inside(e.path()) {
                     continue;
                 }
+                if !holds(e.path()) {
+                    found.push((e, capture));
+                } else if location.per_app && !location.app_folder {
+                    // A vendor folder that also holds a covered cache, such as
+                    // `Caches/Google` with Android Studio's: its other folders (Chrome)
+                    // are listed one by one.
+                    let vendor = e.name().to_owned();
+                    for child in s.children(e.path(), &mut vec![]) {
+                        if child.directory
+                            && c.allows(child.path())
+                            && !inside(child.path())
+                            && !holds(child.path())
+                        {
+                            let name = format!("{vendor}/{}", child.name());
+                            found.push((child, Some(name)));
+                        }
+                    }
+                }
+            }
+            for (e, capture) in found {
                 if location.app_folder {
                     let app = capture.as_deref().unwrap_or_default();
                     let folder = format!("{home}/Library/Application Support/{app}");

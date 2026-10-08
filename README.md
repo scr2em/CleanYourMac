@@ -139,7 +139,7 @@ When you move an item to the Trash, you can restore it. The disk space becomes f
 <details>
 <summary><strong>Storage Explorer</strong>: what uses space in a folder</summary>
 
-Storage Explorer shows each item directly in the folders that you select. For each item, it shows the size on disk and the date of last use. You can move an item that is not protected to the Trash. Storage Explorer shows where space goes. It does not recommend items.
+Storage Explorer shows each item directly in the folders that you select. For each item, it shows the size on disk and the date of last use. You can move an item that is not protected to the Trash. The folders directly in your Library folder (Application Support, Containers, Mail and others) hold macOS and app data as a whole, so you can open them but not remove them. Storage Explorer shows where space goes. It does not recommend items.
 </details>
 
 <details>
@@ -147,7 +147,7 @@ Storage Explorer shows each item directly in the folders that you select. For ea
 
 Large Files finds files of 100 MB or more in the folders that you select. Filter by size, age and last use. Then move the files that you do not need to the Trash.
 
-Files in your Library folder and in hidden folders of your home folder belong to an app or a tool, for example a virtual machine disk, a model, a device backup or a database. Large Files shows them, but you cannot select them. Remove them with their app or tool. Version-control data (`.git`, `.hg`, `.svn`, `.jj` and the other systems above) is never searched, on any drive: its files belong to the repository.
+Files in your Library folder and in hidden folders of your home folder belong to an app or a tool, for example a virtual machine disk, a model, a device backup or a database. Large Files shows them, but you cannot select them. Remove them with their app or tool. Version-control data (`.git`, `.hg`, `.svn`, `.jj` and the other systems above) is never searched, on any drive: its files belong to the repository. A large file that Git tracks, for example a model or a test asset, stays.
 </details>
 
 <details>
@@ -166,7 +166,7 @@ Exact Duplicates does not search version control, build output, dependency or pa
 <details>
 <summary><strong>Dependencies</strong>: installed packages, by project</summary>
 
-Dependencies finds the installed packages of each project. The search stops at each dependency folder and does not search in it. The name of a folder is not sufficient. The project files that install the folder must also be present. Each item shows its project, the files that identify it and, if available, the official command of the tool. When a tool of the project runs (for example, a development server or a build), the app shows the item as in use.
+Dependencies finds the installed packages of each project. The search stops at each dependency folder and does not search in it. The name of a folder is not sufficient. The project files that install the folder must also be present. Each item shows its project, the files that identify it and, if available, the official command of the tool. When a tool of the project runs (for example, a development server or a build), the app shows the item as in use. Dependencies does not search your Library folder or the hidden folders in your home folder, where apps and editors keep their own packages: the extensions of VS Code, Cursor, Windsurf and other VS Code editors are never offered for removal.
 
 Many ecosystems keep downloaded packages in one shared store that all projects use. Dependencies also shows these stores, with the label *Shared by all projects*. Caches & Logs shows the same stores. The totals count each store one time only.
 
@@ -238,7 +238,7 @@ Xcode Data shows:
 - device logs, with the *Review* badge;
 - the data of apps removed from a simulator that the simulator did not clean up (`Dead` folders), with the *Review* badge;
 - SwiftUI preview simulators. The app removes them with `xcrun simctl --set previews delete all`;
-- Xcode installations other than the one that `xcode-select` selects. The selected Xcode stays.
+- Xcode installations other than the one that `xcode-select` selects. The selected Xcode stays. When `xcode-select` selects the Command Line Tools, the newest Xcode stays.
 
 Xcode makes all of these again when necessary, except device logs and other Xcode versions.
 
@@ -339,7 +339,7 @@ The app never shows settings, credentials, instructions (`CLAUDE.md`, `AGENTS.md
 <details>
 <summary><strong>Downloads</strong> and <strong>Trash</strong></summary>
 
-**Downloads** shows each item in your Downloads folder, with the date that you last opened it. **Trash** shows the items in your Trash. When you empty the Trash, the removal is permanent.
+**Downloads** shows each item in your Downloads folder, with the date that you last opened it. **Trash** shows the items in your Trash. When you empty the Trash, the removal is permanent. Neither shows Finder's own `.DS_Store` and `.localized` files.
 </details>
 
 <details>

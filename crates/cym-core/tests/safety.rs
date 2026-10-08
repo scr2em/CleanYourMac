@@ -227,6 +227,221 @@ fn an_ai_worktree_of_another_system_stays() {
 }
 
 #[test]
+fn editor_extensions_are_never_project_dependencies() {
+    let f = Fixture::new();
+    // VS Code and its forks keep each extension with its own package.json and node_modules.
+    let editors = [
+        ".vscode",
+        ".vscode-insiders",
+        ".vscode-oss",
+        ".cursor",
+        ".windsurf",
+        ".trae",
+        ".kiro",
+        ".positron",
+        ".void",
+    ];
+    for editor in editors {
+        let ext = format!("home/{editor}/extensions/publisher.extension-1.0.0");
+        f.write(&format!("{ext}/package.json"), "{}");
+        f.write(&format!("{ext}/node_modules/dep/index.js"), "x");
+        f.write(&format!("{ext}/coverage/lcov.info"), "x");
+    }
+    // Apps keep plugins in the Library folder too.
+    let plugin = "home/Library/Application Support/Code/User/globalStorage/publisher.ext";
+    f.write(&format!("{plugin}/package.json"), "{}");
+    f.write(&format!("{plugin}/node_modules/dep/index.js"), "x");
+    // A real project beside them is still found.
+    f.write("home/Projects/app/package.json", "{}");
+    f.write("home/Projects/app/node_modules/dep/index.js", "x");
+    f.write("home/Projects/app/coverage/lcov.info", "x");
+    let engine = Engine::new(services(&f), builtin(&f));
+    let paths = |module: &str, root: String| -> Vec<Finding> {
+        scan(&engine, &f, module, vec![root])
+            .into_iter()
+            .filter(|r| r.resource.path().is_some_and(|p| !p.contains("/home/.npm")))
+            .collect()
+    };
+    for module in ["node", "artifacts"] {
+        let found = paths(module, f.at("home"));
+        assert_eq!(
+            found.len(),
+            1,
+            "{module}: {:?}",
+            found.iter().map(|r| r.resource.path()).collect::<Vec<_>>()
+        );
+        assert!(found[0]
+            .resource
+            .path()
+            .unwrap()
+            .contains("/home/Projects/app/"));
+    }
+    // Chosen explicitly, an extension's dependencies are shown but can never be removed.
+    let chosen = paths("node", f.at("home/.cursor/extensions"));
+    assert_eq!(chosen.len(), 1);
+    assert!(chosen[0].actions.is_empty());
+    assert!(chosen[0]
+        .blocked_reason
+        .as_deref()
+        .unwrap()
+        .contains("editor extension"));
+    let mut forced = chosen[0].clone();
+    forced.actions = vec![ActionKind::Trash];
+    forced.blocked_reason = None;
+    let result = engine
+        .execute(
+            &ActionRequest {
+                findings: vec![forced],
+                kind: ActionKind::Trash,
+                context: ScanContext {
+                    roots: vec![f.at("home/.cursor/extensions")],
+                    ..Default::default()
+                },
+                acknowledged: vec![],
+                force: true,
+            },
+            &ScanControl::default(),
+        )
+        .remove(0);
+    assert_eq!(result.outcome, Outcome::Failed, "{}", result.message);
+    assert!(std::fs::metadata(
+        f.at("home/.cursor/extensions/publisher.extension-1.0.0/node_modules")
+    )
+    .is_ok());
+}
+
+#[test]
+fn a_large_file_that_git_tracks_stays() {
+    if std::fs::metadata("/usr/bin/git").is_err() {
+        return;
+    }
+    let f = Fixture::new();
+    let repo = f.dir("repo");
+    let big = f.write("repo/assets/model.bin", "");
+    std::fs::File::options()
+        .write(true)
+        .open(&big)
+        .unwrap()
+        .set_len(150_000_000)
+        .unwrap();
+    let s = services(&f);
+    let k = ScanControl::default();
+    let git = Git(s.commands.as_ref());
+    assert_eq!(
+        git.run(&repo, &["init", "-q", "-b", "main"], &k)
+            .unwrap()
+            .status,
+        0
+    );
+    // Tracked without hashing 150 MB: any blob ID marks the path as tracked.
+    let blob = "100644,e69de29bb2d1d6434b8b29ae775ad8c2e48c5391,assets/model.bin";
+    assert_eq!(
+        git.run(&repo, &["update-index", "--add", "--cacheinfo", blob], &k)
+            .unwrap()
+            .status,
+        0
+    );
+    let engine = Engine::new(services(&f), builtin(&f));
+    let large = scan(&engine, &f, "large", vec![f.path()]);
+    assert_eq!(large.len(), 1);
+    let result = engine
+        .execute(
+            &ActionRequest {
+                findings: vec![large[0].clone()],
+                kind: ActionKind::Trash,
+                context: f.context(),
+                acknowledged: vec![],
+                force: true,
+            },
+            &k,
+        )
+        .remove(0);
+    assert_eq!(result.outcome, Outcome::Failed, "{}", result.message);
+    assert!(result.message.contains("Git tracks"), "{}", result.message);
+    assert!(std::fs::metadata(&big).is_ok());
+}
+
+#[test]
+fn chrome_caches_are_listed_beside_android_studio_caches() {
+    let f = Fixture::new();
+    f.write(
+        "home/Library/Caches/Google/AndroidStudio2024.1/index/data",
+        "x",
+    );
+    f.write("home/Library/Caches/Google/Chrome/Default/Cache/data", "x");
+    let engine = Engine::new(services(&f), builtin(&f));
+    let found = scan(&engine, &f, "caches", vec![f.at("home")]);
+    let path = |end: &str| {
+        found
+            .iter()
+            .find(|r| r.resource.path().is_some_and(|p| p.ends_with(end)))
+    };
+    assert!(
+        path("Caches/Google/AndroidStudio2024.1").is_some(),
+        "Android Studio cache"
+    );
+    let chrome = path("Caches/Google/Chrome").expect("Chrome cache");
+    assert_eq!(chrome.actions, vec![ActionKind::Trash]);
+    // The vendor folder is never listed whole, which would count Android Studio twice.
+    assert!(path("Library/Caches/Google").is_none());
+}
+
+#[test]
+fn the_newest_xcode_stays_when_xcode_select_picks_the_command_line_tools() {
+    let f = Fixture::new();
+    // The fixture's xcode-select points at home/Applications/Xcode.app, which is absent,
+    // as when the Command Line Tools are selected.
+    for (app, version) in [
+        ("Xcode-15.app", "15.4"),
+        ("Xcode-16.app", "16.2"),
+        ("Xcode-9.app", "9.0"),
+    ] {
+        f.write(
+            &format!("home/Applications/{app}/Contents/Info.plist"),
+            &format!(r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.apple.dt.Xcode</string><key>CFBundleShortVersionString</key><string>{version}</string></dict></plist>"#),
+        );
+    }
+    let engine = Engine::new(services(&f), builtin(&f));
+    let found = scan(&engine, &f, "xcode", vec![f.at("home")]);
+    let install = |name: &str| {
+        found
+            .iter()
+            .find(|r| r.resource.path().is_some_and(|p| p.ends_with(name)))
+            .unwrap_or_else(|| panic!("{name} listed"))
+    };
+    let newest = install("Xcode-16.app");
+    assert!(newest.actions.is_empty());
+    assert!(newest
+        .blocked_reason
+        .as_deref()
+        .unwrap()
+        .contains("newest one stays"));
+    // Version order is numeric: 15.4 is older than 16.2 and newer than 9.0.
+    assert_eq!(install("Xcode-15.app").actions, vec![ActionKind::Trash]);
+    assert_eq!(install("Xcode-9.app").actions, vec![ActionKind::Trash]);
+    let mut forced = newest.clone();
+    forced.actions = vec![ActionKind::Trash];
+    forced.blocked_reason = None;
+    let result = engine
+        .execute(
+            &ActionRequest {
+                findings: vec![forced],
+                kind: ActionKind::Trash,
+                context: ScanContext {
+                    roots: vec![f.at("home")],
+                    ..Default::default()
+                },
+                acknowledged: vec![],
+                force: true,
+            },
+            &ScanControl::default(),
+        )
+        .remove(0);
+    assert_eq!(result.outcome, Outcome::Failed, "{}", result.message);
+    assert!(std::fs::metadata(f.at("home/Applications/Xcode-16.app")).is_ok());
+}
+
+#[test]
 fn build_output_with_a_shipped_archive_needs_confirmation() {
     let f = Fixture::new();
     f.write("app/pubspec.yaml", "name: app");

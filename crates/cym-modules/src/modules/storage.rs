@@ -1,7 +1,10 @@
 use super::{add_files, descriptor, flush, Candidate, LastUsed, ScanModule};
 use crate::{model::*, policy, ports::*, services::Services};
 use rayon::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 pub struct StorageModule;
 impl ScanModule for StorageModule {
@@ -24,6 +27,7 @@ impl ScanModule for StorageModule {
     ) -> Result<()> {
         let mut warnings = vec![];
         let mut candidates = vec![];
+        let library = format!("{}/Library", policy::home());
         for root in s.roots(&c.roots) {
             if c.excludes(&root) || policy::system_excluded(&root) {
                 continue;
@@ -31,19 +35,34 @@ impl ScanModule for StorageModule {
             candidates.extend(
                 s.children(&root, &mut warnings)
                     .into_iter()
-                    .filter(|e| c.allows(e.path()) && !policy::system_excluded(e.path()))
+                    .filter(|e| {
+                        c.allows(e.path())
+                            && !policy::system_excluded(e.path())
+                            && !finder_file(e.name())
+                    })
                     .map(|e| {
                         // Anything outside the protected locations can be moved to Trash
-                        // after review; nothing here is a cleanup recommendation.
-                        let protected = policy::protected(e.path());
+                        // after review; nothing here is a cleanup recommendation. The
+                        // Library's own folders (Application Support, Containers, Mail, …)
+                        // hold macOS and app data as a whole, so only their contents are.
+                        let blocked = if policy::protected(e.path()) {
+                            Some("Protected location; open it to inspect what is inside.")
+                        } else if Path::new(e.path())
+                            .parent()
+                            .is_some_and(|p| p.to_string_lossy().eq_ignore_ascii_case(&library))
+                        {
+                            Some("Holds macOS and app data as a whole; open it to inspect what is inside.")
+                        } else {
+                            None
+                        };
                         Candidate::new(
                             e,
                             "Part of your storage, not a cleanup recommendation. Inspect it before moving it to Trash.",
-                            if protected { vec![] } else { vec![ActionKind::Trash] },
+                            if blocked.is_some() { vec![] } else { vec![ActionKind::Trash] },
                             Risk::Review,
                         )
                         .last_used(LastUsed::Spotlight)
-                        .blocked(protected.then_some("Protected location; open it to inspect what is inside."))
+                        .blocked(blocked)
                     }),
             );
         }
@@ -107,6 +126,12 @@ impl ScanModule for LargeFilesModule {
         });
         flush(sink, &mut warnings);
         result
+    }
+    /// A file a repository tracks is part of a project, however large; refused as for
+    /// duplicates.
+    fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, k: &ScanControl) -> Result<()> {
+        let path = f.resource.path().ok_or("This item has no file path.")?;
+        super::developer::untracked(s, path, k)
     }
 }
 
@@ -311,6 +336,12 @@ impl ScanModule for DuplicatesModule {
     }
 }
 
+/// Files Finder keeps for itself: folder view settings and a folder's localized name, which
+/// removal would change. Never listed.
+fn finder_file(name: &str) -> bool {
+    name == ".DS_Store" || name == ".localized"
+}
+
 /// Whether a file belongs to an app or tool: anything in the Library folder or in a hidden
 /// folder of the home folder (`~/.ollama`, `~/.colima`, `~/.android`, …).
 pub fn app_data(path: &str, home: &str) -> bool {
@@ -419,7 +450,7 @@ impl ScanModule for FolderModule {
         let candidates = s
             .children(&folder, &mut warnings)
             .into_iter()
-            .filter(|e| c.allows(e.path()))
+            .filter(|e| c.allows(e.path()) && !finder_file(e.name()))
             .map(|e| {
                 Candidate::new(e, self.reason, vec![self.action], self.risk)
                     .last_used(LastUsed::Spotlight)

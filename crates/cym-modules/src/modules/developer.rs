@@ -53,6 +53,24 @@ pub(crate) fn shipped_outputs(s: &Services, folder: &str) -> Option<String> {
     None
 }
 
+/// The home folder's app and tool folders: `~/Library` and hidden folders such as
+/// `~/.vscode` or `~/.cursor`. What they hold (editor extensions, app plugins, tool data)
+/// belongs to that app or tool, never to a project, so project scans do not enter them.
+pub(crate) fn app_home_folder(path: &str, home: &str) -> bool {
+    let name = name(path);
+    Path::new(path).parent() == Some(Path::new(home))
+        && (name.starts_with('.') || name.eq_ignore_ascii_case("Library"))
+}
+/// Whether `path` is inside one of the home folder's app and tool folders, such as an editor
+/// extension (`~/.vscode/extensions/…`, `~/.cursor/extensions/…`).
+pub(crate) fn in_app_home_folder(path: &str, home: &str) -> bool {
+    Path::new(path)
+        .ancestors()
+        .skip(1)
+        .any(|folder| app_home_folder(&folder.to_string_lossy(), home))
+}
+const APP_DATA: &str = "Inside an app's or tool's own folder, such as an editor extension; removing it would break that app or extension.";
+
 /// Refuses to move an item that Git tracks inside its repository. Inside a checkout of any
 /// other version-control system it refuses too: only Git is asked, because another tool
 /// could run commands the repository configures, so whether it tracks the item is unknown.
@@ -247,6 +265,14 @@ pub struct ArtifactsModule {
     pub prune: Vec<&'static str>,
     /// Installed dependencies, which are neither listed nor searched here.
     pub dependencies: Vec<ArtifactRule>,
+    /// The home folder whose app and tool folders are never searched; `None` uses the
+    /// current user's.
+    pub home: Option<String>,
+}
+impl ArtifactsModule {
+    fn home(&self) -> String {
+        self.home.clone().unwrap_or_else(policy::home)
+    }
 }
 impl Default for ArtifactsModule {
     fn default() -> Self {
@@ -547,6 +573,7 @@ impl Default for ArtifactsModule {
             ],
             prune: vec!["node_modules", "site-packages"],
             dependencies: dependency_rules(),
+            home: None,
         }
     }
 }
@@ -622,8 +649,9 @@ impl ScanModule for ArtifactsModule {
     ) -> Result<()> {
         let mut candidates = vec![];
         let mut warnings = vec![];
+        let home = self.home();
         let walked = s.walk(c, k, &mut warnings, &mut |e| {
-            if self.prune.contains(&e.name()) {
+            if self.prune.contains(&e.name()) || (e.directory && app_home_folder(e.path(), &home)) {
                 return Ok(false);
             }
             if e.directory {
@@ -662,7 +690,8 @@ impl ScanModule for ArtifactsModule {
                         candidate
                             .title(m.relative)
                             .details(details)
-                            .last_used(LastUsed::Project { folder: project }),
+                            .last_used(LastUsed::Project { folder: project })
+                            .blocked(in_app_home_folder(e.path(), &home).then_some(APP_DATA)),
                     );
                     return Ok(false);
                 }
@@ -681,6 +710,9 @@ impl ScanModule for ArtifactsModule {
     }
     fn preflight(&self, s: &Services, f: &Finding, _: ActionKind, k: &ScanControl) -> Result<()> {
         let path = f.resource.path().ok_or("Missing path")?;
+        if in_app_home_folder(path, &self.home()) {
+            return Err(APP_DATA.into());
+        }
         self.matches(s, path)
             .ok_or("The owning project's evidence is no longer available.")?;
         untracked(s, path, k)
@@ -1062,8 +1094,11 @@ impl ScanModule for DependenciesModule {
                 return Ok(false);
             }
             // pnpm's virtual store, npm's cache and npx folders hold node_modules that no
-            // project owns.
-            if self.tool_folder_names.contains(&e.name()) || skipped.iter().any(|f| f == e.path()) {
+            // project owns, and neither do apps' and tools' own folders.
+            if self.tool_folder_names.contains(&e.name())
+                || skipped.iter().any(|f| f == e.path())
+                || app_home_folder(e.path(), &home)
+            {
                 return Ok(false);
             }
             if let Some(m) = self.matches(s, e.path()) {
@@ -1092,7 +1127,14 @@ impl ScanModule for DependenciesModule {
                 found.push(Self::matched(e, m));
             }
         }
-        found.extend(self.stores(s, c));
+        let found: Vec<Candidate> = found
+            .into_iter()
+            .map(|candidate| {
+                let blocked = in_app_home_folder(candidate.entry.path(), &home);
+                candidate.blocked(blocked.then_some(APP_DATA))
+            })
+            .chain(self.stores(s, c))
+            .collect();
         add_files(s, sink, "node", found, k)
     }
     fn in_use(&self, s: &Services, f: &Finding, _: ActionKind) -> Option<String> {
@@ -1122,6 +1164,9 @@ impl ScanModule for DependenciesModule {
                 Some(reason) => Err(reason.into()),
                 None => Ok(()),
             };
+        }
+        if in_app_home_folder(path, &self.home()) {
+            return Err(APP_DATA.into());
         }
         if name(path) == "node_modules" {
             if self.manifest(s, &parent(path)).is_none() {
@@ -1413,12 +1458,23 @@ impl CachesModule {
     fn logs(&self) -> String {
         self.home() + "/Library/Logs"
     }
-    /// Every folder this module reports on, so other modules can leave them to it.
-    pub fn covered(&self) -> Vec<String> {
+    /// Every folder this module reports on, so other modules can leave them to it. A
+    /// pattern covers only the folders it matches: `Library/Caches/Google/AndroidStudio*`
+    /// leaves Chrome's `Library/Caches/Google/Chrome` to the macOS leftovers.
+    pub fn covered(&self, s: &Services) -> Vec<String> {
         let home = self.home();
         self.locations
             .iter()
-            .map(|l| format!("{home}/{}", l.root()))
+            .flat_map(|l| {
+                if l.path.contains('*') {
+                    expand(s, &home, l)
+                        .into_iter()
+                        .map(|(e, _)| e.identity.path)
+                        .collect()
+                } else {
+                    vec![format!("{home}/{}", l.path)]
+                }
+            })
             .chain([self.logs()])
             .chain(self.tool_cache.map(|c| format!("{home}/{c}")))
             .collect()
@@ -1527,7 +1583,7 @@ impl ScanModule for CachesModule {
         // macOS leftovers, except folders the tool caches above already cover.
         candidates.extend(
             self.mac
-                .candidates(s, c, k, &self.home(), &self.covered())?,
+                .candidates(s, c, k, &self.home(), &self.covered(s))?,
         );
         let logs = self.logs();
         if s.is_dir(&logs) && !c.excludes(&logs) {
