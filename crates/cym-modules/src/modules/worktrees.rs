@@ -205,7 +205,11 @@ impl ScanModule for WorktreeModule {
         }
         let mut warnings = vec![];
         let walked = s.walk(c, k, &mut warnings, &mut |e| {
-            if !e.directory || ["node_modules", ".build", "target"].contains(&e.name()) {
+            // Build output and installed packages hold no worktrees of the user's.
+            if !e.directory
+                || super::project::package_tree(e.name())
+                || super::project::projects().rebuildable(s, e.path())
+            {
                 return Ok(false);
             }
             if is_repository(s, e.path()) {

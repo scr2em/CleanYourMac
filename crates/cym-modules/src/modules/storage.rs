@@ -100,12 +100,12 @@ impl ScanModule for LargeFilesModule {
         sink: &mut dyn Sink,
     ) -> Result<()> {
         let mut warnings = vec![];
-        let project_folders = super::developer::ProjectFolders::default();
+        let projects = super::project::projects();
         let result = s.walk(c, k, &mut warnings, &mut |e| {
             // A file inside build output or installed packages is part of that build; Build
             // Artifacts and Dependencies offer the whole folder instead.
             if e.directory {
-                return Ok(!project_folders.contains(s, e.path()));
+                return Ok(!projects.rebuildable(s, e.path()));
             }
             if e.regular && e.bytes >= self.minimum_bytes {
                 let mut f = Finding::new(
@@ -221,18 +221,26 @@ impl ScanModule for DuplicatesModule {
     ) -> Result<()> {
         let mut warnings = vec![];
         let mut sizes = vec![];
+        let projects = super::project::projects();
         let mut context = c.clone();
-        context.roots.retain(|r| !policy::duplicate_excluded(r));
+        // A root inside build output or installed packages is not searched at all.
+        context.roots.retain(|r| {
+            !policy::system_excluded(r)
+                && !std::path::Path::new(r)
+                    .ancestors()
+                    .filter_map(|a| a.to_str())
+                    .any(|a| projects.generated(s, a))
+        });
         let walked = s.walk(&context, k, &mut warnings, &mut |e| {
             if e.directory {
-                // Roots were checked in full above, and an ignored folder is never entered,
-                // so only the new folder's own name needs checking.
+                // Roots were checked in full above, and a skipped folder is never entered,
+                // so only the new folder itself needs checking.
                 // Hidden folders (the Trash, tool data, settings) and Library folders hold
                 // app and system data, not documents the user manages.
                 let name = e.name();
-                return Ok(!(policy::duplicate_ignored_name(name)
-                    || name.starts_with('.')
-                    || name.eq_ignore_ascii_case("Library")));
+                return Ok(!(name.starts_with('.')
+                    || name.eq_ignore_ascii_case("Library")
+                    || projects.generated(s, e.path())));
             }
             if e.regular && e.bytes >= self.minimum_bytes {
                 sizes.push((e.bytes, e.clone()));

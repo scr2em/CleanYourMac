@@ -242,14 +242,10 @@ pub fn protected(path: &str) -> bool {
     .any(|q| q.eq_ignore_ascii_case(&p) || (!q.is_empty() && contains_folded(q, &p)))
         || system_excluded(&p)
 }
-/// Generated output, dependency stores and tool caches across ecosystems. Duplicate
-/// detection never descends into these (matched case-insensitively, at any depth).
-pub const DUPLICATE_IGNORES: &[&str] = &[
-    // Version control
-    ".git",
-    ".hg",
-    ".svn",
-    ".jj",
+/// The usual names of generated output, dependency stores and tool caches across
+/// ecosystems, matched in any case. A name is evidence only inside a project: a project's
+/// "last used" date leaves these out, and Exact Duplicates skips them next to a project file.
+pub const GENERATED_NAMES: &[&str] = &[
     // JavaScript and TypeScript
     "node_modules",
     "bower_components",
@@ -351,11 +347,8 @@ pub const DUPLICATE_IGNORES: &[&str] = &[
     ".cache",
     ".tmp",
 ];
-/// Name suffixes treated like `DUPLICATE_IGNORES` entries.
-pub const DUPLICATE_IGNORE_SUFFIXES: &[&str] = &[".egg-info", ".xcarchive", ".dSYM"];
-pub fn duplicate_excluded(path: &str) -> bool {
-    system_excluded(path) || path.split('/').any(duplicate_ignored_name)
-}
+/// Name suffixes only generated output carries, wherever it is.
+pub const GENERATED_SUFFIXES: &[&str] = &[".egg-info", ".xcarchive", ".dSYM"];
 /// Version-control systems and the entries that mark a checkout: metadata folders, or files
 /// for Fossil. Their contents belong to the repository, never to the user directly.
 pub const VERSION_CONTROL: &[(&str, &[&str])] = &[
@@ -413,18 +406,18 @@ pub fn checkout_marker(name: &str) -> Option<&'static str> {
         .map(|(system, _)| *system)
 }
 
-/// Whether one path component names a folder duplicate detection skips; compared without
+/// Whether one path component has a generated folder's usual name; compared without
 /// allocating, ignoring ASCII case.
-pub fn duplicate_ignored_name(name: &str) -> bool {
-    !name.is_empty()
-        && (DUPLICATE_IGNORES
-            .iter()
-            .any(|ignored| ignored.eq_ignore_ascii_case(name))
-            || DUPLICATE_IGNORE_SUFFIXES.iter().any(|suffix| {
-                name.len() >= suffix.len()
-                    && name.is_char_boundary(name.len() - suffix.len())
-                    && name[name.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
-            }))
+pub fn generated_name(name: &str) -> bool {
+    GENERATED_NAMES.iter().any(|g| g.eq_ignore_ascii_case(name))
+}
+/// Whether one path component ends like generated output, such as `lib.egg-info`.
+pub fn generated_suffix(name: &str) -> bool {
+    GENERATED_SUFFIXES.iter().any(|suffix| {
+        name.len() > suffix.len()
+            && name.is_char_boundary(name.len() - suffix.len())
+            && name[name.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
+    })
 }
 /// Drops repeated IDs and files inside another selected file or folder, keeping order.
 pub fn normalized_selection(rows: &[Finding]) -> Vec<Finding> {

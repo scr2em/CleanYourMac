@@ -25,10 +25,7 @@ fn path_boundaries_and_sensitive_items() {
         &(policy::home() + "/Library/CloudStorage/provider/file")
     ));
     assert!(policy::protected(&policy::home()));
-    assert!(policy::duplicate_excluded("/Projects/app/node_modules/x"));
-    assert!(policy::duplicate_excluded("/Projects/app/Pods/x"));
-    assert!(!policy::duplicate_excluded("/Projects/app/src/x"));
-    for ignored in [
+    for generated in [
         ".angular",
         "node_modules",
         ".svelte-kit",
@@ -37,13 +34,15 @@ fn path_boundaries_and_sensitive_items() {
         "__pycache__",
         "dist-newstyle",
         "DerivedData",
-        "lib.egg-info",
+        "Pods",
     ] {
-        assert!(
-            policy::duplicate_excluded(&format!("/Projects/app/{ignored}/cache/file")),
-            "{ignored}"
-        );
+        assert!(policy::generated_name(generated), "{generated}");
     }
+    assert!(policy::generated_suffix("lib.egg-info"));
+    assert!(!policy::generated_suffix(".egg-info"));
+    assert!(!policy::generated_name("src"));
+    // Version-control metadata is the project's history, not generated output.
+    assert!(!policy::generated_name(".git"));
     assert!(policy::package("/Applications/Editor.app"));
 }
 
@@ -314,7 +313,7 @@ fn bulk_listing_matches_lstat_for_every_kind_of_entry() {
 
 /// The path rules as they were before the allocation-free rewrite, kept as the reference.
 mod reference {
-    use cym_core::policy::{canonical, home, DUPLICATE_IGNORES, DUPLICATE_IGNORE_SUFFIXES};
+    use cym_core::policy::{canonical, home};
     use std::path::Path;
     pub fn contains(path: &str, root: &str) -> bool {
         Path::new(&canonical(path)).starts_with(canonical(root))
@@ -355,16 +354,6 @@ mod reference {
             || names.windows(2).any(|w| {
                 w[0] == "library"
                     && ["keychains", "mobile documents", "cloudstorage"].contains(&w[1].as_str())
-            })
-    }
-    pub fn duplicate_excluded(path: &str) -> bool {
-        system_excluded(path)
-            || Path::new(path).components().any(|c| {
-                let name = c.as_os_str().to_string_lossy().to_lowercase();
-                DUPLICATE_IGNORES.contains(&name.as_str())
-                    || DUPLICATE_IGNORE_SUFFIXES
-                        .iter()
-                        .any(|suffix| name.ends_with(&suffix.to_lowercase()))
             })
     }
 }
@@ -458,7 +447,7 @@ fn fast_path_rules_match_the_reference_rules() {
     }
     let scope = policy::Scope::new(&context);
     // Every rule must give both answers somewhere, or the comparison proves nothing.
-    let mut outcomes = [[0usize; 2]; 4];
+    let mut outcomes = [[0usize; 2]; 3];
     for path in &paths {
         outcomes[0][usize::from(
             roots[1..]
@@ -468,7 +457,6 @@ fn fast_path_rules_match_the_reference_rules() {
         )] += 1;
         outcomes[1][usize::from(policy::system_excluded(path))] += 1;
         outcomes[2][usize::from(scope.excludes(path))] += 1;
-        outcomes[3][usize::from(policy::duplicate_excluded(path))] += 1;
         for root in &roots {
             assert_eq!(
                 policy::contains(path, root),
@@ -485,11 +473,6 @@ fn fast_path_rules_match_the_reference_rules() {
             .any(|r| reference::contains_folded(path, r));
         assert_eq!(context.excludes(path), excluded, "excludes {path:?}");
         assert_eq!(scope.excludes(path), excluded, "scope excludes {path:?}");
-        assert_eq!(
-            policy::duplicate_excluded(path),
-            reference::duplicate_excluded(path),
-            "duplicate {path:?}"
-        );
     }
     assert!(
         outcomes.iter().all(|o| o[0] > 20 && o[1] > 20),

@@ -184,10 +184,7 @@ pub fn builtin(fixture: &Fixture) -> cym_core::modules::Registry {
             home: home.clone(),
             ..Default::default()
         }))
-        .register(Arc::new(developer::ArtifactsModule {
-            home: home.clone(),
-            ..Default::default()
-        }))
+        .register(Arc::new(developer::ArtifactsModule { home: home.clone() }))
         .register(Arc::new(developer::CachesModule {
             home: home.clone(),
             ..Default::default()

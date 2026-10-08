@@ -11,6 +11,7 @@ pub mod developer;
 pub mod installers;
 pub mod junk;
 pub mod processes;
+pub mod project;
 pub mod simulators;
 pub mod storage;
 pub mod toolchains;
@@ -235,12 +236,8 @@ pub(crate) fn project_activity(s: &Services, folder: &str) -> Option<f64> {
         .ok()?
         .into_iter()
         .flatten()
-        .filter(|e| {
-            let name = e.name().to_lowercase();
-            // Version-control metadata changes with every commit, so it counts as activity.
-            !crate::policy::DUPLICATE_IGNORES.contains(&name.as_str())
-                || crate::policy::version_control(e.name()).is_some()
-        })
+        // Version-control metadata changes with every commit, so it counts as activity.
+        .filter(|e| !project::generated_name(e.name()))
         .map(|e| e.modified())
         .reduce(f64::max)
 }

@@ -82,8 +82,11 @@ fn duplicates_preserve_an_original_skip_dependency_stores_and_revalidate() {
     f.write("a.txt", &body);
     f.write("b.txt", &body);
     f.write("different.txt", &"other contents ".repeat(400));
+    // Package trees are skipped anywhere; a generated folder's usual name only in a project.
     f.write("node_modules/c.txt", &body);
-    f.write("build/d.txt", &body);
+    f.write("app/package.json", "{}");
+    f.write("app/build/d.txt", &body);
+    f.write("app/src/.keep", "");
     let report = scan(&f, "duplicates");
     assert_eq!(report.findings.len(), 2, "{:?}", report.findings);
     assert_eq!(
@@ -114,6 +117,31 @@ fn duplicates_preserve_an_original_skip_dependency_stores_and_revalidate() {
     );
     assert_eq!(results[0].outcome, Outcome::Failed);
     assert!(fs::metadata(candidate.resource.path().unwrap()).is_ok());
+}
+
+#[test]
+fn duplicates_compare_user_folders_named_like_build_output() {
+    let f = Fixture::new();
+    let body = "equal contents ".repeat(400);
+    // No project file beside them: these are the user's own folders.
+    f.write("Documents/Build/a.txt", &body);
+    f.write("Music/Packages/b.txt", &body);
+    // Evidence makes `target` Cargo's build output, wherever the walk starts.
+    f.write("crate/Cargo.toml", "[package]");
+    f.write("crate/target/c.txt", &body);
+    let report = scan(&f, "duplicates");
+    let mut paths: Vec<_> = report
+        .findings
+        .iter()
+        .map(|r| r.resource.path().unwrap().strip_prefix(&f.path()).unwrap())
+        .collect();
+    paths.sort();
+    assert_eq!(paths, ["/Documents/Build/a.txt", "/Music/Packages/b.txt"]);
+    let mut inside = f.context();
+    inside.roots = vec![f.at("crate/target")];
+    let engine = Engine::new(services(&f), builtin(&f));
+    let report = engine.scan_report(&["duplicates".into()], &inside, &ScanControl::default());
+    assert!(report.findings.is_empty(), "{:?}", report.findings);
 }
 
 #[test]

@@ -160,7 +160,7 @@ Exact Duplicates compares files of 4 KB or more in three steps:
 
 Hard links to one file count as one file. Each group keeps one original, and you cannot select it. The original is the copy in the most deliberate place: Documents, Desktop, Pictures, Movies or Music first, then other folders, then Downloads. A copy in the Trash, a cache or a hidden folder is never the original. When every copy is in such a place, the app keeps them all. Before the app moves a copy, it reads the copy and the original again. They must still be identical, and Git must not track the copy.
 
-Exact Duplicates does not search version control, build output, dependency or package-cache folders, hidden folders or Library folders. It is not part of the overview scan, and duplicates are never part of the one-click fixes on the overview.
+Exact Duplicates does not search version control, build output, dependency or package-cache folders, hidden folders or Library folders. It recognises build output and dependencies the way Build Artifacts and Dependencies do, from the project's files: a folder named `build` or `dist` is skipped next to a project file, but your own `Documents/Build` folder is compared. It is not part of the overview scan, and duplicates are never part of the one-click fixes on the overview.
 </details>
 
 <details>

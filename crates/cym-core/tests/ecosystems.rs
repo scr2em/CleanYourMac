@@ -1203,3 +1203,73 @@ fn toolchains_list_conda_environments_uv_pythons_and_ide_jdks() {
         report.warnings
     );
 }
+
+/// Every tool asks one classifier what a folder in a project is, so they cannot disagree.
+#[test]
+fn one_classifier_decides_what_a_project_folder_is() {
+    let f = Fixture::new();
+    let s = services(&f);
+    let projects = modules::project::projects();
+    f.write("web/package.json", "{}");
+    f.write("web/node_modules/x/index.js", "");
+    f.write("web/dist/app.js", "");
+    f.write("web/next.config.js", "");
+    f.write("web/.next/BUILD_ID", "");
+    f.write("rs/Cargo.toml", "[package]");
+    f.write("rs/target/debug/app", "");
+    f.write("py/requirements.txt", "");
+    f.write("py/.venv/pyvenv.cfg", "");
+    f.write("net/App.csproj", "");
+    f.write("net/bin/App.dll", "");
+    f.write("repo/.git/HEAD", "ref: refs/heads/main");
+    f.write("repo/out/report.txt", "");
+    f.write("orphan/node_modules/x/index.js", "");
+    f.write("Documents/Build/plan.key", "");
+    f.write("Documents/dist/notes.txt", "");
+
+    // Offered whole by Build Artifacts or Dependencies.
+    for path in ["web/node_modules", "web/.next", "rs/target", "py/.venv"] {
+        assert!(projects.rebuildable(&s, &f.at(path)), "{path}");
+    }
+    // A name alone, or a node_modules nobody owns, is not enough.
+    for path in [
+        "orphan/node_modules",
+        "Documents/Build",
+        "Documents/dist",
+        "web",
+    ] {
+        assert!(!projects.rebuildable(&s, &f.at(path)), "{path}");
+    }
+    // Projects are recognised by any rule's evidence, or by a version-control checkout.
+    for folder in ["web", "rs", "py", "net", "repo"] {
+        assert!(projects.is_project(&s, &f.at(folder)), "{folder}");
+    }
+    assert!(!projects.is_project(&s, &f.at("Documents")));
+    // Searches of the user's files skip generated folders inside projects, and package
+    // trees anywhere, but not the user's own folders that share their names.
+    for path in [
+        "web/dist",
+        "net/bin",
+        "repo/out",
+        "rs/target",
+        "orphan/node_modules",
+    ] {
+        assert!(projects.generated(&s, &f.at(path)), "{path}");
+    }
+    for path in ["Documents/Build", "Documents/dist", "web/src"] {
+        assert!(!projects.generated(&s, &f.at(path)), "{path}");
+    }
+    // A project's "last used" date leaves out generated entries but counts its history.
+    for name in [
+        "node_modules",
+        "dist",
+        "target",
+        "lib.egg-info",
+        ".pnpm-store",
+    ] {
+        assert!(modules::project::generated_name(name), "{name}");
+    }
+    for name in ["src", ".git", "package.json"] {
+        assert!(!modules::project::generated_name(name), "{name}");
+    }
+}
