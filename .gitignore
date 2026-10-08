@@ -6,3 +6,5 @@ coverage/
 .test-fixtures/
 target/
 /.bench-fixture/
+/scripts/npkill-compare/node_modules/
+/scripts/npkill-compare/package*.json

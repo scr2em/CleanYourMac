@@ -94,3 +94,26 @@ What we learned:
 - **The rest of a cold walk is order-bound.** The visitor decides whether to enter each folder, so only folders it already chose can be listed ahead. Listing deeper speculatively would also list folders the scan skips, such as `node_modules`.
 
 Equivalence: `prefetching_walker_visits_in_stack_order_and_honors_skip_and_stop` compares the visit order with `StackWalker` for 0, 1 and 3 listing threads, with stopping early and with a read-ahead limit small enough that the threads pause and resume. The same comparison on the 152,716-entry fixture, with 1 to 15 threads and parallel listing forced on, matched in every run.
+
+## Against npkill
+
+[npkill](https://github.com/zaldih/npkill) 0.12.2 finds `node_modules` folders with Node worker threads, then sizes each one by spawning `du -sk | cut` (two at a time) and reads its parent folder for the newest change. `scripts/npkill-compare/` runs that same pipeline without the terminal UI, and times both tools as whole processes on the same folder:
+
+~~~
+cargo build --release --bin cym
+npm install --prefix scripts/npkill-compare npkill@0.12.2
+sudo python3 scripts/npkill-compare/compare.py ~/some/folder 5   # without sudo: warm only
+~~~
+
+Linux VM, 4 vCPUs. The benchmark fixture copied to a non-hidden path (152,716 entries, 200 `node_modules`), because npkill skips its last-modified step on hidden paths. Medians of five runs; cold runs drop the page cache before every run.
+
+| | CleanYourMac `cym scan node` | npkill | Faster |
+| --- | ---: | ---: | --- |
+| Warm | 352 ms | 3,401 ms | 9.7× |
+| Cold | 1,893 ms | 4,451 ms | 2.4× |
+
+- **Same folders found:** both report the same 200 `node_modules`.
+- **npkill spends most of its time sizing.** Its search finishes in about 1 s; spawning `du` for each folder, two at a time, takes the next 2 to 3 s. CleanYourMac sizes folders in-process and in parallel.
+- **CleanYourMac does more in that time.** The Dependencies scan also reports Python environments and other ecosystems (303 findings in all), with project, package manager and last-used details.
+- **Size totals differ by design.** npkill's `du` also counts the blocks of folders themselves: 4 KB per folder on ext4, 504 KB per `node_modules` here, 100,800 KB in all. CleanYourMac counts the blocks of files, which agree exactly with `du`. On APFS folders take almost no blocks, so on a Mac the totals should nearly match.
+- **This is the Linux harness.** On macOS npkill also uses `du`, and CleanYourMac lists folders with `getattrlistbulk`. Run the script on a Mac to confirm the numbers there.
