@@ -498,14 +498,21 @@ private struct SearchSummary: View {
 
 private struct WarningView: View {
     @Bindable var store: AppStore
+    /// Whether some folders could not be read because the app lacks Full Disk Access.
+    private var needsAccess: Bool {
+        store.warnings.contains { $0.contains("Full Disk Access") || $0.contains("not permitted") || $0.contains("Permission denied") }
+    }
     var body: some View {
         if !store.warnings.isEmpty {
-            Callout("\(store.warnings.count) scan warnings · coverage may be incomplete", symbol: "exclamationmark.triangle.fill", tone: Palette.warning) {
-                VStack(alignment: .leading, spacing: Space.sm) {
+            Callout(
+                store.warnings.count == 1 ? "1 scan warning · coverage may be incomplete" : "\(store.warnings.count) scan warnings · coverage may be incomplete",
+                symbol: "exclamationmark.triangle.fill", tone: Palette.warning,
+                action: needsAccess ? (title: "Grant Full Disk Access", run: {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+                }) : nil
+            ) {
+                LazyVStack(alignment: .leading, spacing: Space.sm) {
                     ForEach(Array(store.warnings.enumerated()), id: \.offset) { _, warning in Text(warning).font(TypeStyle.caption).foregroundStyle(Palette.muted).textSelection(.enabled) }
-                    TextAction("Open Full Disk Access Settings") {
-                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
-                    }
                 }
             }
         }

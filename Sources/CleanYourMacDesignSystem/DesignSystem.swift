@@ -12,7 +12,7 @@ public enum Layout {
     public static let rowRadius: CGFloat = 12, sheetRadius: CGFloat = 22, tileRadius: CGFloat = 10
     public static let iconSmall: CGFloat = 12, iconMedium: CGFloat = 16, iconLarge: CGFloat = 32, rowIcon: CGFloat = 24, rowTile: CGFloat = 34, checkbox: CGFloat = 20
     public static let sidebarRow: CGFloat = 36, sidebarTile: CGFloat = 26, controlHeight: CGFloat = 34
-    public static let chipHeight: CGFloat = 30, toolIcon: CGFloat = 44
+    public static let chipHeight: CGFloat = 30, toolIcon: CGFloat = 44, calloutMaxHeight: CGFloat = 180
     public static let scanOrb: CGFloat = 200, scanOrbCompact: CGFloat = 64, diskBar: CGFloat = 24
 }
 /// Soft Studio type: SF Pro Rounded for titles, labels and figures, which carry the app's

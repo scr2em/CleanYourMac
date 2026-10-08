@@ -312,26 +312,40 @@ public struct TextAction: View {
     }
 }
 
-/// A soft card that expands to show details, used for scan warnings.
+/// A soft card that expands to show details, used for scan warnings. The details scroll
+/// inside a bounded height, so a long list never pushes the page out of reach, and the
+/// optional action stays in the header where it is always visible.
 public struct Callout<Content: View>: View {
     private let title: String, symbol: String, tone: Color
+    private let action: (title: String, run: () -> Void)?
     private let content: Content
     @State private var open = false
-    public init(_ title: String, symbol: String, tone: Color, @ViewBuilder content: () -> Content) {
-        self.title = title; self.symbol = symbol; self.tone = tone; self.content = content()
+    public init(_ title: String, symbol: String, tone: Color, action: (title: String, run: () -> Void)? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title; self.symbol = symbol; self.tone = tone; self.action = action; self.content = content()
     }
     public var body: some View {
         VStack(alignment: .leading, spacing: Space.sm) {
-            Button { open.toggle() } label: {
-                HStack(spacing: Space.sm) {
-                    Image(systemName: symbol).font(TypeStyle.label).foregroundStyle(tone)
-                    Text(title).font(TypeStyle.label).foregroundStyle(Palette.ink)
-                    Spacer()
-                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Palette.muted)
-                        .rotationEffect(.degrees(open ? 180 : 0))
-                }.contentShape(Rectangle())
-            }.buttonStyle(.plain)
-            if open { content.transition(.opacity.combined(with: .move(edge: .top))) }
+            HStack(spacing: Space.sm) {
+                Button { open.toggle() } label: {
+                    HStack(spacing: Space.sm) {
+                        Image(systemName: symbol).font(TypeStyle.label).foregroundStyle(tone)
+                        Text(title).font(TypeStyle.label).foregroundStyle(Palette.ink).lineLimit(2).multilineTextAlignment(.leading)
+                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Palette.muted)
+                            .rotationEffect(.degrees(open ? 180 : 0))
+                        Spacer(minLength: Space.sm)
+                    }.contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(open ? "Hide details: \(title)" : "Show details: \(title)")
+                if let action { TextAction(action.title, action: action.run) }
+            }
+            if open {
+                ScrollView {
+                    content.frame(maxWidth: .infinity, alignment: .leading).padding(.trailing, Space.sm)
+                }
+                .frame(maxHeight: Layout.calloutMaxHeight)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .padding(.horizontal, Space.md).padding(.vertical, Space.sm + Space.xxs)
         .background(tone.opacity(0.08), in: RoundedRectangle(cornerRadius: Layout.controlRadius, style: .continuous))

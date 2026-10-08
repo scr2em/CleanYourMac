@@ -127,6 +127,26 @@ impl Services {
         }
     }
 
+    /// One warning for every folder macOS would not let the scan read, with a few examples.
+    pub fn denied_summary(problems: &[String]) -> String {
+        let examples: Vec<&str> = problems
+            .iter()
+            .take(3)
+            .map(|p| {
+                p.strip_prefix("Cannot read ")
+                    .or_else(|| p.strip_prefix("Cannot inspect "))
+                    .and_then(|p| p.rsplit_once(": ").map(|(path, _)| path))
+                    .unwrap_or(p)
+            })
+            .collect();
+        format!(
+        "{} folder{} need Full Disk Access to be read, for example {}. Grant it in System Settings > Privacy & Security > Full Disk Access, then scan again.",
+        problems.len(),
+        if problems.len() == 1 { "" } else { "s" },
+        examples.join(", ")
+    )
+    }
+
     /// Canonical, physically distinct roots with nested roots folded into their ancestors.
     pub fn roots(&self, paths: &[String]) -> Vec<String> {
         let resolved: Vec<String> = paths
@@ -187,6 +207,8 @@ impl Services {
         let mut count = 0usize;
         // Prepared once: every visited entry is checked against these.
         let scope = policy::Scope::new(context);
+        // Folders macOS keeps private without Full Disk Access, reported as one warning.
+        let mut denied: Vec<String> = vec![];
         for root in self.roots(&context.roots) {
             control.check()?;
             if context.excludes(&root) {
@@ -212,7 +234,15 @@ impl Services {
             self.walker.walk(
                 &root,
                 control,
-                &mut |problem| warnings.push(problem),
+                &mut |problem| {
+                    if problem.contains("Operation not permitted")
+                        || problem.contains("Permission denied")
+                    {
+                        denied.push(problem);
+                    } else {
+                        warnings.push(problem);
+                    }
+                },
                 &mut |e| {
                     count += 1;
                     if count > self.walk_limit {
@@ -251,6 +281,9 @@ impl Services {
                 ));
                 break;
             }
+        }
+        if !denied.is_empty() {
+            warnings.push(Self::denied_summary(&denied));
         }
         Ok(())
     }

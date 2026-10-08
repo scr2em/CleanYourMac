@@ -363,3 +363,17 @@ fn restore_only_returns_trash_items_to_unprotected_places() {
     let parent = std::path::Path::new(&home).parent().unwrap();
     assert!(policy::protected(parent.to_str().unwrap()));
 }
+
+#[test]
+fn folders_macos_keeps_private_become_one_warning() {
+    let problems: Vec<String> = (0..200)
+        .map(|i| format!("Cannot read /Users/x/Library/Group Containers/group.{i}: Operation not permitted (os error 1)"))
+        .collect();
+    let summary = cym_core::Services::denied_summary(&problems);
+    assert!(
+        summary.starts_with("200 folders need Full Disk Access"),
+        "{summary}"
+    );
+    assert!(summary.contains("/Users/x/Library/Group Containers/group.0, "));
+    assert!(!summary.contains("group.3"));
+}
