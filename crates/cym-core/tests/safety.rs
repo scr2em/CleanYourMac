@@ -104,6 +104,53 @@ fn an_ai_worktree_with_work_in_it_stays() {
         "fn main() {}",
     );
     f.write("home/.codex/worktrees/task-3/app/wip.rs", "fn main() {}");
+    // A clean repository with a submodule, and one with a repository in an ignored folder:
+    // `status` sees neither's work, so both stay.
+    let identity = ["-c", "user.name=t", "-c", "user.email=t@t"];
+    let commit = |repo: &str| {
+        let args = [&identity[..], &["commit", "-q", "--allow-empty", "-m", "x"]].concat();
+        assert_eq!(git.run(repo, &args, &k).unwrap().status, 0);
+    };
+    let with_sub = f.dir("home/.codex/worktrees/task-4");
+    let lib = f.dir("home/.codex/worktrees/task-4/lib");
+    let with_ignored = f.dir("home/.codex/worktrees/task-5");
+    let vendored = f.dir("home/.codex/worktrees/task-5/vendor/tool");
+    for repo in [&with_sub, &lib, &with_ignored, &vendored] {
+        assert_eq!(
+            git.run(repo, &["init", "-q", "-b", "main"], &k)
+                .unwrap()
+                .status,
+            0
+        );
+    }
+    commit(&lib);
+    f.write("home/.codex/worktrees/task-4/lib/wip.rs", "fn main() {}");
+    let head = git.run(&lib, &["rev-parse", "HEAD"], &k).unwrap();
+    let head = String::from_utf8_lossy(&head.data).trim().to_owned();
+    let cacheinfo = format!("160000,{head},lib");
+    assert_eq!(
+        git.run(
+            &with_sub,
+            &["update-index", "--add", "--cacheinfo", &cacheinfo],
+            &k
+        )
+        .unwrap()
+        .status,
+        0
+    );
+    commit(&with_sub);
+    f.write("home/.codex/worktrees/task-5/.gitignore", "vendor/\n");
+    f.write(
+        "home/.codex/worktrees/task-5/vendor/tool/wip.rs",
+        "fn main() {}",
+    );
+    assert_eq!(
+        git.run(&with_ignored, &["add", ".gitignore"], &k)
+            .unwrap()
+            .status,
+        0
+    );
+    commit(&with_ignored);
     let engine = Engine::new(services(&f), builtin(&f));
     let findings = scan(&engine, &f, "ai", vec![f.at("home")]);
     let dirty = findings
@@ -141,4 +188,21 @@ fn an_ai_worktree_with_work_in_it_stays() {
         .as_deref()
         .unwrap()
         .contains("uncommitted or untracked"));
+    let reason = |end: &str| {
+        findings
+            .iter()
+            .find(|r| r.resource.path().is_some_and(|p| p.ends_with(end)))
+            .and_then(|r| r.blocked_reason.clone())
+            .unwrap_or_default()
+    };
+    assert!(
+        reason("worktrees/task-4").contains("nested repository lib"),
+        "{}",
+        reason("worktrees/task-4")
+    );
+    assert!(
+        reason("worktrees/task-5").contains("ignored folder (vendor/tool)"),
+        "{}",
+        reason("worktrees/task-5")
+    );
 }

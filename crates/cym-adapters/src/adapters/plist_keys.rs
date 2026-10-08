@@ -125,6 +125,8 @@ fn xml_depth(bytes: &[u8]) -> usize {
             find(next + 9, b"]]>").map(|e| e + 3)
         } else if rest.starts_with(b"<?") {
             find(next + 2, b"?>").map(|e| e + 2)
+        } else if rest.starts_with(b"<!-") {
+            None
         } else if rest.starts_with(b"<!") {
             match tag_end(next + 2) {
                 Some(e) if !bytes[next..e].contains(&b'[') => Some(e + 1),
@@ -150,7 +152,10 @@ fn xml_depth(bytes: &[u8]) -> usize {
                 if open.pop() != Some(name) {
                     return REFUSE;
                 }
-            } else if !tag.ends_with(b"/") {
+            } else if tag.ends_with(b"/") {
+                // The parser expands an empty element into a start and an end.
+                deepest = deepest.max(open.len() + 1);
+            } else {
                 open.push(name);
                 deepest = deepest.max(open.len());
                 if deepest > MAX_DEPTH {
@@ -323,6 +328,10 @@ mod tests {
         assert_eq!(
             xml_depth(b"<dict><array/><array><dict></dict></array></dict>"),
             3
+        );
+        assert_eq!(
+            xml_depth(b"<dict><array><dict><array/></dict></array></dict>"),
+            4
         );
         // Closing tags the parser never sees, and names the count would not recognise, do
         // not hide nesting.
