@@ -553,12 +553,6 @@ fn satisfies(name: &str, request: &str) -> bool {
     name == bare || name.starts_with(&format!("{bare}.")) || name.starts_with(&format!("{bare}-"))
 }
 /// Numeric components for ordering version names, newest last.
-fn version_key(name: &str) -> Vec<u64> {
-    name.split(|c: char| !c.is_ascii_digit())
-        .filter_map(|p| p.parse().ok())
-        .collect()
-}
-
 impl ToolchainsModule {
     /// The first installed package-manager program with this file name.
     fn package_tool(&self, name: &str) -> Option<String> {
@@ -636,7 +630,7 @@ impl ToolchainsModule {
             s.children(parent, &mut vec![])
                 .into_iter()
                 .filter(|e| e.directory && !e.name().starts_with('.'))
-                .max_by_key(|e| version_key(e.name()))
+                .max_by(|a, b| version_order(a.name(), b.name()))
                 .is_some_and(|e| e.name() == name)
         };
         let points_here = |link: &str| {

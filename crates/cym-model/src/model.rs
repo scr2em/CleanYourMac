@@ -320,6 +320,65 @@ pub fn format_bytes(bytes: u64) -> String {
         _ => format!("{value:.1} {}", UNITS[unit]),
     }
 }
+/// Orders version strings as people read them, for every tool that keeps the newest: numbers
+/// compare as numbers (`1.10` after `1.9`, `16` equal to `16.0`), any text before the first
+/// digit is ignored (`v20.1.0`, `python-3.12`), and a pre-release (`16.1b2`, `3.13.0rc1`,
+/// `1.2.0-beta.3`) comes before its release.
+pub fn version_order(a: &str, b: &str) -> std::cmp::Ordering {
+    fn parts(text: &str) -> (Vec<u64>, Option<Vec<u64>>) {
+        let start = text
+            .find(|c: char| c.is_ascii_digit())
+            .unwrap_or(text.len());
+        let text = &text[start..];
+        let end = text
+            .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+            .unwrap_or(text.len());
+        let mut release: Vec<u64> = text[..end]
+            .split('.')
+            .filter_map(|p| p.parse().ok())
+            .collect();
+        while release.last() == Some(&0) {
+            release.pop();
+        }
+        let rest = text[end..].trim_start_matches(['-', '.', '_']);
+        let lower = rest.to_ascii_lowercase();
+        let pre = ["alpha", "beta", "rc", "pre", "dev", "a", "b"]
+            .iter()
+            .find(|tag| {
+                lower.starts_with(*tag)
+                    && lower[tag.len()..]
+                        .chars()
+                        .next()
+                        .is_none_or(|c| c.is_ascii_digit() || matches!(c, '.' | '-'))
+            })
+            .map(|tag| {
+                // The tag's rank, then its numbers: alpha < beta < rc.
+                let rank = match *tag {
+                    "dev" => 0,
+                    "alpha" | "a" => 1,
+                    "beta" | "b" => 2,
+                    _ => 3,
+                };
+                std::iter::once(rank)
+                    .chain(
+                        lower[tag.len()..]
+                            .split(|c: char| !c.is_ascii_digit())
+                            .filter_map(|p| p.parse().ok()),
+                    )
+                    .collect()
+            });
+        (release, pre)
+    }
+    let ((a_release, a_pre), (b_release, b_pre)) = (parts(a), parts(b));
+    a_release
+        .cmp(&b_release)
+        .then_with(|| match (a_pre, b_pre) {
+            (None, None) => std::cmp::Ordering::Equal,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (Some(x), Some(y)) => x.cmp(&y),
+        })
+}
 pub fn now() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

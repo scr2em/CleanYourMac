@@ -162,15 +162,9 @@ impl XcodeModule {
         {
             return Some((selected, "This is the Xcode that xcode-select selects."));
         }
-        let number =
-            |v: &str| -> Vec<u64> { v.split('.').map(|p| p.parse().unwrap_or(0)).collect() };
         installs
             .iter()
-            .max_by(|(a, x), (b, y)| {
-                number(x)
-                    .cmp(&number(y))
-                    .then_with(|| b.path().cmp(a.path()))
-            })
+            .max_by(|(a, x), (b, y)| version_order(x, y).then_with(|| b.path().cmp(a.path())))
             .map(|(e, _)| {
                 (
                     policy::canonical(e.path()),

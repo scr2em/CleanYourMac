@@ -644,3 +644,25 @@ fn ignored_processes_default_in_one_place() {
         );
     }
 }
+
+/// Xcode Data and Toolchains keep "the newest" by one ordering.
+#[test]
+fn versions_order_the_same_everywhere() {
+    use cym_core::model::version_order;
+    use std::cmp::Ordering::*;
+    for (older, newer) in [
+        ("1.9", "1.10"),
+        ("16.1b2", "16.1"),
+        ("16.0", "16.1b2"),
+        ("3.13.0rc1", "3.13.0"),
+        ("1.2.0-alpha", "1.2.0-beta.3"),
+        ("1.2.0-beta.3", "1.2.0-rc.1"),
+        ("v20.1.0", "v20.10.0"),
+        ("python-3.9.18", "python-3.12.1"),
+        ("1.70.0-aarch64-apple-darwin", "1.71.0-aarch64-apple-darwin"),
+    ] {
+        assert_eq!(version_order(older, newer), Less, "{older} < {newer}");
+        assert_eq!(version_order(newer, older), Greater, "{newer} > {older}");
+    }
+    assert_eq!(version_order("16", "16.0.0"), Equal);
+}
