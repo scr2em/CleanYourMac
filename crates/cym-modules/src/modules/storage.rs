@@ -129,7 +129,10 @@ impl ScanModule for LargeFilesModule {
                 f.last_used_at = s.usage.last_used(e.path());
                 if app_data(e.path(), &policy::home()) {
                     f.blocked_reason = Some("Part of an app's or developer tool's data, such as a virtual machine disk, a model, a backup or a database. Remove it with that app or tool.".into());
-                } else if !policy::protected(e.path()) {
+                } else if policy::protected(e.path()) {
+                    // Shown as blocked, with why, rather than as a row with nothing to do.
+                    f.blocked_reason = Some("Protected location; it is never moved.".into());
+                } else {
                     f.actions.push(ActionKind::Trash);
                 }
                 sink.finding(f);

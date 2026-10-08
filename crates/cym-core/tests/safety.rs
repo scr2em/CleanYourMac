@@ -823,3 +823,43 @@ fn irreplaceable_data_needs_confirmation() {
         assert!(row.acknowledgement.is_some(), "{title}");
     }
 }
+
+/// A project edited today deep in `src/` is not idle, though its folders' dates are old.
+#[test]
+fn work_below_the_top_level_keeps_a_project_active() {
+    use std::time::{Duration, SystemTime};
+    let f = Fixture::new();
+    f.write("app/package.json", "{}");
+    f.write("app/package-lock.json", "{}");
+    f.write("app/node_modules/dep/index.js", "x");
+    let edited = f.write("app/src/app/main.ts", "x");
+    let old = SystemTime::now() - Duration::from_secs(90 * 86_400);
+    let age = |path: String| {
+        std::fs::File::open(&path)
+            .unwrap()
+            .set_modified(old)
+            .unwrap()
+    };
+    for path in [
+        "app/package.json",
+        "app/package-lock.json",
+        "app/node_modules",
+        "app/src/app",
+        "app/src",
+        "app",
+    ] {
+        age(f.at(path));
+    }
+    let engine = Engine::new(services(&f), builtin(&f));
+    let findings = scan(&engine, &f, "node", vec![f.path()]);
+    let deps = findings
+        .iter()
+        .find(|r| r.value("Artifact") == Some("node_modules"))
+        .expect("listed");
+    let used = deps.last_used_at.expect("a date");
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64();
+    assert!(now - used < 86_400.0, "{edited} counts as today's work");
+}

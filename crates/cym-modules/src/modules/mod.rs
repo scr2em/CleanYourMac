@@ -335,17 +335,44 @@ impl LastUsed {
         }
     }
 }
-/// The newest modification among a project's immediate entries, skipping generated and
-/// dependency folders whose timestamps change on every build.
+/// The newest modification among a project's own files, three levels deep, skipping
+/// generated and dependency folders whose timestamps change on every build. Editing
+/// `src/app/main.rs` changes only that file's date, not its folders', so the top level alone
+/// can make a project in use look idle. A project too large to check counts as active now:
+/// what was not seen may be today's work, and an idle date decides what gets removed.
 pub(crate) fn project_activity(s: &Services, folder: &str) -> Option<f64> {
-    s.fs.children(folder)
-        .ok()?
-        .into_iter()
-        .flatten()
-        // Version-control metadata changes with every commit, so it counts as activity.
-        .filter(|e| !project_folders::generated_name(e.name()))
-        .map(|e| e.modified())
-        .reduce(f64::max)
+    const DEPTH: usize = 3;
+    const ENTRIES: usize = 10_000;
+    let mut newest: Option<f64> = None;
+    let mut seen = 0;
+    let mut level = vec![folder.to_owned()];
+    for depth in 0..DEPTH {
+        let mut next = vec![];
+        for dir in &level {
+            let Ok(rows) = s.fs.children(dir) else {
+                if depth == 0 {
+                    return None;
+                }
+                continue;
+            };
+            for e in rows.into_iter().flatten() {
+                // Version-control metadata changes with every commit, so it counts.
+                if project_folders::generated_name(e.name()) {
+                    continue;
+                }
+                seen += 1;
+                if seen > ENTRIES {
+                    return Some(now());
+                }
+                newest = Some(newest.map_or(e.modified(), |n| n.max(e.modified())));
+                if e.directory && !e.symlink && crate::policy::version_control(e.name()).is_none() {
+                    next.push(e.path().to_owned());
+                }
+            }
+        }
+        level = next;
+    }
+    newest
 }
 
 /// Home-relative folders that AI Tools and Containers & VMs list with their own checks, so
