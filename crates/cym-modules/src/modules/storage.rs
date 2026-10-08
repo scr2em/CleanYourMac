@@ -27,7 +27,8 @@ impl ScanModule for StorageModule {
     ) -> Result<()> {
         let mut warnings = vec![];
         let mut candidates = vec![];
-        let library = format!("{}/Library", policy::home());
+        let home = policy::home();
+        let library = format!("{home}/Library");
         for root in s.roots(&c.roots) {
             if c.excludes(&root) || policy::system_excluded(&root) {
                 continue;
@@ -52,6 +53,11 @@ impl ScanModule for StorageModule {
                             .is_some_and(|p| p.to_string_lossy().eq_ignore_ascii_case(&library))
                         {
                             Some("Holds macOS and app data as a whole; open it to inspect what is inside.")
+                        } else if app_data(e.path(), &home) {
+                            // As in Large Files: an app's or tool's own data (Messages,
+                            // backups, a sync folder, ~/.ollama) is removed with that app,
+                            // or with the tool that lists it and checks it first.
+                            Some("Part of an app's or tool's data; remove it in that app, or with the tool that lists it (Caches & Logs, AI Tools, Dependencies and others).")
                         } else {
                             None
                         };

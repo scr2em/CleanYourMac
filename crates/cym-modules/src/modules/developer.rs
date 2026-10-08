@@ -32,31 +32,37 @@ fn active_project_tools(s: &Services, project: &str) -> Option<String> {
     })
 }
 /// The first shipped-build output inside a build folder: an Xcode archive, debug symbols,
-/// an app package for a store, or an Android shrinker mapping. Searched breadth-first with
-/// bounds, so a huge build folder cannot stall the scan.
-pub(crate) fn shipped_outputs(s: &Services, folder: &str) -> Option<String> {
+/// an app package for a store or for sideloading, or an Android shrinker mapping. Searched
+/// breadth-first, eight levels deep, so a huge build folder cannot stall the scan; one with
+/// more entries than the search reads gives `Err`, since what it did not see may be one.
+pub(crate) fn shipped_outputs(
+    s: &Services,
+    folder: &str,
+) -> std::result::Result<Option<String>, ()> {
     let mut queue = std::collections::VecDeque::from([(folder.to_owned(), 0)]);
     let mut seen = 0;
     while let Some((dir, depth)) = queue.pop_front() {
         for e in s.children(&dir, &mut vec![]) {
             seen += 1;
-            if seen > 20_000 {
-                return None;
+            if seen > 500_000 {
+                return Err(());
             }
             let name = e.name().to_ascii_lowercase();
-            if [".xcarchive", ".dsym", ".ipa", ".aab"]
+            if [".xcarchive", ".dsym", ".ipa", ".aab", ".apk"]
                 .iter()
                 .any(|x| name.ends_with(x))
                 || (name == "mapping" && dir.ends_with("/outputs"))
             {
-                return Some(e.name().to_owned());
+                return Ok(Some(e.name().to_owned()));
             }
-            if e.directory && !e.symlink && depth < 6 {
+            // Shipped outputs sit near the top (`outputs/bundle/release/app.aab`,
+            // `Build/Products/Release/App.app.dSYM`); deeper levels are packages' own files.
+            if e.directory && !e.symlink && depth < 8 {
                 queue.push_back((e.path().to_owned(), depth + 1));
             }
         }
     }
-    None
+    Ok(None)
 }
 
 const APP_DATA: &str = "Inside an app's or tool's own folder, such as an editor extension; removing it would break that app or extension.";
@@ -150,7 +156,7 @@ impl ScanModule for ArtifactsModule {
                     let candidate = match shipped_outputs(s, e.path()) {
                         // A release archive, crash symbols or a shrinker mapping cannot be
                         // rebuilt for a build already shipped.
-                        Some(found) => Candidate::new(
+                        Ok(Some(found)) => Candidate::new(
                             e.clone(),
                             &format!("{reason} It holds {found}, which a rebuild cannot recreate for a build you already shipped."),
                             vec![],
@@ -160,7 +166,18 @@ impl ScanModule for ArtifactsModule {
                             &format!("This build output holds {found}: a shipped build or the symbols needed to read its crash reports."),
                             vec![ActionKind::Trash],
                         ),
-                        None => Candidate::new(e.clone(), &reason, vec![ActionKind::Trash], rule.risk),
+                        // Too large or deep to check fully: what was not seen may be one.
+                        Err(()) => Candidate::new(
+                            e.clone(),
+                            &format!("{reason} It is too large to check fully for a shipped build (an archive, debug symbols or an app package)."),
+                            vec![],
+                            Risk::Review,
+                        )
+                        .acknowledge(
+                            "This build output is too large to check for a shipped build or the symbols needed to read its crash reports.",
+                            vec![ActionKind::Trash],
+                        ),
+                        Ok(None) => Candidate::new(e.clone(), &reason, vec![ActionKind::Trash], rule.risk),
                     };
                     candidates.push(
                         candidate
@@ -611,12 +628,17 @@ impl Default for CachesModule {
                     "electron-builder cache",
                     "Library/Caches/electron-builder",
                 ),
+                // Large downloads are Review, so they never join the one-click cache fix.
                 cache("JavaScript", "Playwright browsers", "Library/Caches/ms-playwright")
-                    .note("Browsers are downloaded again by playwright install."),
+                    .note("Browsers are downloaded again by playwright install, often several hundred MB each.")
+                    .risk(Risk::Review),
                 cache("JavaScript", "Cypress binaries", "Library/Caches/Cypress")
-                    .command("cypress cache clear"),
+                    .note("Cypress downloads its app again, several hundred MB, the next time a project runs it.")
+                    .command("cypress cache clear")
+                    .risk(Risk::Review),
                 cache("JavaScript", "Puppeteer browsers", ".cache/puppeteer")
-                    .note("Puppeteer downloads its browser again when a project installs it."),
+                    .note("Puppeteer downloads its browser again, several hundred MB, when a project installs it.")
+                    .risk(Risk::Review),
                 // Python and machine learning
                 cache("Python", "pip cache", "Library/Caches/pip").package_store().command("pip cache purge"),
                 cache("Python", "Poetry cache", "Library/Caches/pypoetry/cache").package_store(),
@@ -638,8 +660,10 @@ impl Default for CachesModule {
                     .note("pre-commit installs its hook environments again on the next commit.")
                     .command("pre-commit clean"),
                 // Apple platforms
+                // Apple's caches are left to review, as everywhere else.
                 cache("Xcode", "Xcode cache", "Library/Caches/com.apple.dt.Xcode")
-                    .apps(owners::XCODE),
+                    .apps(owners::XCODE)
+                    .risk(Risk::Review),
                 cache("SwiftPM", "SwiftPM cache", "Library/Caches/org.swift.swiftpm").package_store()
                     .command("swift package purge-cache")
                     .apps(owners::XCODE),
@@ -667,11 +691,19 @@ impl Default for CachesModule {
                 cache("Gradle", "Gradle caches", ".gradle/caches").package_store().apps(owners::ANDROID),
                 cache("Gradle", "Gradle wrapper distributions", ".gradle/wrapper/dists")
                     .apps(owners::ANDROID),
-                cache("Gradle", "Gradle daemon logs", ".gradle/daemon").apps(owners::ANDROID),
-                cache("Kotlin", "Kotlin/Native toolchains", ".konan").apps(owners::ANDROID),
+                // Logs are never made again, so they are left to review.
+                cache("Gradle", "Gradle daemon logs", ".gradle/daemon")
+                    .note("Logs of past Gradle daemons; they can help diagnose a failed build.")
+                    .apps(owners::ANDROID)
+                    .risk(Risk::Review),
+                cache("Kotlin", "Kotlin/Native toolchains", ".konan")
+                    .note("Kotlin/Native downloads its toolchains again, about 1 GB, on the next build.")
+                    .apps(owners::ANDROID)
+                    .risk(Risk::Review),
                 cache("Gradle", "Gradle JDKs", ".gradle/jdks")
-                    .note("Java runtimes Gradle downloaded for toolchains; it downloads them again when a build needs one.")
-                    .apps(owners::ANDROID),
+                    .note("Java runtimes Gradle downloaded for toolchains; it downloads them again, several hundred MB each, when a build needs one.")
+                    .apps(owners::ANDROID)
+                    .risk(Risk::Review),
                 cache("Maven", "Maven repository", ".m2/repository").package_store()
                     .note("Artifacts installed locally with mvn install exist nowhere else.")
                     .apps(owners::ANDROID)
@@ -728,14 +760,21 @@ impl Default for CachesModule {
                 // Virtual machines and clusters: images the tools download again. The
                 // machines themselves are listed by Containers & VMs.
                 cache("Tart", "Tart image cache", ".tart/cache")
-                    .note("Images Tart pulled; virtual machines cloned from them keep working.")
-                    .command("tart prune"),
+                    .note("Images Tart pulled, often tens of GB; virtual machines cloned from them keep working.")
+                    .command("tart prune")
+                    .risk(Risk::Review),
                 cache("Vagrant", "Vagrant box", ".vagrant.d/boxes/*")
                     .note("Machines already made from the box keep working; a new machine downloads it again.")
                     .command("vagrant box prune")
                     .risk(Risk::Review),
                 cache("Kubernetes", "minikube downloads", ".minikube/cache")
-                    .note("Images and Kubernetes binaries minikube downloads again; clusters stay."),
+                    .note("Images and Kubernetes binaries minikube downloads again, several GB; clusters stay.")
+                    .risk(Risk::Review),
+                // Chrome's own cache, named so the folders beside it in Caches/Google are not
+                // taken for app caches.
+                cache("Google Chrome", "Chrome cache", "Library/Caches/Google/Chrome")
+                    .apps(owners::CHROME)
+                    .app_cache(),
                 // Browsers: per-profile caches in Application Support. History, cookies,
                 // passwords, extensions and Local Storage stay.
                 cache("Google Chrome", "Chrome script cache", "Library/Application Support/Google/Chrome/*/Code Cache")
@@ -816,7 +855,15 @@ impl Default for CachesModule {
             // VS Code's Electron caches, logs and crash reports, named as for every editor.
             .chain(
                 super::electron_folders!("Library/Application Support/Code/", "VS Code · ").map(
-                    |(path, name, note, _)| cache("VS Code", name, path).note(note).apps(owners::VSCODE),
+                    |(path, name, note, cache_folder)| {
+                        let location = cache("VS Code", name, path).note(note).apps(owners::VSCODE);
+                        // Logs and crash reports are never made again.
+                        if cache_folder {
+                            location
+                        } else {
+                            location.risk(Risk::Review)
+                        }
+                    },
                 ),
             )
             .collect(),

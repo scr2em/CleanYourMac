@@ -46,9 +46,19 @@ fn library_folders_and_finder_files_are_left_alone() {
         .as_deref()
         .unwrap()
         .contains("macOS and app data"));
-    // One level further down, items are ordinary storage again.
+    // Further down, an app's data is listed for its size but never offered, as in Large
+    // Files: it is removed in its app, or with the tool that lists it and checks it first.
     let caches = scan(&engine, "storage", vec![f.at("home/Library/Caches")]);
-    assert_eq!(caches[0].actions, vec![ActionKind::Trash]);
+    assert!(caches[0].actions.is_empty());
+    assert!(caches[0]
+        .blocked_reason
+        .as_deref()
+        .unwrap()
+        .contains("app's or tool's data"));
+    // Outside app and tool folders, items are ordinary storage.
+    f.write("home/Projects/notes.txt", "x");
+    let projects = scan(&engine, "storage", vec![f.at("home/Projects")]);
+    assert_eq!(projects[0].actions, vec![ActionKind::Trash]);
 
     // Downloads and Trash never list Finder's own files.
     for module in ["downloads", "trash"] {

@@ -117,7 +117,7 @@ When you move an item to the Trash, you can restore it. The disk space becomes f
 **Scan** on the overview starts all tools except Exact Duplicates. Exact Duplicates reads the contents of all files, so it starts only when you open it. Results show while the scan continues. After the scan, the overview recommends these actions:
 - Remove the dependencies and build output of projects that you did not use for 30 days or more.
 - Remove caches that the tools make again when necessary.
-- Remove Xcode build data.
+- Remove Xcode build data that you did not use for 30 days or more.
 - Empty the Trash.
 
 ### Rules for all tools
@@ -142,7 +142,7 @@ When you move an item to the Trash, you can restore it. The disk space becomes f
 <details>
 <summary><strong>Storage Explorer</strong>: what uses space in a folder</summary>
 
-Storage Explorer shows each item directly in the folders that you select. For each item, it shows the size on disk and the date of last use. You can move an item that is not protected to the Trash. The folders directly in your Library folder (Application Support, Containers, Mail and others) hold macOS and app data as a whole, so you can open them but not remove them. Storage Explorer shows where space goes. It does not recommend items.
+Storage Explorer shows each item directly in the folders that you select. For each item, it shows the size on disk and the date of last use. You can move an item that is not protected to the Trash. The folders directly in your Library folder (Application Support, Containers, Mail and others) hold macOS and app data as a whole, so you can open them but not remove them. Further down, and in hidden folders of your home folder, items are an app's or tool's data: the app shows their size, and you remove them in that app or with the tool that lists them, which checks them first. Storage Explorer shows where space goes. It does not recommend items.
 </details>
 
 <details>
@@ -252,7 +252,7 @@ Xcode Data shows:
 - SwiftUI preview simulators. The app removes them with `xcrun simctl --set previews delete all`;
 - Xcode installations other than the one that `xcode-select` selects. The selected Xcode stays. When `xcode-select` selects the Command Line Tools, the newest Xcode stays.
 
-Xcode makes all of these again when necessary, except device logs and other Xcode versions.
+Xcode makes all of these again when necessary, except device logs and other Xcode versions. Device Support comes back only when you connect a device with that system version again, so the overview recommends Xcode data only after 30 days without use.
 
 Archives are protected. An archive can be the only copy of a build that you shipped. It also contains the debug symbols that you need to read its crash reports. You can move an archive to the Trash from its details, after you confirm that you accept this loss. The app does not move items while Xcode, Simulator, `xcodebuild` or the Swift compiler runs.
 </details>

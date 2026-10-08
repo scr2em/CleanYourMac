@@ -714,3 +714,87 @@ fn an_ai_worktree_with_work_in_it_stays() {
         .unwrap();
     assert_eq!(kept.blocked_reason, None);
 }
+
+/// What a cache folder holds beside known caches is not known, so it is never a one-click
+/// "App cache": Poetry keeps whole environments in `pypoetry/virtualenvs`.
+#[test]
+fn unknown_folders_beside_known_caches_are_left_to_review() {
+    let f = Fixture::new();
+    f.write("home/Library/Caches/pypoetry/cache/x", "x");
+    f.write(
+        "home/Library/Caches/pypoetry/virtualenvs/app-py3.12/pyvenv.cfg",
+        "x",
+    );
+    let engine = Engine::new(services(&f), builtin(&f));
+    let findings = scan(&engine, &f, "caches", vec![f.at("home")]);
+    let venvs = findings
+        .iter()
+        .find(|r| {
+            r.resource
+                .path()
+                .is_some_and(|p| p.ends_with("pypoetry/virtualenvs"))
+        })
+        .expect("listed");
+    assert_eq!(venvs.risk, Risk::Review, "{}", venvs.reason);
+}
+
+/// A build folder holding an app package, or too large to check, needs confirmation.
+#[test]
+fn shipped_apps_in_build_output_need_confirmation() {
+    let f = Fixture::new();
+    f.write("app/pubspec.yaml", "name: app");
+    f.write("app/build/app/outputs/flutter-apk/app-release.apk", "x");
+    let engine = Engine::new(services(&f), builtin(&f));
+    let findings = scan(&engine, &f, "artifacts", vec![f.path()]);
+    let build = findings
+        .iter()
+        .find(|r| r.resource.path().is_some_and(|p| p.ends_with("app/build")))
+        .expect("listed");
+    assert!(build.actions.is_empty());
+    assert_eq!(build.acknowledged_actions, vec![ActionKind::Trash]);
+    assert!(build.reason.contains("app-release.apk"), "{}", build.reason);
+}
+
+/// A one-click fix with an idle age skips items whose age is unknown or recent.
+#[test]
+fn idle_fixes_wait_for_a_known_old_date() {
+    use cym_core::recommend::{recommendations, RULES};
+    let now = 2_000_000_000.0;
+    let row = |id: &str, last: Option<f64>| {
+        let mut f = Finding::new(
+            "xcode",
+            id,
+            id,
+            Resource::File {
+                file: FileIdentity {
+                    path: format!("/x/{id}"),
+                    device: 1,
+                    inode: 1,
+                    modified_seconds: 0,
+                    modified_nanos: 0,
+                    tree_signature: None,
+                },
+            },
+            "",
+        );
+        f.actions = vec![ActionKind::Trash];
+        f.risk = Risk::Rebuild;
+        f.bytes = Some(10_000_000);
+        f.allocated_bytes = Some(10_000_000);
+        f.last_used_at = last;
+        f
+    };
+    let rows = [
+        row("old", Some(now - 40.0 * 86_400.0)),
+        row("recent", Some(now - 86_400.0)),
+        row("unknown", None),
+    ];
+    let fixes = recommendations(
+        &|m: &str| rows.iter().filter(|r| r.module_id == m).collect(),
+        RULES,
+        now,
+        1,
+    );
+    let xcode = fixes.iter().find(|r| r.id == "xcode-build-data").unwrap();
+    assert_eq!(xcode.ids, vec!["xcode:old".to_string()]);
+}

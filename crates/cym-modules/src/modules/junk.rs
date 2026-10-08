@@ -60,8 +60,8 @@ impl Default for MacJunk {
                 JunkLocation {
                     name: "Saved window state",
                     path: "Library/Saved Application State/*",
-                    reason: "Lets an app reopen its windows where you left them; it opens fresh windows instead.",
-                    risk: Risk::Rebuild,
+                    reason: "Lets an app reopen its windows where you left them; it opens fresh windows instead, and an app such as a terminal can lose its restored sessions.",
+                    risk: Risk::Review,
                     per_app: true,
                     app_folder: false,
                 },
@@ -76,16 +76,16 @@ impl Default for MacJunk {
                 JunkLocation {
                     name: "iPhone software updates",
                     path: "Library/iTunes/iPhone Software Updates",
-                    reason: "Device update files, downloaded again when a device needs them.",
-                    risk: Risk::Rebuild,
+                    reason: "Device update files, several GB each, downloaded again when a device needs them.",
+                    risk: Risk::Review,
                     per_app: false,
                     app_folder: false,
                 },
                 JunkLocation {
                     name: "iPad software updates",
                     path: "Library/iTunes/iPad Software Updates",
-                    reason: "Device update files, downloaded again when a device needs them.",
-                    risk: Risk::Rebuild,
+                    reason: "Device update files, several GB each, downloaded again when a device needs them.",
+                    risk: Risk::Review,
                     per_app: false,
                     app_folder: false,
                 },
@@ -199,11 +199,12 @@ impl MacJunk {
                     continue;
                 }
                 if !holds(e.path()) {
-                    found.push((e, capture));
+                    found.push((e, capture, false));
                 } else if location.per_app && !location.app_folder {
                     // A vendor folder that also holds a covered cache, such as
-                    // `Caches/Google` with Android Studio's: its other folders (Chrome)
-                    // are listed one by one.
+                    // `Caches/pypoetry` with Poetry's package cache: its other folders are
+                    // listed one by one, for review, since nothing says what they hold
+                    // (Poetry keeps whole environments in `pypoetry/virtualenvs`).
                     let vendor = e.name().to_owned();
                     for child in s.children(e.path(), &mut vec![]) {
                         if child.directory
@@ -212,12 +213,12 @@ impl MacJunk {
                             && !holds(child.path())
                         {
                             let name = format!("{vendor}/{}", child.name());
-                            found.push((child, Some(name)));
+                            found.push((child, Some(name), true));
                         }
                     }
                 }
             }
-            for (e, capture) in found {
+            for (e, capture, unknown) in found {
                 if location.app_folder {
                     let app = capture.as_deref().unwrap_or_default();
                     let folder = format!("{home}/Library/Application Support/{app}");
@@ -256,12 +257,16 @@ impl MacJunk {
                 if let Some(b) = owner {
                     details.push(detail("App", b));
                 }
-                let reason = if location.per_app {
+                let reason = if unknown {
+                    "A folder in a cache folder beside caches other tools list; what it holds is not known, and it may be data the tool keeps, such as environments or downloads. Review it.".to_owned()
+                } else if location.per_app {
                     format!("{} Quit the app first.", location.reason)
                 } else {
                     location.reason.to_owned()
                 };
-                let risk = if apple && location.risk == Risk::Rebuild {
+                // Rebuild only where something is known to make it again: not for Apple's own
+                // caches, nor for an unknown folder beside a known cache.
+                let risk = if (apple || unknown) && location.risk == Risk::Rebuild {
                     Risk::Review
                 } else {
                     location.risk

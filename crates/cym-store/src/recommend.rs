@@ -75,10 +75,10 @@ pub const RULES: &[Rule] = &[
         id: "xcode-build-data",
         module: "xcode",
         title: "Xcode build data",
-        detail: "DerivedData and other Xcode data that rebuilds with the next build.",
+        detail: "DerivedData, Device Support and other Xcode data untouched for 30 days or more, which the next build or device connection makes again.",
         action: ActionKind::Trash,
         risks: &[Risk::Rebuild],
-        idle_days: None,
+        idle_days: Some(30),
         project_only: false,
     },
     // Duplicate copies are never a one-click fix: which copy matters is the user's call.
@@ -112,9 +112,10 @@ pub fn recommendations<'a>(
                         && f.actions.contains(&rule.action)
                         && rule.risks.contains(&f.risk)
                         && (!rule.project_only || f.value("Project").is_some())
+                        // An item with no date is not known to be idle, so it waits.
                         && rule.idle_days.is_none_or(|days| {
                             let last = f.last_used_at.or(f.modified_at);
-                            last.is_none_or(|t| now - t >= f64::from(days) * 86_400.0)
+                            last.is_some_and(|t| now - t >= f64::from(days) * 86_400.0)
                         })
                 })
                 .collect();
