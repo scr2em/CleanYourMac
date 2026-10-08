@@ -583,7 +583,7 @@ impl ScanModule for ContainersModule {
                 f.details = vec![
                     detail("Ecosystem", label),
                     detail("Engine", engine.map_or("Docker", |e| e.name)),
-                    detail("Total size", format!("{:.1} GB", u.size as f64 / 1e9)),
+                    detail("Total size", format_bytes(u.size)),
                     detail("Items", format!("{} ({} in use)", u.total, u.active)),
                 ];
                 if !context.is_empty() {
@@ -671,9 +671,9 @@ impl ScanModule for ContainersModule {
             .map_or(0, |u| u.reclaimable);
         if now > reviewed + reviewed / 10 + 100_000_000 {
             return Err(format!(
-                "{tool} can now free {:.1} GB, more than the {:.1} GB you reviewed. Scan again to review what changed.",
-                now as f64 / 1e9,
-                reviewed as f64 / 1e9
+                "{tool} can now free {}, more than the {} you reviewed. Scan again to review what changed.",
+                format_bytes(now),
+                format_bytes(reviewed)
             ));
         }
         let out = self.run_tool(s, &exe, args, 900, k)?;

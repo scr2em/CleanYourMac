@@ -284,6 +284,21 @@ pub struct ActionResult {
     #[serde(default)]
     pub overridable: bool,
 }
+/// A byte count as Finder shows it, in powers of 1000: `999 bytes`, `12.3 KB`, `1.2 GB`.
+/// Every message and detail uses this, so sizes read the same everywhere.
+pub fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["bytes", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 999.95 && unit < UNITS.len() - 1 {
+        value /= 1000.0;
+        unit += 1;
+    }
+    match unit {
+        0 => format!("{bytes} bytes"),
+        _ => format!("{value:.1} {}", UNITS[unit]),
+    }
+}
 pub fn now() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

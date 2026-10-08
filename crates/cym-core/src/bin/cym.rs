@@ -15,20 +15,6 @@ fn fail(message: &str) -> ! {
     eprintln!("{message}");
     exit(2)
 }
-fn bytes(value: u64) -> String {
-    let units = ["bytes", "KB", "MB", "GB", "TB"];
-    let mut size = value as f64;
-    let mut unit = 0;
-    while size >= 1000. && unit < units.len() - 1 {
-        size /= 1000.;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{value} bytes")
-    } else {
-        format!("{size:.1} {}", units[unit])
-    }
-}
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h") {
@@ -99,7 +85,11 @@ fn main() {
         }
     } else {
         for f in &report.findings {
-            let size = f.bytes.map(bytes).unwrap_or_else(|| "—".into());
+            // Size on disk, as the app shows it.
+            let size = f
+                .disk_bytes()
+                .map(format_bytes)
+                .unwrap_or_else(|| "—".into());
             let subtitle = policy::abbreviate_home_in(&f.subtitle, &home);
             println!("{size}\t{}\t{subtitle}", f.title);
         }

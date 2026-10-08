@@ -323,7 +323,7 @@ impl ScanModule for ProjectsModule {
         let after_total = after.loose + after.garbage + after.packed;
         Ok(format!(
             "Git packed its objects; the repository data is {} smaller.",
-            bytes_text(before_total.saturating_sub(after_total))
+            format_bytes(before_total.saturating_sub(after_total))
         ))
     }
     fn archive(&self, s: &Services, f: &Finding, k: &ScanControl) -> Result<String> {
@@ -394,20 +394,5 @@ impl ScanModule for ProjectsModule {
             return cleanup(e);
         }
         Ok(zip)
-    }
-}
-
-/// A byte count for messages: `1.2 GB`, `340 MB`, `12 KB`.
-fn bytes_text(bytes: u64) -> String {
-    let units = ["bytes", "KB", "MB", "GB", "TB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1000.0 && unit < units.len() - 1 {
-        value /= 1000.0;
-        unit += 1;
-    }
-    match unit {
-        0 => format!("{bytes} bytes"),
-        _ => format!("{value:.1} {}", units[unit]),
     }
 }

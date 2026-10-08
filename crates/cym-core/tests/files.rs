@@ -592,3 +592,16 @@ fn home_paths_match_whole_components_only() {
     assert!(!app_data("/Users/al/Movies/x.mov", home));
     assert!(keep_rank("/Users/al.old/x", home) < keep_rank("/Users/al/.cache/x", home));
 }
+
+#[test]
+fn sizes_read_the_same_everywhere() {
+    use cym_core::model::format_bytes;
+    assert_eq!(format_bytes(0), "0 bytes");
+    assert_eq!(format_bytes(999), "999 bytes");
+    assert_eq!(format_bytes(12_345), "12.3 KB");
+    // Small items no longer read "0.0 GB".
+    assert_eq!(format_bytes(52_000_000), "52.0 MB");
+    assert_eq!(format_bytes(999_960), "1.0 MB");
+    assert_eq!(format_bytes(1_234_000_000), "1.2 GB");
+    assert_eq!(format_bytes(5_000_000_000_000_000), "5000.0 TB");
+}

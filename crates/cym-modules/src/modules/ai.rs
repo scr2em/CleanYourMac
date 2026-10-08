@@ -1089,10 +1089,6 @@ fn titled(title: &str, matched: &[String]) -> String {
     }
 }
 
-fn gigabytes(bytes: u64) -> String {
-    format!("{:.1} GB", bytes as f64 / 1e9)
-}
-
 impl AiToolsModule {
     /// The details every row of a data folder carries.
     fn base(&self, tool: &AiTool, root: &str, tier: Tier) -> Vec<Detail> {
@@ -1217,12 +1213,12 @@ impl AiToolsModule {
             };
             let mut details = self.base(tool, root, Tier::Review);
             details.push(detail("Model", m.name.clone()));
-            details.push(detail("Shared with other models", gigabytes(m.shared)));
+            details.push(detail("Shared with other models", format_bytes(m.shared)));
             let modified = e.modified();
             out.push(
                 Candidate::new(
                     e,
-                    &format!("A local model. Ollama frees its files ({}) the next time it starts; ollama pull {} downloads it again. Files other models use stay.", gigabytes(m.unique), m.name),
+                    &format!("A local model. Ollama frees its files ({}) the next time it starts; ollama pull {} downloads it again. Files other models use stay.", format_bytes(m.unique), m.name),
                     vec![ActionKind::Trash],
                     Tier::Review.risk(),
                 )
