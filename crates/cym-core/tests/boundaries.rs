@@ -132,14 +132,49 @@ fn every_tool_stays_inside_roots_and_out_of_exclusions() {
         ..Default::default()
     };
     assert_within(&s, &excluded);
-    // A root that is itself a link is never followed.
+    // A chosen folder that is itself a link scans what it points to, and nothing else;
+    // links inside a chosen folder are never followed (checked above).
     let through_link = ScanContext {
         roots: vec![s.f.at("chosen/link")],
         limit_to_roots: true,
         ..Default::default()
     };
-    let found = assert_within(&s, &through_link);
-    assert!(found.is_empty(), "{found:?}");
+    let report = s
+        .engine
+        .scan_report(&s.ids, &through_link, &ScanControl::default());
+    assert!(!report.findings.is_empty());
+    for r in &report.findings {
+        let p = r.resource.path().unwrap_or_default();
+        assert!(p.starts_with(&s.f.at("elsewhere")), "{} {p}", r.module_id);
+    }
+}
+
+#[test]
+fn exclusions_match_however_they_are_spelled() {
+    let s = scene();
+    // Different letter case, and through the link to the excluded folder.
+    for exclusion in [s.f.at("CHOSEN/Private"), s.f.at("chosen/link")] {
+        let roots = vec![s.f.at("chosen"), s.f.at("elsewhere")];
+        let c = ScanContext {
+            roots,
+            exclusions: vec![exclusion.clone(), s.f.at("chosen/private")],
+            ..Default::default()
+        };
+        let excluded = if exclusion.ends_with("link") {
+            s.f.at("elsewhere")
+        } else {
+            s.f.at("chosen/private")
+        };
+        let c = ScanContext {
+            exclusions: vec![exclusion],
+            ..c
+        };
+        let report = s.engine.scan_report(&s.ids, &c, &ScanControl::default());
+        for r in &report.findings {
+            let p = r.resource.path().unwrap_or_default();
+            assert!(!policy::contains(p, &excluded), "{} {p}", r.module_id);
+        }
+    }
 }
 
 #[test]

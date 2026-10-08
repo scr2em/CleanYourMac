@@ -307,17 +307,25 @@ mod reference {
     pub fn contains(path: &str, root: &str) -> bool {
         Path::new(&canonical(path)).starts_with(canonical(root))
     }
+    /// `contains` ignoring ASCII case, as exclusions and system locations match.
+    pub fn contains_folded(path: &str, root: &str) -> bool {
+        contains(&path.to_ascii_lowercase(), &root.to_ascii_lowercase())
+    }
     pub fn system_excluded(path: &str) -> bool {
         [
             "/System", "/Library", "/bin", "/sbin", "/usr", "/dev", "/Network", "/private", "/var",
             "/etc", "/tmp",
         ]
         .iter()
-        .any(|r| contains(path, r))
+        .any(|r| contains_folded(path, r))
             || sensitive(path)
     }
     fn sensitive(path: &str) -> bool {
         let h = home();
+        let names: Vec<String> = Path::new(path)
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase())
+            .collect();
         [
             "/.ssh",
             "/.aws",
@@ -327,10 +335,14 @@ mod reference {
             "/Library/CloudStorage",
         ]
         .iter()
-        .any(|r| contains(path, &(h.clone() + r)))
-            || Path::new(path).components().any(|c| {
-                let s = c.as_os_str().to_string_lossy();
-                s == ".git" || s == ".env" || s.starts_with(".env.")
+        .any(|r| contains_folded(path, &(h.clone() + r)))
+            || names.iter().any(|s| {
+                [".git", ".env", ".ssh", ".aws", ".gnupg"].contains(&s.as_str())
+                    || s.starts_with(".env.")
+            })
+            || names.windows(2).any(|w| {
+                w[0] == "library"
+                    && ["keychains", "mobile documents", "cloudstorage"].contains(&w[1].as_str())
             })
     }
     pub fn duplicate_excluded(path: &str) -> bool {
@@ -458,7 +470,7 @@ fn fast_path_rules_match_the_reference_rules() {
         let excluded = context
             .exclusions
             .iter()
-            .any(|r| reference::contains(path, r));
+            .any(|r| reference::contains_folded(path, r));
         assert_eq!(context.excludes(path), excluded, "excludes {path:?}");
         assert_eq!(scope.excludes(path), excluded, "scope excludes {path:?}");
         assert_eq!(

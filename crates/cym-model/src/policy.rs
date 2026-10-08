@@ -1,8 +1,13 @@
 use crate::model::{Finding, Resource, ScanContext};
 use std::path::{Component, Path, PathBuf};
 
+/// The current user's home folder, without a trailing slash.
 pub fn home() -> String {
-    std::env::var("HOME").unwrap_or_default()
+    let h = std::env::var("HOME").unwrap_or_default();
+    match h.trim_end_matches('/') {
+        "" if h.starts_with('/') => "/".into(),
+        trimmed => trimmed.into(),
+    }
 }
 pub fn canonical(path: &str) -> String {
     let expanded = if path == "~" {
@@ -51,12 +56,26 @@ fn under(path: &str, root: &str) -> bool {
         || (path.starts_with(root)
             && (path.len() == root.len() || path.as_bytes()[root.len()] == b'/'))
 }
+/// `under`, ignoring ASCII case.
+fn under_folded(path: &str, root: &str) -> bool {
+    let (p, r) = (path.as_bytes(), root.as_bytes());
+    root == "/"
+        || (p.len() >= r.len()
+            && p[..r.len()].eq_ignore_ascii_case(r)
+            && (p.len() == r.len() || p[r.len()] == b'/'))
+}
+/// `contains`, ignoring ASCII case. Macs usually format drives case-insensitively, so
+/// `~/projects/keep` and `~/Projects/keep` name the same folder. Used where matching more is
+/// the safe direction: exclusions, system and credential locations.
+pub fn contains_folded(path: &str, root: &str) -> bool {
+    under_folded(&canonical_cow(path), &canonical_cow(root))
+}
 impl ScanContext {
     pub fn excludes(&self, path: &str) -> bool {
-        self.exclusions.iter().any(|r| contains(path, r))
+        self.exclusions.iter().any(|r| contains_folded(path, r))
     }
     pub fn protects(&self, path: &str) -> bool {
-        self.excludes(path) || self.exclusions.iter().any(|r| contains(r, path))
+        self.excludes(path) || self.exclusions.iter().any(|r| contains_folded(r, path))
     }
     pub fn allows(&self, path: &str) -> bool {
         !self.excludes(path)
@@ -78,19 +97,36 @@ const SENSITIVE_HOME: &[&str] = &[
     "/Library/CloudStorage",
 ];
 pub fn system_excluded(path: &str) -> bool {
-    SYSTEM_ROOTS.iter().any(|r| contains(path, r)) || sensitive(path)
+    SYSTEM_ROOTS.iter().any(|r| contains_folded(path, r)) || sensitive(path)
 }
 fn sensitive(path: &str) -> bool {
     let h = home();
     SENSITIVE_HOME
         .iter()
-        .any(|r| contains(path, &(h.clone() + r)))
+        .any(|r| contains_folded(path, &(h.clone() + r)))
         || sensitive_name(path)
 }
-/// Whether any component is Git metadata or an environment file.
+/// Whether the path holds Git metadata, an environment file, or credentials and synced
+/// files in any user's home folder (`.ssh`, `.aws`, `.gnupg`, `Library/Keychains`,
+/// `Library/Mobile Documents`, `Library/CloudStorage`), whatever the letter case.
 fn sensitive_name(path: &str) -> bool {
+    let mut previous = "";
+    // Empty and `.` components, as in `Library//Keychains`, don't separate a pair.
     path.split('/')
-        .any(|c| c == ".git" || c == ".env" || c.starts_with(".env."))
+        .filter(|c| !c.is_empty() && *c != ".")
+        .any(|c| {
+            let named = |n: &str| c.eq_ignore_ascii_case(n);
+            let hit = named(".git")
+                || named(".env")
+                || c.get(..5).is_some_and(|p| p.eq_ignore_ascii_case(".env."))
+                || named(".ssh")
+                || named(".aws")
+                || named(".gnupg")
+                || (previous.eq_ignore_ascii_case("Library")
+                    && (named("Keychains") || named("Mobile Documents") || named("CloudStorage")));
+            previous = c;
+            hit
+        })
 }
 
 /// The exclusion and system-location rules for one scan, prepared once so each visited
@@ -114,9 +150,9 @@ impl Scope {
     }
     fn inside(path: &str, roots: &[String]) -> bool {
         if is_canonical(path) {
-            roots.iter().any(|r| under(path, r))
+            roots.iter().any(|r| under_folded(path, r))
         } else {
-            roots.iter().any(|r| contains(path, r))
+            roots.iter().any(|r| contains_folded(path, r))
         }
     }
     pub fn excludes(&self, path: &str) -> bool {
@@ -139,7 +175,8 @@ pub fn protected(path: &str) -> bool {
         "/Applications",
         &(h.clone() + "/Applications"),
     ]
-    .contains(&p.as_str())
+    .iter()
+    .any(|q| q.eq_ignore_ascii_case(&p))
         || system_excluded(&p)
 }
 /// Generated output, dependency stores and tool caches across ecosystems. Duplicate
@@ -317,18 +354,34 @@ fn ancestors(path: &str) -> impl Iterator<Item = &str> {
         (parent != path).then_some(parent)
     })
 }
-/// macOS packages are listed as single items; traversal does not enter them.
+/// macOS packages are listed as single items; traversal does not enter them, so nothing
+/// inside a library or document bundle is ever offered on its own.
 pub const PACKAGE_EXTENSIONS: &[&str] = &[
     "app",
+    "appex",
     "bundle",
+    "docset",
+    "fcpbundle",
     "framework",
-    "xcarchive",
+    "imovielibrary",
+    "kext",
+    "key",
+    "logicx",
+    "musiclibrary",
+    "numbers",
+    "pages",
+    "photolibrary",
     "photoslibrary",
     "playground",
+    "plugin",
+    "rtfd",
+    "sparsebundle",
+    "xcarchive",
+    "xpc",
 ];
 pub fn package(path: &str) -> bool {
     Path::new(path)
         .extension()
         .and_then(|s| s.to_str())
-        .is_some_and(|e| PACKAGE_EXTENSIONS.contains(&e))
+        .is_some_and(|e| PACKAGE_EXTENSIONS.iter().any(|p| p.eq_ignore_ascii_case(e)))
 }

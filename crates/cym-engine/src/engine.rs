@@ -75,6 +75,7 @@ impl Engine {
         emit: &(dyn Fn(ScanEvent) + Sync),
         store: Option<&ResultStore>,
     ) {
+        let context = &self.services.scoped(context);
         let emit = Mutex::new(emit);
         let send = |event: ScanEvent| {
             if let Ok(emit) = emit.lock() {
@@ -158,9 +159,13 @@ impl Engine {
             .install(|| self.results.remove_missing(&|path| services.exists(path)))
     }
     pub fn execute(&self, request: &ActionRequest, control: &ScanControl) -> Vec<ActionResult> {
+        let request = ActionRequest {
+            context: self.services.scoped(&request.context),
+            ..request.clone()
+        };
         self.services
             .io
-            .install(|| actions::execute(&self.services, &self.registry, request, control))
+            .install(|| actions::execute(&self.services, &self.registry, &request, control))
     }
     /// Executes an action on stored findings by ID and drops rows that were applied or are
     /// already gone.

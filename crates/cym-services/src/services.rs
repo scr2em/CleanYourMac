@@ -103,6 +103,30 @@ impl Services {
             .map(|data| String::from_utf8_lossy(&data).into_owned())
     }
 
+    /// The context with every root and exclusion also spelled the way the disk resolves it,
+    /// so an exclusion typed through a symbolic link or firmlink (`/tmp`, a linked `~/Code`)
+    /// still matches the resolved paths a scan produces.
+    pub fn scoped(&self, context: &ScanContext) -> ScanContext {
+        let both = |paths: &[String]| {
+            let mut out: Vec<String> = vec![];
+            for path in paths {
+                let path = policy::canonical(path);
+                let resolved = self.fs.resolve(&path);
+                for p in [Some(path), resolved].into_iter().flatten() {
+                    if !out.contains(&p) {
+                        out.push(p);
+                    }
+                }
+            }
+            out
+        };
+        ScanContext {
+            roots: both(&context.roots),
+            exclusions: both(&context.exclusions),
+            ..context.clone()
+        }
+    }
+
     /// Canonical, physically distinct roots with nested roots folded into their ancestors.
     pub fn roots(&self, paths: &[String]) -> Vec<String> {
         let resolved: Vec<String> = paths
@@ -165,14 +189,26 @@ impl Services {
         let scope = policy::Scope::new(context);
         for root in self.roots(&context.roots) {
             control.check()?;
-            if context.excludes(&root) || policy::system_excluded(&root) {
+            if context.excludes(&root) {
                 continue;
             }
-            if !self.is_dir(&root) {
+            if policy::system_excluded(&root) {
+                warnings.push(format!(
+                    "Skipped {root}: system and credential locations are never scanned."
+                ));
+                continue;
+            }
+            let Some(device) = self
+                .entry(&root)
+                .ok()
+                .filter(|e| e.directory)
+                .map(|e| e.identity.device)
+            else {
                 warnings.push(format!("Root is unavailable: {root}"));
                 continue;
-            }
+            };
             let mut limited = false;
+            let mut mounts = vec![];
             self.walker.walk(
                 &root,
                 control,
@@ -190,6 +226,12 @@ impl Services {
                     {
                         return Ok(Visit::Skip);
                     }
+                    // Another drive, disk image or network share mounted inside the root is
+                    // never entered; choose it as a folder to scan it.
+                    if e.directory && e.identity.device != device {
+                        mounts.push(e.path().to_owned());
+                        return Ok(Visit::Skip);
+                    }
                     Ok(if visit(e)? && e.directory && !policy::package(e.path()) {
                         Visit::Descend
                     } else {
@@ -197,6 +239,11 @@ impl Services {
                     })
                 },
             )?;
+            for mount in mounts {
+                warnings.push(format!(
+                    "Skipped {mount}: it is on another drive. Choose it as a folder to scan it."
+                ));
+            }
             if limited {
                 warnings.push(format!(
                     "Scan reached its {}-entry limit; choose narrower folders.",
