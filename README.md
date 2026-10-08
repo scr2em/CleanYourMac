@@ -10,9 +10,14 @@ CleanYourMac finds items that use disk space on your Mac. Examples are large dow
 
 **You control all changes.** The app does not select items for you. Before an action starts, you review the items and the result of the action. Your scan results and your files stay on your Mac.
 
-![CleanYourMac overview with storage totals and cleanup tools](docs/screenshots/overview.jpg)
+![CleanYourMac overview: storage totals and the recommended fixes](docs/screenshots/overview.png)
 
-*The screenshots show the real app with example data. Actions do not operate in the demo.*
+- **Made for developers.** It knows `node_modules`, Python environments, Cargo `target`, DerivedData, simulators, toolchains and Git worktrees. It shows the project that owns each item.
+- **Cleans up after AI tools.** It sorts the caches, transcripts and models of Claude Code, Codex, Gemini CLI, Cursor, Ollama and 20 more tools into Safe, Review and Caution tiers.
+- **Safe by design.** Items go to the Trash. The app examines each item again before it acts, and it does not touch credentials, settings or files that Git tracks.
+- **Fast.** A Rust core reads the disk in parallel and keeps a million results searchable.
+
+*The screenshots show the app design with example data.*
 
 ## What the app finds
 
@@ -58,23 +63,46 @@ You can also download the app from [GitHub Releases](https://github.com/scr2em/C
 
 When you move an item to the Trash, you can restore it. The disk space becomes free when you empty the Trash. The Activity page keeps a local record of each action. From Activity, you can restore an item that is in the Trash and that has not changed.
 
-### Search the results
+## A tour of the app
 
-Search the dependencies of your projects. See the totals and the project details on one page.
-
-![Node dependency name search with aggregate totals and item details](docs/screenshots/node-dependencies.jpg)
-
-### Examine a simulator
-
-See the device, runtime, state and app-data size before you reset or delete a simulator.
-
-![Simulator app-data results and device details](docs/screenshots/simulators.jpg)
-
-### Find processes that continue to run
-
-See the CPU use, memory use, process identity and working folder before you quit a process.
-
-![Orphan-process results with CPU and memory totals](docs/screenshots/orphan-processes.jpg)
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/ai-tools.png" alt="AI Tools page with Claude Code, Ollama, Cursor and Gemini items in Safe, Review and Caution tiers"><br><strong>AI Tools.</strong> Transcripts, caches and models of AI tools, each with a risk tier and the project of each session.</td>
+<td width="50%"><img src="docs/screenshots/ai-tools-dark.png" alt="AI Tools page in dark appearance"><br><strong>Light and dark.</strong> Every page follows the appearance of your Mac, in seven palettes.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/dependencies.png" alt="Dependencies page with node_modules, a Python environment, Pods and the Cargo registry"><br><strong>Dependencies.</strong> Installed packages of each project, and the shared stores that all projects use.</td>
+<td><img src="docs/screenshots/build-artifacts.png" alt="Build Artifacts page with Cargo, Xcode, Flutter, Gradle and Next.js output"><br><strong>Build Artifacts.</strong> Output that the next build makes again, identified by the files of its project.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/git-worktrees.png" alt="Git Worktrees page with linked, locked and orphaned worktrees"><br><strong>Git Worktrees.</strong> Branch, state and size of each worktree. Worktrees with local changes stay.</td>
+<td><img src="docs/screenshots/xcode-data.png" alt="Xcode Data page with DerivedData, device support and a protected archive"><br><strong>Xcode Data.</strong> DerivedData and device support. Archives are protected.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/simulators.png" alt="Simulators page with devices and an installed runtime"><br><strong>Simulators.</strong> App data of each device, with its runtime and the date of the last boot.</td>
+<td><img src="docs/screenshots/toolchains.png" alt="Toolchains page with Swift, Android, Rust, Python and Node.js versions"><br><strong>Toolchains &amp; SDKs.</strong> Installed language versions. The version in use stays.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/caches-logs.png" alt="Caches and Logs page with Gradle, Homebrew, Cargo and pip caches"><br><strong>Caches &amp; Logs.</strong> Caches that tools download or make again, with the cost of each removal.</td>
+<td><img src="docs/screenshots/large-files.png" alt="Large Files page with installers, disk images and videos"><br><strong>Large Files.</strong> Files of 100 MB or more, with size, age and last-use filters.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/exact-duplicates.png" alt="Exact Duplicates page with originals and duplicate copies"><br><strong>Exact Duplicates.</strong> Verified identical files. The original of each group stays.</td>
+<td><img src="docs/screenshots/storage-explorer.png" alt="Storage Explorer page with the folders of the home folder by size"><br><strong>Storage Explorer.</strong> What uses space in a folder, with the date of last use.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/downloads.png" alt="Downloads page with installers and documents"><br><strong>Downloads.</strong> Installers and files that you downloaded, with the date that you last opened them.</td>
+<td><img src="docs/screenshots/trash.png" alt="Trash page with items selected to empty"><br><strong>Trash.</strong> The exact items in your Trash, before you empty it.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/applications.png" alt="Applications page with apps and their related files as separate items"><br><strong>Applications.</strong> Each app and its related files, as separate items. Running and Apple apps are protected.</td>
+<td><img src="docs/screenshots/app-leftovers.png" alt="App Leftovers page with files of apps that are not installed"><br><strong>App Leftovers.</strong> Files that have the name of an app that is not installed.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/orphan-processes.png" alt="Orphan Processes page with node, esbuild, python and ruby processes"><br><strong>Orphan Processes.</strong> Processes that their parent left running, with CPU and memory use.</td>
+<td><img src="docs/screenshots/overview.png" alt="Overview page with recommended fixes"><br><strong>Overview.</strong> One scan for all tools, and the fixes that free the most space.</td>
+</tr>
+</table>
 
 ## How each tool operates
 
