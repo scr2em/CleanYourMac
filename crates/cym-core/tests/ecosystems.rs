@@ -1273,3 +1273,53 @@ fn one_classifier_decides_what_a_project_folder_is() {
         assert!(!modules::project::generated_name(name), "{name}");
     }
 }
+
+/// Caches & Logs checks the app that owns each cache the way its scan classified it: an
+/// editor's cache waits for the editor, not for a leftover rule that happens to match too.
+#[test]
+fn caches_wait_for_the_app_the_scan_named() {
+    let f = Fixture::new();
+    let home = f.dir("home");
+    f.write("home/Library/Application Support/Code/Code Cache/js/a", "x");
+    f.write("home/Library/Application Support/Code/GPUCache/a", "x");
+    f.write("home/Library/Caches/Google/AndroidStudio2024.1/a", "x");
+    f.write("home/Library/Caches/Google/Chrome/Default/Cache/a", "x");
+    let module = Arc::new(CachesModule {
+        home: Some(home),
+        ..Default::default()
+    });
+    let s = services(&f);
+    let report = Engine::new(s.clone(), builtin(&f).register(module.clone())).scan_report(
+        &["caches".into()],
+        &f.context(),
+        &ScanControl::default(),
+    );
+    let find = |suffix: &str| {
+        report
+            .findings
+            .iter()
+            .find(|r| r.resource.path().is_some_and(|p| p.ends_with(suffix)))
+            .unwrap_or_else(|| panic!("{suffix}: {:?}", report.findings))
+    };
+    let code = find("/Code/Code Cache");
+    let chrome = find("/Caches/Google/Chrome");
+    assert!(module.in_use(&s, code, ActionKind::Trash).is_none());
+    assert!(module.in_use(&s, chrome, ActionKind::Trash).is_none());
+    let running = |bundle_id: &str, path: &str| Services {
+        apps: Arc::new(FakeApps(vec![RunningApp {
+            pid: 7,
+            bundle_id: bundle_id.into(),
+            path: path.into(),
+        }])),
+        ..s.clone()
+    };
+    let vscode = running(
+        "com.microsoft.VSCode",
+        "/Applications/Visual Studio Code.app",
+    );
+    let reason = module.in_use(&vscode, code, ActionKind::Trash).unwrap();
+    assert!(reason.contains("Visual Studio Code"), "{reason}");
+    let google = running("com.google.Chrome", "/Applications/Google Chrome.app");
+    let reason = module.in_use(&google, chrome, ActionKind::Trash).unwrap();
+    assert!(reason.contains("Google Chrome"), "{reason}");
+}

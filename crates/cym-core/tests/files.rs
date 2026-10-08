@@ -558,3 +558,37 @@ fn checking_only_new_components_matches_the_full_check() {
         assert!(checked > 10_000, "{checked}");
     }
 }
+
+#[test]
+fn home_paths_match_whole_components_only() {
+    let home = "/Users/al";
+    assert_eq!(policy::home_relative("/Users/al", home), Some(""));
+    assert_eq!(policy::home_relative("/Users/al/x/y", home), Some("x/y"));
+    assert_eq!(policy::home_relative("/Users/alice/x", home), None);
+    assert_eq!(policy::home_relative("/Users/al.old/.x", home), None);
+    assert_eq!(policy::home_relative("/Users/al/x", ""), None);
+    assert_eq!(policy::abbreviate_home("/Users/al", home), "~");
+    assert_eq!(
+        policy::abbreviate_home("/Users/al/Movies", home),
+        "~/Movies"
+    );
+    assert_eq!(
+        policy::abbreviate_home("/Users/alice", home),
+        "/Users/alice"
+    );
+    assert_eq!(
+        policy::abbreviate_home_in(
+            r#"{"path":"/Users/al/a","other":"/Users/alice/b","p":"/private/Users/al/c","h":"/Users/al"} in /Users/al"#,
+            home
+        ),
+        r#"{"path":"~/a","other":"/Users/alice/b","p":"/private/Users/al/c","h":"~"} in ~"#
+    );
+    assert_eq!(policy::abbreviate_home_in("/a/b", "/"), "/a/b");
+    // A folder next to the home folder is not app data inside it.
+    use cym_core::modules::storage::{app_data, keep_rank};
+    assert!(app_data("/Users/al/Library/x", home));
+    assert!(app_data("/Users/al/.ollama/models/x", home));
+    assert!(!app_data("/Users/al.old/Movies/x.mov", home));
+    assert!(!app_data("/Users/al/Movies/x.mov", home));
+    assert!(keep_rank("/Users/al.old/x", home) < keep_rank("/Users/al/.cache/x", home));
+}

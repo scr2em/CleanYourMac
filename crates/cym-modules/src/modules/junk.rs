@@ -178,11 +178,7 @@ impl MacJunk {
     }
     /// The location and first `*` match of an existing path.
     fn locate(&self, home: &str, path: &str) -> Option<(&JunkLocation, Option<String>)> {
-        let relative: Vec<&str> = path
-            .strip_prefix(home)?
-            .strip_prefix('/')?
-            .split('/')
-            .collect();
+        let relative: Vec<&str> = policy::home_relative(path, home)?.split('/').collect();
         self.locations.iter().find_map(|l| {
             let parts: Vec<&str> = l.path.split('/').collect();
             if parts.len() != relative.len() {
@@ -306,24 +302,33 @@ impl MacJunk {
     }
     /// Checks before removing a leftover: `None` when the path is not one.
     pub fn preflight(&self, s: &Services, home: &str, path: &str) -> Option<Result<()>> {
-        let (location, capture) = self.locate(home, path)?;
-        Some(match capture.as_deref() {
-            Some(app) if location.app_folder => app_closed(s, app),
-            Some(capture) if location.per_app => owners_closed(s, &[bundle(capture)]),
-            _ => Ok(()),
-        })
+        if let Some((location, capture)) = self.locate(home, path) {
+            return Some(match capture.as_deref() {
+                Some(app) if location.app_folder => app_closed(s, &[app]),
+                Some(capture) if location.per_app => owners_closed(s, &[bundle(capture)]),
+                _ => Ok(()),
+            });
+        }
+        // A folder inside a vendor's cache folder, such as `Caches/Google/Chrome`, listed on
+        // its own when the vendor folder also holds a cache another tool reports. Its app is
+        // named after the folder, alone or after the vendor ("Google Chrome").
+        let (vendor_path, child) = path.rsplit_once('/')?;
+        let (location, vendor) = self.locate(home, vendor_path)?;
+        let vendor = vendor.filter(|_| location.per_app && !location.app_folder)?;
+        Some(
+            owners_closed(s, &[bundle(&vendor)])
+                .and_then(|()| app_closed(s, &[child, &format!("{vendor} {child}")])),
+        )
     }
 }
-/// Fails while an app named `name` (its bundle's file name) is running.
-fn app_closed(s: &Services, name: &str) -> Result<()> {
+/// Fails while an app with one of `names` (its bundle's file name) is running.
+fn app_closed(s: &Services, names: &[&str]) -> Result<()> {
     let running = s.apps.running()?;
-    match running.iter().find(|a| {
-        std::path::Path::new(&a.path)
-            .file_stem()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.eq_ignore_ascii_case(name))
+    match running.iter().find_map(|a| {
+        let stem = std::path::Path::new(&a.path).file_stem()?.to_str()?;
+        names.iter().find(|n| n.eq_ignore_ascii_case(stem))
     }) {
-        Some(_) => Err(format!("Quit {name} before removing its cache.")),
+        Some(name) => Err(format!("Quit {name} before removing its cache.")),
         None => Ok(()),
     }
 }

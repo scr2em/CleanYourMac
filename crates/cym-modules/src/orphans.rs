@@ -265,12 +265,7 @@ pub fn active_tools(services: &Services, directory: Option<&str>) -> Vec<String>
 /// project or tool a process belongs to.
 fn describe(p: &Snapshot) -> String {
     let home = policy::home();
-    let tilde = |path: &str| match path.strip_prefix(&home) {
-        Some(rest) if !home.is_empty() && (rest.is_empty() || rest.starts_with('/')) => {
-            format!("~{rest}")
-        }
-        _ => path.to_owned(),
-    };
+    let tilde = |path: &str| policy::abbreviate_home(path, &home);
     let mut text = format!("{} (PID {})", p.name, p.identity.pid);
     if let Some(cwd) = p.cwd.as_deref().filter(|c| !c.is_empty() && *c != "/") {
         text += &format!(" in {}", tilde(cwd));

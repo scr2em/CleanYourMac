@@ -9,6 +9,50 @@ pub fn home() -> String {
         trimmed => trimmed.into(),
     }
 }
+/// `path` below `home`, without the separator: `Some("")` for home itself, `None` outside
+/// it. Only whole components match, so `/Users/al` does not hold `/Users/alice`.
+pub fn home_relative<'a>(path: &'a str, home: &str) -> Option<&'a str> {
+    if home.is_empty() {
+        return None;
+    }
+    let rest = path.strip_prefix(home)?;
+    if rest.is_empty() {
+        Some(rest)
+    } else {
+        rest.strip_prefix('/')
+    }
+}
+/// `path` with the home folder written as `~`, as Finder and shells show it.
+pub fn abbreviate_home(path: &str, home: &str) -> String {
+    match home_relative(path, home) {
+        Some("") => "~".into(),
+        Some(rest) => format!("~/{rest}"),
+        None => path.into(),
+    }
+}
+/// `text` with each path that starts at the home folder written from `~`. Only whole paths
+/// match: with home `/Users/al`, `/Users/alice` and `/private/Users/al` stay as they are.
+pub fn abbreviate_home_in(text: &str, home: &str) -> String {
+    if home.is_empty() || home == "/" {
+        return text.into();
+    }
+    let path_char = |c: char| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-');
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find(home) {
+        let after = &rest[i + home.len()..];
+        let starts = !rest[..i].chars().next_back().is_some_and(path_char);
+        let ends = after
+            .chars()
+            .next()
+            .is_none_or(|c| c == '/' || !path_char(c));
+        out.push_str(&rest[..i]);
+        out.push_str(if starts && ends { "~" } else { home });
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
 pub fn canonical(path: &str) -> String {
     let expanded = if path == "~" {
         home()

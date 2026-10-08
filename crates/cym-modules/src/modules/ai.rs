@@ -425,10 +425,7 @@ fn worktree(name: &str, cwd: Option<&str>) -> bool {
     name.contains("--claude-worktrees-") || cwd.is_some_and(|c| c.contains("/.claude/worktrees/"))
 }
 fn short(path: &str, home: &str) -> String {
-    match path.strip_prefix(home) {
-        Some(rest) if rest.is_empty() || rest.starts_with('/') => format!("~{rest}"),
-        _ => path.to_owned(),
-    }
+    policy::abbreviate_home(path, home)
 }
 
 /// Live Claude Code sessions recorded in `sessions/<pid>.json`.

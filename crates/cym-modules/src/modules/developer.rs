@@ -937,11 +937,7 @@ fn find_location<'a>(
     locations: &'a [CacheLocation],
     path: &str,
 ) -> Option<&'a CacheLocation> {
-    let relative: Vec<&str> = path
-        .strip_prefix(home)?
-        .strip_prefix('/')?
-        .split('/')
-        .collect();
+    let relative: Vec<&str> = policy::home_relative(path, home)?.split('/').collect();
     locations.iter().find(|l| {
         let parts: Vec<&str> = l.path.split('/').collect();
         parts.len() == relative.len()
@@ -1072,11 +1068,14 @@ impl ScanModule for CachesModule {
     }
     fn in_use(&self, s: &Services, f: &Finding, _: ActionKind) -> Option<String> {
         let path = f.resource.path()?;
-        // A macOS leftover only needs its app closed; developer tools are irrelevant to it.
-        if let Some(result) = self.mac.preflight(s, &self.home(), path) {
-            return result.err();
-        }
+        // The scan lists a macOS leftover only where no cache above claims the folder, so
+        // the leftover check applies only then. It needs just its app closed.
         let location = self.location(path);
+        if location.is_none() {
+            if let Some(result) = self.mac.preflight(s, &self.home(), path) {
+                return result.err();
+            }
+        }
         if let Some(reason) = location.and_then(|l| owners_closed(s, l.apps).err()) {
             return Some(reason);
         }

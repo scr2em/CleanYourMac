@@ -386,7 +386,7 @@ impl ToolchainsModule {
     }
     fn locate(&self, path: &str) -> Option<(&ToolchainLocation, Vec<String>)> {
         let home = self.home();
-        let relative = path.strip_prefix(&home)?.strip_prefix('/')?;
+        let relative = policy::home_relative(path, &home)?;
         self.locations
             .iter()
             .find_map(|l| l.captures(relative).map(|c| (l, c)))

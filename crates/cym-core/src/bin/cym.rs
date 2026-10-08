@@ -91,14 +91,7 @@ fn main() {
             "complete": report.warnings.is_empty(),
         });
         match serde_json::to_string_pretty(&output) {
-            Ok(text) => println!(
-                "{}",
-                if home.is_empty() {
-                    text
-                } else {
-                    text.replace(&home, "~")
-                }
-            ),
+            Ok(text) => println!("{}", policy::abbreviate_home_in(&text, &home)),
             Err(e) => {
                 eprintln!("Scan failed: {e}");
                 exit(1)
@@ -107,11 +100,7 @@ fn main() {
     } else {
         for f in &report.findings {
             let size = f.bytes.map(bytes).unwrap_or_else(|| "—".into());
-            let subtitle = if home.is_empty() {
-                f.subtitle.clone()
-            } else {
-                f.subtitle.replace(&home, "~")
-            };
+            let subtitle = policy::abbreviate_home_in(&f.subtitle, &home);
             println!("{size}\t{}\t{subtitle}", f.title);
         }
         for w in &report.warnings {

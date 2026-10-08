@@ -356,15 +356,18 @@ fn finder_file(name: &str) -> bool {
     name == ".DS_Store" || name == ".localized"
 }
 
-/// Whether a file belongs to an app or tool: anything in the Library folder or in a hidden
-/// folder of the home folder (`~/.ollama`, `~/.colima`, `~/.android`, …).
+/// Whether a file in the home folder belongs to an app or tool: anything in the Library
+/// folder, or in a hidden folder at any depth (`~/.ollama`, `~/.colima`, a project's `.idea`).
 pub fn app_data(path: &str, home: &str) -> bool {
-    path.strip_prefix(home).is_some_and(|rest| {
-        let mut parts = rest.split('/').filter(|c| !c.is_empty());
-        let first = parts.next().unwrap_or_default();
-        first.eq_ignore_ascii_case("Library")
-            || rest.split('/').any(|c| c.len() > 1 && c.starts_with('.'))
+    policy::home_relative(path, home).is_some_and(|rest| {
+        let first = rest.split('/').next().unwrap_or_default();
+        first.eq_ignore_ascii_case("Library") || hidden_folder(rest)
     })
+}
+fn hidden_folder(relative: &str) -> bool {
+    relative
+        .split('/')
+        .any(|c| c.len() > 1 && c.starts_with('.'))
 }
 const DISPOSABLE: u8 = 3;
 const KEPT_IN_DISPOSABLE: &str =
@@ -373,9 +376,7 @@ const KEPT_IN_DISPOSABLE: &str =
 pub fn keep_rank(path: &str, home: &str) -> u8 {
     let lower = path.to_ascii_lowercase();
     // Hidden folders in the home folder hold tool data and settings.
-    let hidden = path
-        .strip_prefix(home)
-        .is_some_and(|rest| rest.split('/').any(|c| c.len() > 1 && c.starts_with('.')));
+    let hidden = policy::home_relative(path, home).is_some_and(hidden_folder);
     if hidden
         || lower.contains("/caches/")
         || lower.contains("/cache/")
