@@ -361,7 +361,11 @@ impl ScanModule for XcodeModule {
         Ok(())
     }
     fn in_use(&self, s: &Services, f: &Finding, _: ActionKind) -> Option<String> {
-        let apps = s.apps.running().unwrap_or_default();
+        // Not knowing which apps run is treated as Xcode running, as everywhere else.
+        let apps = match s.apps.running() {
+            Ok(apps) => apps,
+            Err(e) => return Some(format!("Cannot check whether Xcode is running: {e}")),
+        };
         let simulator = f
             .resource
             .path()

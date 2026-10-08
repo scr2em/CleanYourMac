@@ -127,7 +127,14 @@ impl ScanModule for InstallersModule {
     }
     fn in_use(&self, s: &Services, f: &Finding, _: ActionKind) -> Option<String> {
         let path = f.resource.path()?;
-        let running = s.apps.running().ok()?;
+        let running = match s.apps.running() {
+            Ok(running) => running,
+            Err(e) => {
+                return Some(format!(
+                    "Cannot check whether this installer is running: {e}"
+                ))
+            }
+        };
         running
             .iter()
             .find(|a| policy::canonical(&a.path) == policy::canonical(path))
