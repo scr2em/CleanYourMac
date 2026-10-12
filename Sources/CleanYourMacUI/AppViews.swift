@@ -14,8 +14,12 @@ public struct WorkspaceView: View {
             // The page floats as a rounded sheet on the window, the app's signature shape. All
             // SwiftUI, so it keeps inside the safe area that newer macOS uses to slide content
             // under the sidebar and toolbar (an AppKit split view here ignored it).
+            // The column's minimum size is fixed, never the page's: AppKit re-solves the window's
+            // constraints whenever a split view column's minimum changes, and a page whose height
+            // follows its content (warnings, largest items, wrapped text) could keep that going
+            // until AppKit aborts the app. A page taller than the window is clipped instead.
             content
-                .frame(minWidth: Layout.contentMin, maxWidth: .infinity, maxHeight: .infinity)
+                .frame(minWidth: Layout.contentMin, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 .background(Palette.canvas)
             .clipShape(RoundedRectangle(cornerRadius: Layout.sheetRadius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: Layout.sheetRadius, style: .continuous).strokeBorder(Palette.border, lineWidth: Stroke.hairline))
