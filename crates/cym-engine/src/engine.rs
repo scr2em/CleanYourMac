@@ -267,7 +267,8 @@ impl Engine {
         let recorded = self
             .history()
             .into_iter()
-            .find(|r| r.id == row.id)
+            // Swift's UUID encoder uses uppercase hex; UUID case does not change identity.
+            .find(|r| r.id.eq_ignore_ascii_case(&row.id))
             .ok_or("This action is not in the local history.")?;
         actions::restore(&self.services, &recorded, &ScanControl::default())
     }

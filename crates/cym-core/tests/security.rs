@@ -152,6 +152,46 @@ fn paths_must_be_plain_and_restores_come_from_the_journal() {
 }
 
 #[test]
+fn restoring_uuid_case_uses_only_recorded_paths() {
+    let f = Fixture::new();
+    let original = f.write("notes.txt", "keep these notes");
+    let engine = Engine::new(services(&f), builtin(&f));
+    let k = ScanControl::default();
+    let finding = file_finding(
+        "storage:notes",
+        "storage",
+        engine.services.entry(&original).unwrap().identity,
+    );
+    let mut result = engine
+        .execute(
+            &ActionRequest {
+                findings: vec![finding],
+                kind: ActionKind::Trash,
+                context: f.context(),
+                acknowledged: vec![],
+                force: false,
+            },
+            &k,
+        )
+        .remove(0);
+    assert_eq!(result.outcome, Outcome::Applied, "{}", result.message);
+    let trashed = result.trash_path.clone().unwrap();
+    // Match the UUID spelling sent back by Swift, with caller-controlled paths that
+    // must be ignored in favor of the journal's own record.
+    result.id = result.id.to_ascii_uppercase();
+    let forged = f.at("not-the-original.txt");
+    result.original_path = Some(forged.clone());
+    result.trash_path = Some(f.at("not-the-trash-item.txt"));
+    engine.restore(&result).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&original).unwrap(),
+        "keep these notes"
+    );
+    assert!(!std::path::Path::new(&trashed).exists());
+    assert!(!std::path::Path::new(&forged).exists());
+}
+
+#[test]
 fn restoring_never_replaces_a_new_file() {
     let f = Fixture::new();
     let from = f.write("a.txt", "trashed");
