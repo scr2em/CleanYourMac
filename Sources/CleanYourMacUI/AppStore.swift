@@ -234,10 +234,11 @@ public final class AppStore {
     /// With chosen folders, every tool is limited to them, including those that read fixed
     /// locations such as caches, toolchains and apps.
     public var context: ScanContext {
-        ScanContext(
-            roots: selectedModuleID == "storage" && !storageNavigation.isEmpty ? [storageNavigation.last!] : scanRoots,
+        let browsing = selectedModuleID == "storage" && !storageNavigation.isEmpty
+        return ScanContext(
+            roots: browsing ? [storageNavigation.last!] : scanRoots,
             exclusions: exclusions, ignoredProcessNames: ignoredNames,
-            limitToRoots: scanPlace == .folders && !demo
+            limitToRoots: !demo && (scanPlace == .folders || browsing)
         )
     }
     public var enabledModules: [ModuleDescriptor] { modules.filter { !disabledModules.contains($0.id) } }
