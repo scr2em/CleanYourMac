@@ -4,6 +4,7 @@ build/
 *.xcuserstate
 coverage/
 .test-fixtures/
+test-fixtures/
 target/
 /.bench-fixture/
 /scripts/npkill-compare/node_modules/

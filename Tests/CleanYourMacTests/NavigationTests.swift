@@ -8,6 +8,13 @@ import Testing
     for _ in 0..<500 where store.isScanning { try await Task.sleep(for: .milliseconds(10)) }
 }
 
+@MainActor private func queryDemo(_ store: AppStore) async throws {
+    await store.requery()
+    // Demo startup can supersede this query; wait for its rows to be published.
+    for _ in 0..<200 where store.queryID == 0 { try await Task.sleep(for: .milliseconds(10)) }
+    try #require(store.queryID != 0)
+}
+
 @MainActor @Test func unscannedToolNeverInheritsAnotherToolsCompletion() async throws {
     let fixture = try Fixture(); defer { fixture.clean() }
     try fixture.write("app/package.json", "{}")
@@ -15,6 +22,7 @@ import Testing
     let defaults = try #require(UserDefaults(suiteName: "org.cleanyourmac.test." + UUID().uuidString))
     let store = AppStore(defaults: defaults, core: CoreEngine(journalPath: fixture.path + "/history.json"))
     store.roots = [fixture.path]
+    store.scanPlace = .folders
     store.selectedModuleID = "node"
     store.scan()
     try await waitForScan(store)
@@ -40,7 +48,7 @@ import Testing
     let defaults = try #require(UserDefaults(suiteName: "org.cleanyourmac.test." + UUID().uuidString))
     let store = AppStore(demo: true, defaults: defaults, core: CoreEngine())
     #expect(store.selectedModuleID == "node")
-    await store.requery()
+    try await queryDemo(store)
     #expect(await store.rows(0..<2).map(\.id) == ["demo-node", "demo-node-2"])
     store.sortAscending = true
     await store.requery()
@@ -64,7 +72,7 @@ import Testing
     let defaults = try #require(UserDefaults(suiteName: "org.cleanyourmac.test." + UUID().uuidString))
     let store = AppStore(demo: true, demoRows: 50_000, defaults: defaults, core: CoreEngine())
     #expect(store.selectedModuleID == "large")
-    await store.requery()
+    try await queryDemo(store)
     #expect(store.resultTotal == 10_000)
     #expect(store.row(at: 9_999) == nil)
     store.prefetch(9_999)
@@ -80,7 +88,7 @@ import Testing
 @MainActor @Test func commandClickTogglesAndShiftClickSelectsAnEligibleRange() async throws {
     let defaults = try #require(UserDefaults(suiteName: "org.cleanyourmac.test." + UUID().uuidString))
     let store = AppStore(demo: true, demoRows: 5_000, defaults: defaults, core: CoreEngine())
-    await store.requery()
+    try await queryDemo(store)
     let rows = await store.rows(0..<40)
     let eligible = rows.filter(\.eligible)
     let first = try #require(eligible.first), last = try #require(eligible.last)
@@ -109,7 +117,7 @@ import Testing
 @MainActor @Test func keyboardMovesTheCursorAndSelectsAllOrNothing() async throws {
     let defaults = try #require(UserDefaults(suiteName: "org.cleanyourmac.test." + UUID().uuidString))
     let store = AppStore(demo: true, demoRows: 5_000, defaults: defaults, core: CoreEngine())
-    await store.requery()
+    try await queryDemo(store)
     let rows = await store.rows(0..<3)
     #expect(await store.moveCursor(by: 1, extend: false) == 0)
     #expect(store.inspectedID == rows[0].id)
@@ -136,7 +144,7 @@ import Testing
 @MainActor @Test func demoStartsWithLoadedInspectorDetails() async throws {
     let defaults = try #require(UserDefaults(suiteName: "org.cleanyourmac.test." + UUID().uuidString))
     let store = AppStore(demo: true, defaults: defaults, core: CoreEngine())
-    await store.requery()
+    try await queryDemo(store)
     for _ in 0..<200 where store.inspected == nil { try await Task.sleep(for: .milliseconds(10)) }
     let finding = try #require(store.inspected)
     #expect(finding.id == "demo-node")
@@ -145,12 +153,13 @@ import Testing
 
 @MainActor @Test func overviewOffersRecommendedFixesThatOpenAReview() async throws {
     let defaults = try #require(UserDefaults(suiteName: "org.cleanyourmac.test." + UUID().uuidString))
-    let store = AppStore(demo: true, demoRows: 5_000, defaults: defaults, core: CoreEngine())
+    let store = AppStore(demo: true, defaults: defaults, core: CoreEngine())
     store.selectedModuleID = "overview"
-    await store.requery()
+    try await queryDemo(store)
     await store.refreshOverview()
-    // Synthetic duplicates are eligible copies, so the duplicate fix is offered.
-    let fix = try #require(store.recommendations.first { $0.id == "duplicate-copies" })
+    // Rebuildable project dependencies are offered; duplicate copies require individual review.
+    #expect(!store.recommendations.contains { $0.moduleID == "duplicates" })
+    let fix = try #require(store.recommendations.first { $0.id == "idle-dependencies" })
     #expect(fix.count == fix.ids.count && fix.bytes > 0)
     #expect(store.recommendedBytes >= fix.bytes)
     store.review(fix)

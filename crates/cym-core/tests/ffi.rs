@@ -46,7 +46,8 @@ fn c_abi_round_trips_requests_scans_and_errors() {
 
         let (sender, receiver) = mpsc::channel::<Value>();
         let request = CString::new(
-            json!({"modules": ["node"], "context": {"roots": [f.path()]}}).to_string(),
+            json!({"modules": ["node"], "context": {"roots": [f.path()], "limitToRoots": true}})
+                .to_string(),
         )
         .unwrap();
         let scan = cym_scan_start(

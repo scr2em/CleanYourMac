@@ -1,5 +1,20 @@
 # Verification
 
+## Latest Mac test run — October 8, 2026
+
+Tested `d4831e2` with the local fixes below on Apple silicon, macOS 26.5.1, Swift 6.3.3 and Rust 1.89.0:
+
+- All 149 default Rust tests pass. The three opt-in native Rust tests also pass: a real Trash/restore round trip, graceful and explicit forced termination of generated orphan processes, and reset/delete of a newly created simulator.
+- All 17 Swift tests pass with `CYM_NATIVE_TESTS=1`, including the native Trash/restore round trip through the Swift bridge.
+- Rust formatting, Clippy with warnings denied, design-token lint and shell syntax checks pass.
+- The arm64 release app builds and passes strict ad hoc signature verification. The Projects and System Data pages rendered correctly during the preceding `fcd0110` launch check; the latest commits change the Rust core and its tests, not those SwiftUI pages.
+
+The native checks exposed a restore failure because Swift encodes UUIDs in uppercase while the journal lookup compared them case-sensitively. The fix accepts UUID case variations while still using only the journal's recorded paths; a fixture regression test verifies both. They also exposed stale Swift executables after Rust-only changes. The core build now removes only generated app/test executables when the static library contents change, forcing SwiftPM to relink them.
+
+The native test script now selects the Mac fixture suite instead of also running the unrelated release-only million-row benchmark in debug mode. Its process test checks that Force Quit is refused before a graceful request; the graceful call itself already observes a survivor for the two-second grace period. Generated files, processes and simulator devices were cleaned up. These fixes were committed on October 12, 2026, after the default Rust and Swift suites passed again on macOS 27.0.1.
+
+This run does not cover Intel execution, older macOS versions, the release-only million-row benchmark, or cleanup against live container engines and AI tools. The checks below describe that remaining coverage.
+
 ## macOS preview verification — October 8, 2026
 
 Verified locally after the SVG resource update:
@@ -54,10 +69,9 @@ The Rust tests also pass on Linux (37 tests, plus a doc example that does not ru
 
 Swift tests cover the bridge: descriptor decoding, streamed findings, `Resource` round trips through the core, fail-closed actions and history, analytics, cancellation and the navigation state.
 
-Not yet re-run after the migration:
+Remaining manual appearance coverage:
 
-- the native tests (`scripts/test-native.sh`), which cover a real Trash round trip, generated orphan processes and a disposable simulator;
-- a manual review of the packaged app with the new palettes.
+- a review of every palette in both light and dark appearance.
 
 Written on Linux and only type-checked for `aarch64-apple-darwin`, so first verified on a Mac:
 

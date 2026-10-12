@@ -4,8 +4,8 @@
 mod common;
 use common::*;
 use cym_core::{
-    adapters::journal::MemoryJournal, model::*, modules, orphans, ports::*, simulator::Simctl,
-    Engine, Services,
+    adapters::journal::MemoryJournal, model::*, orphans, ports::*, simulator::Simctl, Engine,
+    Services,
 };
 use std::{fs, io::Read, process::Command, sync::Arc, thread, time::Duration};
 
@@ -84,11 +84,12 @@ fn native_orphan_termination_and_explicit_force_quit() {
         let identity = s.processes.inspect(pid).unwrap().identity;
         let candidates = orphans::candidates(&s, &context, &k).unwrap();
         assert!(candidates.iter().any(|(p, _)| p.identity == identity));
+        assert!(orphans::signal(&s, &identity, true, &context, &k).is_err());
         let outcome = orphans::signal(&s, &identity, false, &context, &k).unwrap();
         if ignore_term {
             assert_eq!(outcome, Outcome::Requested);
-            assert!(orphans::signal(&s, &identity, true, &context, &k).is_err());
-            thread::sleep(Duration::from_secs(2));
+            // Graceful signaling already observed the process for the two-second grace
+            // period, so a surviving process is ready for a separate Force Quit request.
             assert_eq!(
                 orphans::signal(&s, &identity, true, &context, &k).unwrap(),
                 Outcome::Applied

@@ -112,7 +112,8 @@ fn file_scans_never_enter_version_control_folders() {
     big("repos/project.mtn");
     big("repo/src/video.mov");
     // A user's own folder that merely shares a plain name is scanned as usual.
-    big("repo/cvs/receipts.pdf");
+    // Keep it in a different parent so CVS and cvs do not alias on macOS volumes.
+    big("personal/cvs/receipts.pdf");
     let engine = Engine::new(services(&f), builtin(&f));
     let paths = |module: &str| -> Vec<String> {
         let mut paths: Vec<String> = scan(&engine, &f, module, vec![f.path()])
@@ -124,7 +125,7 @@ fn file_scans_never_enter_version_control_folders() {
     };
     let large = paths("large");
     assert_eq!(large.len(), 2, "{large:?}");
-    assert!(large[0].ends_with("repo/cvs/receipts.pdf"));
+    assert!(large[0].ends_with("personal/cvs/receipts.pdf"));
     assert!(large[1].ends_with("repo/src/video.mov"));
     // Every pack file holds the same zeros as the video, and none is a duplicate.
     let duplicates = paths("duplicates");

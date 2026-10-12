@@ -515,7 +515,7 @@ private struct WarningView: View {
                 store.warnings.count == 1 ? "1 scan warning · coverage may be incomplete" : "\(store.warnings.count) scan warnings · coverage may be incomplete",
                 symbol: "exclamationmark.triangle.fill", tone: Palette.warning,
                 action: needsAccess ? (title: "Grant Full Disk Access", run: {
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+                    _ = NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
                 }) : nil
             ) {
                 LazyVStack(alignment: .leading, spacing: Space.sm) {

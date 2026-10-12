@@ -187,6 +187,7 @@ public struct Finding: Identifiable, Codable, Hashable, Sendable {
         self.bytes = bytes; self.allocatedBytes = allocatedBytes; self.cpuPercent = cpuPercent; self.memoryBytes = memoryBytes
         self.modifiedAt = modifiedAt; self.lastUsedAt = lastUsedAt
         self.details = details; self.actions = actions; self.risk = risk; self.reason = reason; self.blockedReason = blockedReason; self.badge = badge; self.brand = brand
+        self.acknowledgedActions = []
     }
     public func value(_ label: String) -> String? { details.first { $0.label == label }?.value }
 }

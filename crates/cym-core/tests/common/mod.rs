@@ -7,12 +7,13 @@ use std::{
     time::Duration,
 };
 
-/// A disposable folder outside `target/` (whose name the duplicate finder ignores).
+/// A disposable folder outside build and hidden folders, so duplicate fixtures model
+/// user-managed files rather than data that the safety policy protects.
 pub struct Fixture(pub PathBuf);
 impl Fixture {
     pub fn new() -> Self {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../.test-fixtures")
+            .join("../../test-fixtures")
             .join(uuid::Uuid::new_v4().to_string());
         fs::create_dir_all(&root).unwrap();
         Self(fs::canonicalize(root).unwrap())
@@ -221,13 +222,42 @@ pub fn builtin(fixture: &Fixture) -> cym_core::modules::Registry {
         }))
 }
 
+/// Keep installation scans independent of applications installed on the host.
+struct FixtureFileSystem(Arc<dyn FileSystem>);
+impl FileSystem for FixtureFileSystem {
+    fn inspect(&self, path: &str, allow_link: bool) -> Result<Entry> {
+        self.0.inspect(path, allow_link)
+    }
+    fn children(&self, path: &str) -> Result<Vec<Result<Entry>>> {
+        if path == "/Applications" {
+            Ok(vec![])
+        } else {
+            self.0.children(path)
+        }
+    }
+    fn resolve(&self, path: &str) -> Option<String> {
+        self.0.resolve(path)
+    }
+    fn read(&self, path: &str, limit: u64) -> Result<Vec<u8>> {
+        self.0.read(path, limit)
+    }
+    fn remove(&self, path: &str) -> Result<()> {
+        self.0.remove(path)
+    }
+    fn rename(&self, from: &str, to: &str) -> Result<()> {
+        self.0.rename(from, to)
+    }
+}
+
 /// Native filesystem adapters with fixture Trash and an in-memory journal.
 pub fn services(fixture: &Fixture) -> Services {
+    let native = Services::with_journal(Arc::new(MemoryJournal::default()));
     Services {
+        fs: Arc::new(FixtureFileSystem(native.fs.clone())),
         trash: Arc::new(FixtureTrash(fixture.at(".Trash"))),
         apps: Arc::new(FakeApps::default()),
         processes: Arc::new(FakeProcesses::default()),
-        ..Services::with_journal(Arc::new(MemoryJournal::default()))
+        ..native
     }
 }
 pub fn file_finding(id: &str, module: &str, identity: FileIdentity) -> Finding {

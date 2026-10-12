@@ -14,6 +14,14 @@ private func collect(_ stream: AsyncThrowingStream<ScanEvent, Error>) async thro
     return (findings, warnings)
 }
 
+private func storedFinding(_ core: CoreEngine, path: String, context: ScanContext) async throws -> Finding {
+    _ = try await collect(core.scan(moduleIDs: ["storage"], context: context, store: true))
+    let query = try await core.query(ResultQuery(module: "storage", search: path))
+    let rows = try await core.rows(queryID: query.queryId, offset: 0, limit: query.total)
+    let row = try #require(rows.first { $0.path == path })
+    return try #require(await core.finding(row.id))
+}
+
 @Test func coreDescribesRegisteredModules() {
     let modules = CoreEngine.shared.modules()
     #expect(modules.count == 20)
@@ -27,7 +35,7 @@ private func collect(_ stream: AsyncThrowingStream<ScanEvent, Error>) async thro
     let fixture = try Fixture(); defer { fixture.clean() }
     try fixture.write("app/package.json", "{}")
     try fixture.write("app/node_modules/dependency/index.js")
-    let result = try await collect(CoreEngine.shared.scan(moduleIDs: ["node"], context: ScanContext(roots: [fixture.path])))
+    let result = try await collect(CoreEngine.shared.scan(moduleIDs: ["node"], context: ScanContext(roots: [fixture.path], limitToRoots: true)))
     #expect(result.warnings.isEmpty)
     let finding = try #require(result.findings.first)
     #expect(result.findings.count == 1)
@@ -55,9 +63,7 @@ private func collect(_ stream: AsyncThrowingStream<ScanEvent, Error>) async thro
     let fixture = try Fixture(); defer { fixture.clean() }
     let core = CoreEngine(journalPath: fixture.path + "/history.json")
     let path = try fixture.write("reviewed-file")
-    let scanned = try await collect(core.scan(moduleIDs: ["storage"], context: ScanContext(roots: [fixture.path])))
-    var finding = try #require(scanned.findings.first { $0.resource.path == path })
-    finding.actions = [.trash]
+    let finding = try await storedFinding(core, path: path, context: ScanContext(roots: [fixture.path]))
     let excluded = try await core.execute(ActionRequest(findings: [finding], kind: .trash, context: ScanContext(roots: [fixture.path], exclusions: [path])))
     #expect(excluded.first?.outcome == .failed)
     #expect(FileManager.default.fileExists(atPath: path))
@@ -91,9 +97,7 @@ func nativeTrashRoundTrip() async throws {
     let core = CoreEngine(journalPath: fixture.path + "/history.json")
     let name = "CleanYourMac-native-test-" + UUID().uuidString + ".txt"
     let path = try fixture.write(name, "Disposable native Trash fixture")
-    let scanned = try await collect(core.scan(moduleIDs: ["storage"], context: ScanContext(roots: [fixture.path])))
-    var finding = try #require(scanned.findings.first { $0.resource.path == path })
-    finding.actions = [.trash]
+    let finding = try await storedFinding(core, path: path, context: ScanContext(roots: [fixture.path]))
     let result = try #require(try await core.execute(ActionRequest(findings: [finding], kind: .trash, context: ScanContext(roots: [fixture.path]))).first)
     // Restore only the exact generated fixture, even if an assertion fails.
     defer { if !FileManager.default.fileExists(atPath: path) { Task { try? await core.restore(result) } } }

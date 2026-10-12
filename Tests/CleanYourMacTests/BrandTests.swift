@@ -1,4 +1,4 @@
-import CleanYourMacDesignSystem
+@testable import CleanYourMacDesignSystem
 import Testing
 
 @Test func svgPathDataBecomesAbsoluteCommands() throws {

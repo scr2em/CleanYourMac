@@ -115,7 +115,9 @@ fn containers_list_their_disks_and_offer_only_their_own_cleanup() {
     let result = run(&engine, &f, cache, ActionKind::RunCommand);
     assert_eq!(result.outcome, Outcome::Applied, "{}", result.message);
     assert!(result.message.contains("3.5GB"));
-    let docker = f.at("home/.docker/bin/docker");
+    // A system-installed Docker CLI can take precedence over the fixture's home CLI.
+    // Cleanup must use the same executable that measured the engine.
+    let docker = runner.calls()[0][0].clone();
     assert!(runner.calls().contains(&vec![
         docker.clone(),
         "builder".into(),
