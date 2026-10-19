@@ -11,3 +11,8 @@ rust-version = "1.89"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# macOS 27's dyld rejects some stripped proc-macro dylibs ("mis-aligned LINKEDIT string pool").
+# They only run during the build, so leave them unstripped.
+[profile.release.build-override]
+strip = false
