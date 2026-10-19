@@ -7,7 +7,7 @@ cask "cleanyourmac" do
   desc "Find and review storage clutter, project dependencies, and orphan processes"
   homepage "https://github.com/scr2em/CleanYourMac"
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "CleanYourMac.app"
 
