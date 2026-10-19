@@ -1,6 +1,6 @@
 cask "cleanyourmac" do
-  version "0.1.0-preview.1"
-  sha256 "1227ce0bc14f34c257ddd4fcebe5f1412140465d12f57db6403ec10d7a555649"
+  version "0.1.0-preview.2"
+  sha256 "4e770431658c5aff3f3d318e516d9e34e7b0da874e094078fbd19dc378c56938"
 
   url "https://github.com/scr2em/CleanYourMac/releases/download/v#{version}/CleanYourMac-#{version}-universal.zip"
   name "CleanYourMac"

@@ -55,7 +55,7 @@ brew update
 brew upgrade --cask scr2em/cleanyourmac/cleanyourmac
 ```
 
-You can also download the app from [GitHub Releases](https://github.com/scr2em/CleanYourMac/releases/tag/v0.1.0-preview.1). Unzip the file. Then move the app to the Applications folder.
+You can also download the app from [GitHub Releases](https://github.com/scr2em/CleanYourMac/releases/tag/v0.1.0-preview.2). Unzip the file. Then move the app to the Applications folder.
 
 **Preview release:** The app is not notarized by Apple at this time. macOS can ask for your approval when you open the app for the first time.
 
