@@ -6,21 +6,28 @@ TASK_APP="$TASK_REPO/build/CleanYourMac.app"
 TASK_UNIVERSAL=""
 if [ "$#" -gt 0 ]; then TASK_UNIVERSAL="$1"; fi
 export CYM_SKIP_CORE=1
+# Ask SwiftPM where products go: Swift Build (Swift 6.4+) uses .build/out/Products/Release for every
+# triple, so each slice is kept aside before the next triple's build overwrites it.
+TASK_SLICES="$TASK_REPO/.build/universal-slices"
 if [ "$TASK_UNIVERSAL" = "--universal" ]; then
   bash scripts/build-core.sh --universal
-  bash scripts/swift.sh build -c release --triple arm64-apple-macosx14.0
-  bash scripts/swift.sh build -c release --triple x86_64-apple-macosx14.0
+  rm -rf "$TASK_SLICES"
+  mkdir -p "$TASK_SLICES"
+  for TASK_TRIPLE in arm64-apple-macosx14.0 x86_64-apple-macosx14.0; do
+    bash scripts/swift.sh build -c release --triple "$TASK_TRIPLE"
+    TASK_PRODUCTS="$(bash scripts/swift.sh build -c release --triple "$TASK_TRIPLE" --show-bin-path)"
+    cp "$TASK_PRODUCTS/CleanYourMac" "$TASK_SLICES/CleanYourMac-$TASK_TRIPLE"
+  done
 else
   bash scripts/build-core.sh
   bash scripts/swift.sh build -c release
+  TASK_PRODUCTS="$(bash scripts/swift.sh build -c release --show-bin-path)"
 fi
 mkdir -p "$TASK_APP/Contents/MacOS" "$TASK_APP/Contents/Resources"
 if [ "$TASK_UNIVERSAL" = "--universal" ]; then
-  lipo -create .build/arm64-apple-macosx/release/CleanYourMac .build/x86_64-apple-macosx/release/CleanYourMac -output "$TASK_APP/Contents/MacOS/CleanYourMac"
-  TASK_PRODUCTS=.build/arm64-apple-macosx/release
+  lipo -create "$TASK_SLICES"/CleanYourMac-* -output "$TASK_APP/Contents/MacOS/CleanYourMac"
 else
-  cp .build/release/CleanYourMac "$TASK_APP/Contents/MacOS/CleanYourMac"
-  TASK_PRODUCTS=.build/release
+  cp "$TASK_PRODUCTS/CleanYourMac" "$TASK_APP/Contents/MacOS/CleanYourMac"
 fi
 # SwiftPM resource bundles (brand logos) live in Resources, where the app looks for them.
 for TASK_BUNDLE in "$TASK_PRODUCTS"/*.bundle; do
